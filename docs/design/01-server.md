@@ -1,0 +1,148 @@
+# Server design
+
+Hono on Node (latest LTS via mise). One process, started by hand. Source: `packages/server`.
+
+```
+src/
+  main.ts            config, listeners, graceful shutdown
+  http/              Hono app: middleware (host/origin guards), routes, SSE, static SPA
+  agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log
+  catalog/           projects, sessions, path autocomplete
+  git/               diff + status
+  push/              VAPID keys, subscriptions, triggers
+  curator/           curator proxy listener
+  store/             small JSON files in the data dir
+```
+
+## Configuration
+
+| Setting | Default | Notes |
+|---|---|---|
+| `PI_CODE_PORT` | `4180` | Main listener, `127.0.0.1` only |
+| `PI_CODE_CURATOR_PORT` | `4181` | Curator proxy listener, `127.0.0.1` only |
+| `PI_CODE_HOSTNAME` | required | Tailnet hostname, e.g. `mac.tail1234.ts.net`; used for the Host allowlist and origin checks |
+| `PI_CODE_PI_BIN` | `pi` on `PATH` | pi executable |
+| `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys, push subscriptions |
+| `PI_AGENT_DIR` | `~/.pi/agent` | Read-only: sessions, trust.json |
+
+Tailscale setup (documented in the README, not automated):
+
+```
+tailscale serve --bg --https=443  http://127.0.0.1:4180
+tailscale serve --bg --https=8443 http://127.0.0.1:4181
+```
+
+## Agents
+
+### AgentHost — one pi process
+
+Spawns:
+
+```
+pi --mode rpc --extension <pi-code extension path> [--session <file>]
+```
+
+with `cwd` = the project directory. Without `--session`, pi starts a new session in that cwd.
+
+Responsibilities:
+
+- **Framing.** Read stdout as UTF-8 and split on `\n` only (strip a trailing `\r`). Never use `readline`: it also splits on U+2028/U+2029, which are valid inside JSON strings. Write one JSON object + `\n` per command, honoring stdin backpressure.
+- **Correlation.** Every command gets an `id`; a map of pending promises resolves on the matching `response`. `extension_ui_response` is the exception: pi sends no response, so it is written without a pending entry. `parse` errors (no id) are logged.
+- **Routing.** stdout records are `response` → pending map; `extension_ui_request` → pipeline; everything else is a session event → pipeline.
+- **stderr** is diagnostics only: kept in a bounded tail (last 200 lines) exposed on crash.
+- **Lifecycle.** `status: starting | ready | exited`. The agent is registered and its pipeline runs from spawn; it becomes ready after the first successful `get_state`. Startup can block on the project-trust dialog, which reaches clients through the normal pipeline while the agent is `starting`. On unexpected exit, the agent becomes `exited` with `exitCode` and stderr tail; it stays listed so the client can restart it (respawn with `--session <last file>`). Closing: end stdin (pi disposes and exits), SIGTERM after 5 s, SIGKILL after 10 s.
+
+The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi loads TypeScript extensions directly).
+
+### AgentManager — the registry
+
+- `agents: Map<agentId, Agent>` and `owners: Map<sessionFile, agentId>`.
+- `open({ cwd })` → new agent, new session.
+- `open({ sessionFile })` → if already owned, return the existing agent; else spawn with `--session` and `cwd` read from the session header.
+- `close(agentId)` → stop process, drop ownership.
+- After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
+- `cwd` must resolve inside `$HOME` (realpath), else `400`.
+
+### Event pipeline
+
+All records from one agent flow through a single **sequential** async queue, so side effects (entry syncs) never reorder events. For each record:
+
+1. **Side effects** (may await pi) produce the list of server events to publish:
+   - `message_end`, `entry_appended` → `get_entries { since: lastEntryId }` → emit `entries_appended { entries, leafId }`. If the returned `leafId` is not the last appended entry, or `since` is unknown, fall back to a full `get_entries` and emit `transcript_reset`.
+   - `compaction_end`, and completion of `new_session` / `switch_session` / `fork` / `clone` / tree navigation → full `get_entries` + `get_state` → `transcript_reset`.
+   - `tool_execution_update|end` whose `details.curatorUrl` is set → register the curator session with the curator proxy and emit `curator { toolCallId, url }`.
+   - `agent_settled`, dialog `extension_ui_request`, run failure → notification triggers (see Push).
+   - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`.
+   - `extension_ui_request` `setStatus` with a `pi-code:` key → private channel from the pi-code extension (see `04-pi-extension.md`); consumed, not forwarded.
+   - `bash` completion → emit `bash_done`, then sync entries (the `bashExecution` entry has no `message_end`).
+2. **Publish**, synchronously per event: assign the next `seq`, reduce into `LiveState` with the shared reducer (`@pi-code/protocol`), update the cached transcript/state, append to the event log, fan out to SSE subscribers. Nothing awaits inside this step, so state and `seq` always advance together.
+
+`message_update` deltas are forwarded as-is (pi already strips cumulative partials on the wire).
+
+### Event log
+
+A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` is per-agent and monotonic for the agent's lifetime. Replay from `Last-Event-ID` succeeds if `seq + 1` is still in the buffer; otherwise the server emits `resync`.
+
+### Snapshot
+
+`GET /api/agents/:id/snapshot` returns `{ agent, state, transcript, live, seq }` where `transcript` is the server's cached entry list (kept current by the pipeline), `live` the reducer state, and `seq` the last event's seq. Built synchronously from memory, so it always reflects exactly the events up to `seq`.
+
+### Commands
+
+`POST /api/agents/:id/rpc` forwards a pi `RpcCommand` (allowlisted, see the API contract) and returns pi's `RpcResponse.data`. The server:
+
+- Rejects `prompt` while a run is active unless `streamingBehavior` is set (pi would reject it too; failing early gives a clear error).
+- Serializes session-changing commands per agent.
+- After state-mutating commands (`set_model`, `cycle_model`, `set_thinking_level`, `cycle_thinking_level`, queue modes, auto compaction/retry, `set_session_name`) refreshes `get_state` and emits `state`.
+- Runs `bash` without holding the HTTP request: returns `202 { id }`, streams pi's `bash_execution_update` as `bash_output`, emits `bash_done` with the result.
+- Filters `pi-code-*` commands out of `get_commands` results.
+- Never forwards `export_html` (writes files on the host; not in scope).
+
+Dialog answers go through `POST /api/agents/:id/ui-responses`, written to pi as `extension_ui_response`, and remove the request from live state. Dialogs sent with a `timeout` get an `expiresAt`. pi resolves them itself on expiry without any event, so the server schedules a timer that removes the dialog, clears `input` attention and publishes `ui_resolved`.
+
+## Catalog
+
+Read-only over `~/.pi/agent/sessions`, parsing the documented session format.
+
+- **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached by `(path, mtime, size)`.
+- **Projects** = distinct header `cwd`s, sorted by most recent session activity, with session counts. Directory names are not trusted (lossy); only header `cwd`s are used.
+- **Path autocomplete** — `GET /api/fs/dirs?prefix=~/De`: expands `~`, lists directories only, requires the realpath to stay inside `$HOME`, hides dot-directories unless the typed segment starts with `.`, returns at most 50 entries, and flags which are git repos and which have pi sessions.
+
+## Git
+
+Runs `git` with `cwd` = the agent's cwd, 10 s timeout, no shell.
+
+- **Diff** (explicit action): `git diff HEAD --patch --no-color --no-ext-diff` plus untracked files from `git ls-files --others --exclude-standard`, each rendered as a new-file patch (`git diff --no-index /dev/null <file>`). Returns per-file `{ path, oldPath?, status, patch, binary }`. Files over 1 MB are listed without patch. Non-repo → `404 not_a_git_repo`. Empty repo (no HEAD) → diff against the empty tree.
+- **Status** (status bar): `git rev-parse --abbrev-ref HEAD` + `git status --porcelain=v1 -uno` → `{ branch, dirty }`.
+
+## Push
+
+- VAPID keys generated on first run, stored in `DATA_DIR/vapid.json`. Subscriptions in `DATA_DIR/push-subscriptions.json`, keyed by endpoint; removed on `404/410` from the push service.
+- Uses the `web-push` library; TTL 1 h; urgency `high` for dialogs, `normal` otherwise.
+- **Attention.** Each agent has `attention: none | finished | failed | input`. Set by the triggers below; cleared when a client fetches that agent's snapshot or answers the dialog. The push payload carries the total count of agents needing attention for the badge.
+- **Triggers:**
+
+| Trigger | Detection | Payload |
+|---|---|---|
+| Run finished | `agent_settled` after a run whose last assistant message has `stopReason` `stop` / `length` | title: session name or project; body: last assistant text (first 140 chars) |
+| Run failed | `agent_settled` after a run whose last assistant `stopReason` is `error` (retries exhausted) | body: `errorMessage` |
+| Input needed | `extension_ui_request` with method `select` / `confirm` / `input` / `editor` | body: dialog title |
+
+User aborts (`stopReason: aborted`) notify nothing. Payload: `{ kind, agentId, title, body, badge, url: "/agents/<id>" }`.
+
+## Curator proxy
+
+The pi-web-access search curator starts a server on `127.0.0.1:<random port>` and serves a page with root-relative URLs (`/events`, `/submit`, …) authenticated by a `session` token (query string on GETs, JSON body on POSTs).
+
+- The pipeline extracts `port` and `token` from `details.curatorUrl` and registers `token → port` (expires with the curator's own lifetime, or 30 min).
+- The curator listener (`127.0.0.1:4181`, same Host guard) routes each request by token: from the `session` query parameter, else from a `pi_code_curator` cookie set (HttpOnly, SameSite=Strict, Secure) when the page is first loaded. Unknown token → `404`.
+- Proxies to `http://127.0.0.1:<port>` preserving path and query, streaming responses (SSE included).
+- The client receives `curatorProxyUrl = https://<hostname>:8443/?session=<token>` and opens it in a new tab.
+
+## Static SPA
+
+Serves `packages/web/dist` with long-cache hashed assets, `index.html` fallback for client routes, `no-cache` for `index.html`, `sw.js` and `manifest.webmanifest`.
+
+## Shutdown
+
+SIGINT/SIGTERM → stop accepting requests → close every agent (end stdin, same escalation as `close`) in parallel → exit.
