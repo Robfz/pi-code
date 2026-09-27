@@ -12,6 +12,7 @@ import {
   selectStreaming,
   selectTools,
 } from "@/store/selectors";
+import { useConversationUi } from "../conversation-ui";
 import { BashExecutionView, bashFromResult } from "./bash-execution";
 import { Thinking } from "./thinking";
 import { ToolCallSlot } from "./tool-call-slot";
@@ -76,10 +77,14 @@ function OrphanTools() {
 /** `!` / `!!` commands in flight (committed as `bashExecution` entries when done). */
 function BashRuns() {
   const bash = useConversation(selectBash);
+  const excluded = useConversationUi((s) => s.excludedBash);
   return Object.entries(bash).map(([id, run]) => (
     <BashExecutionView
       key={id}
-      bash={bashFromResult(run.command, run.output, run.done)}
+      bash={{
+        ...bashFromResult(run.command, run.output, run.done),
+        excludeFromContext: excluded[id] === true,
+      }}
       running={run.done === undefined}
     />
   ));

@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"forked","timestamp":"2026-01-02T09:00:00.000Z","cwd":"/home/user/proj","parentSession":"/sessions/--home-user-proj--/2026-01-01T10-00-00-000Z_v3-full.jsonl"}
+{"type":"message","id":"f0000001","parentId":null,"timestamp":"2026-01-02T09:00:01.000Z","message":{"role":"user","content":"Only a question, never answered","timestamp":1767344401000}}

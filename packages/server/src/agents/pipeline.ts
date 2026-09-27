@@ -8,6 +8,7 @@ import {
   type BashResult,
   type DialogRequest,
   effectiveStopReason,
+  type GitStatus,
   initialLiveState,
   isDialogRequest,
   type JsonAgentSessionEvent,
@@ -24,13 +25,17 @@ import {
   type UiResponseBody,
 } from "@pi-code/protocol";
 import { ApiError, isApiError } from "../errors.ts";
+import { gitStatus } from "../git/git.ts";
 import type { AgentHost, HostCommand } from "./agent-host.ts";
 import { EventLog } from "./event-log.ts";
 
 /** What the pipeline needs from its agent (implemented by `Agent`). */
 export interface PipelineAgent {
   readonly id: string;
+  readonly cwd: string;
+  /** The current pi process (throws while there is none, see `hasHost`). */
   readonly host: AgentHost;
+  readonly hasHost: boolean;
   status: AgentStatus;
   attention: Attention;
   /** Mirrors the pipeline's cached `get_state` (read by `info()`). */
@@ -41,7 +46,8 @@ export interface PipelineAgent {
 /** A notification trigger (push notifications hook in here, S12). */
 export type AttentionTrigger =
   | { kind: "finished" | "failed"; agentId: string; message: AssistantMessage }
-  | { kind: "input"; agentId: string; request: DialogRequest };
+  | { kind: "input"; agentId: string; request: DialogRequest }
+  | { kind: "input"; agentId: string; trustPrompt: { cwd: string } };
 
 export interface PipelineOptions {
   /** Events kept for SSE replay. Default 10,000. */
@@ -50,7 +56,14 @@ export interface PipelineOptions {
   onAgentInfo?: (info: AgentInfo) => void;
   /** Called when an agent starts needing attention. */
   onTrigger?: (trigger: AttentionTrigger) => void;
+  /** Git status of a directory (default: `git` itself). */
+  gitStatus?: (cwd: string) => Promise<GitStatus | null>;
+  /** Delay between `turn_end` (or `bash` completion) and the git status refresh. Default 2 s. */
+  gitDebounceMs?: number;
 }
+
+/** Synthetic `extension_ui_request` ids the server publishes to clear stale statuses/widgets. */
+const CLEAR_ID_PREFIX = "pi-code-clear-";
 
 /** Commands after which pi may be in another session: full transcript + state refresh. */
 export const SESSION_CHANGING_COMMANDS: ReadonlySet<string> = new Set([
@@ -118,6 +131,17 @@ export class AgentPipeline {
   private readonly unsyncedMessages = new Map<string, number>();
   /** Last assistant message of the current run (for the finished / failed triggers). */
   private runAssistant: AssistantMessage | undefined;
+  /**
+   * Status / widget keys set since a session change or respawn began. Extensions re-initialise
+   * then (their new records arrive before the command response), so keys not set again belong
+   * to the previous session and are cleared once the change completes.
+   */
+  private freshUi: { statuses: Set<string>; widgets: Set<string> } | undefined;
+  private clearIds = 0;
+  private gitTimer: NodeJS.Timeout | undefined;
+  private gitRefreshing = false;
+  private gitAgain = false;
+  private disposed = false;
 
   constructor(agent: PipelineAgent, opts: PipelineOptions = {}) {
     this.agent = agent;
@@ -216,9 +240,28 @@ export class AgentPipeline {
   // -------------------------------------------------------------------------
   // Lifecycle
 
-  /** Publishes the initial status and queues initialization (state, transcript, stats → ready). */
+  /**
+   * Publishes the initial status and, unless the agent awaits the trust decision, queues
+   * initialization (state, transcript, stats, git status → ready).
+   */
   start(): void {
     this.publishStatus();
+    if (this.agent.status === "starting") void this.enqueue(() => this.initialize());
+  }
+
+  /**
+   * A new pi process was attached (after the trust decision, or a restart): forget the old
+   * process's in-flight state, become `starting`, and initialize again. Statuses and widgets
+   * the new process doesn't set before it is ready are cleared.
+   */
+  spawned(): void {
+    for (const timer of this.dialogTimers.values()) clearTimeout(timer);
+    this.dialogTimers.clear();
+    this.bashCommands.clear();
+    this.unsyncedMessages.clear();
+    this.runAssistant = undefined;
+    this.beginUiRefresh();
+    this.setStatus("starting");
     void this.enqueue(() => this.initialize());
   }
 
@@ -230,9 +273,12 @@ export class AgentPipeline {
       const stats = await host
         .send<SessionStats>({ type: "get_session_stats" })
         .catch(() => undefined);
-      if (this.agent.status !== "starting") return;
+      const git = await this.readGitStatus();
+      if (this.agent.status !== "starting" || this.agent.host !== host) return;
       this.publish({ type: "transcript_reset", transcript, state });
       if (stats !== undefined) this.publish({ type: "stats", stats });
+      this.clearStaleUi();
+      if (git !== undefined) this.publishGitStatus(git);
       this.setStatus("ready");
     } catch (e) {
       this.warnUnlessExited("initialization", e);
@@ -254,8 +300,10 @@ export class AgentPipeline {
 
   /** The agent was removed: stop timers and end event streams. */
   dispose(): void {
+    this.disposed = true;
     for (const timer of this.dialogTimers.values()) clearTimeout(timer);
     this.dialogTimers.clear();
+    clearTimeout(this.gitTimer);
     this.log.close();
   }
 
@@ -288,6 +336,7 @@ export class AgentPipeline {
         break;
       case "turn_end":
         events.push(...(await this.fetchStats()));
+        this.scheduleGitStatus();
         break;
       case "compaction_end":
         if (!event.aborted && event.errorMessage === undefined) {
@@ -329,6 +378,9 @@ export class AgentPipeline {
 
   onUiRequest(request: RpcExtensionUIRequest): void {
     const receivedAt = Date.now();
+    // Tracked on receipt: a respawned pi's startup records are queued behind initialization.
+    if (request.method === "setStatus") this.freshUi?.statuses.add(request.statusKey);
+    if (request.method === "setWidget") this.freshUi?.widgets.add(request.widgetKey);
     void this.enqueue(() => {
       this.publish({ type: "ui_request", request, receivedAt });
       if (!isDialogRequest(request)) return;
@@ -395,13 +447,125 @@ export class AgentPipeline {
     if (isQueryCommand(type)) return Promise.resolve();
     return this.enqueue(async () => {
       if (SESSION_CHANGING_COMMANDS.has(type)) {
-        if (!isCancelled(data)) this.publishAll(await this.resetSession());
+        if (isCancelled(data)) {
+          this.freshUi = undefined;
+          return;
+        }
+        this.publishAll(await this.resetSession());
+        this.clearStaleUi();
         return;
       }
       const events = await this.syncEntries();
       if (STATE_MUTATING_COMMANDS.has(type)) events.push(...(await this.fetchState()));
       this.publishAll(events);
     });
+  }
+
+  /**
+   * Full resync after an out-of-band session change (tree navigation): `transcript_reset` +
+   * `stats`. Resolves once published.
+   */
+  resync(): Promise<void> {
+    return this.enqueue(async () => {
+      this.publishAll(await this.resetSession());
+    });
+  }
+
+  /**
+   * Starts collecting the status / widget keys extensions set from now on; call right before
+   * sending a session-changing command. See `freshUi`.
+   */
+  beginUiRefresh(): void {
+    this.freshUi = { statuses: new Set(), widgets: new Set() };
+  }
+
+  /** Clears the statuses / widgets not set again since `beginUiRefresh` (synthetic requests). */
+  private clearStaleUi(): void {
+    const fresh = this.freshUi;
+    this.freshUi = undefined;
+    if (fresh === undefined) return;
+    const receivedAt = Date.now();
+    for (const statusKey of Object.keys(this.live.statuses)) {
+      if (fresh.statuses.has(statusKey)) continue;
+      this.publish({
+        type: "ui_request",
+        request: {
+          type: "extension_ui_request",
+          id: `${CLEAR_ID_PREFIX}${++this.clearIds}`,
+          method: "setStatus",
+          statusKey,
+          statusText: undefined,
+        },
+        receivedAt,
+      });
+    }
+    for (const widgetKey of Object.keys(this.live.widgets)) {
+      if (fresh.widgets.has(widgetKey)) continue;
+      this.publish({
+        type: "ui_request",
+        request: {
+          type: "extension_ui_request",
+          id: `${CLEAR_ID_PREFIX}${++this.clearIds}`,
+          method: "setWidget",
+          widgetKey,
+          widgetLines: undefined,
+        },
+        receivedAt,
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Git status
+
+  /** Refreshes the git status `gitDebounceMs` after the last call (turn ends, bash commands). */
+  scheduleGitStatus(): void {
+    if (this.disposed) return;
+    clearTimeout(this.gitTimer);
+    this.gitTimer = setTimeout(() => {
+      this.gitTimer = undefined;
+      void this.refreshGitStatus();
+    }, this.opts.gitDebounceMs ?? 2_000);
+    this.gitTimer.unref();
+  }
+
+  /** Reads the git status (outside the queue) and publishes `git_status` if it changed. */
+  async refreshGitStatus(): Promise<void> {
+    if (this.gitRefreshing) {
+      this.gitAgain = true;
+      return;
+    }
+    this.gitRefreshing = true;
+    try {
+      do {
+        this.gitAgain = false;
+        const status = await this.readGitStatus();
+        if (status !== undefined && !this.disposed) {
+          await this.enqueue(() => this.publishGitStatus(status));
+        }
+      } while (this.gitAgain && !this.disposed);
+    } finally {
+      this.gitRefreshing = false;
+    }
+  }
+
+  /** The cwd's git status; `undefined` when it couldn't be read. */
+  private async readGitStatus(): Promise<GitStatus | null | undefined> {
+    try {
+      return await (this.opts.gitStatus ?? gitStatus)(this.agent.cwd);
+    } catch (e) {
+      console.warn(`[agent ${this.agent.id}] git status failed: ${(e as Error).message}`);
+      return undefined;
+    }
+  }
+
+  private publishGitStatus(status: GitStatus | null): void {
+    const current = this.caches.gitStatus;
+    const same =
+      status === null
+        ? current === null
+        : current !== null && current.branch === status.branch && current.dirty === status.dirty;
+    if (!same) this.publish({ type: "git_status", status });
   }
 
   /**
@@ -417,6 +581,7 @@ export class AgentPipeline {
         const entries = sync ? await this.syncEntries() : [];
         this.publishAll([this.bashDone(id, result), ...entries]);
         this.bashCommands.delete(id);
+        if (sync) this.scheduleGitStatus();
       });
     response.then(
       (result) => finish(result, true),
@@ -545,7 +710,8 @@ export class AgentPipeline {
   }
 
   private warnUnlessExited(what: string, e: unknown): void {
-    if (isApiError(e, "agent_exited") || this.agent.host.status !== "running") return;
+    if (isApiError(e, "agent_exited")) return;
+    if (!this.agent.hasHost || this.agent.host.status !== "running") return;
     console.warn(`[agent ${this.agent.id}] ${what} failed: ${(e as Error).message}`);
   }
 }

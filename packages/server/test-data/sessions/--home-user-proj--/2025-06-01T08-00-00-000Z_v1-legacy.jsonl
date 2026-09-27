@@ -1,0 +1,4 @@
+{"type":"session","id":"v1-legacy","timestamp":"2025-06-01T08:00:00.000Z","cwd":"/home/user/proj"}
+{"type":"message","timestamp":"2025-06-01T08:00:01.000Z","message":{"role":"user","content":"hello from v1","timestamp":1748764801000}}
+{"type":"message","timestamp":"2025-06-01T08:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"timestamp":1748764803000}}
+{"type":"compaction","timestamp":"2025-06-01T08:05:00.000Z","summary":"s","firstKeptEntryIndex":1,"tokensBefore":10}

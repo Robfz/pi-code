@@ -1,14 +1,18 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   ChevronLeftIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
+  CopyPlusIcon,
   EllipsisVerticalIcon,
   FileDiffIcon,
   GitBranchIcon,
+  GitForkIcon,
+  PencilIcon,
   PowerIcon,
+  ShrinkIcon,
+  SquarePenIcon,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,30 +21,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { closeAgent, errorMessage } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { useConversation } from "@/store/context";
+import { selectSessionName } from "@/store/selectors";
 import { useUiPrefs } from "@/store/ui-prefs";
+import { useOpenSheet } from "./action-sheets";
 import { ConnectionIndicator } from "./connection-indicator";
+import { useSessionActions } from "./session-actions";
 
-/** Session name · project · connection · tool expansion toggle · menu. */
+/**
+ * Session name · project · connection · tool expansion toggle · menu (tree, diff, fork, clone,
+ * compact, rename, new session, close). Session commands need a ready agent.
+ */
 export function ConversationHeader() {
-  const navigate = useNavigate();
   const agentId = useConversation((s) => s.agentId);
   const cwd = useConversation((s) => s.agent.cwd);
-  const name = useConversation((s) => s.agent.sessionName);
+  const name = useConversation(selectSessionName);
+  const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
   const toolsExpanded = useUiPrefs((s) => s.toolsExpanded);
   const setToolsExpanded = useUiPrefs((s) => s.setToolsExpanded);
+  const actions = useSessionActions();
+  const openSheet = useOpenSheet();
   const folder = cwd ? baseName(cwd) : "";
-
-  async function close() {
-    try {
-      await closeAgent(agentId);
-      void navigate({ to: "/" });
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }
 
   return (
     <header className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -84,7 +86,23 @@ export function ConversationHeader() {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={() => void close()}>
+            <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("fork")}>
+              <GitForkIcon /> Fork…
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!ready} onSelect={() => void actions.clone()}>
+              <CopyPlusIcon /> Clone
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("compact")}>
+              <ShrinkIcon /> Compact…
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("rename")}>
+              <PencilIcon /> Rename…
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!ready} onSelect={() => void actions.newSession()}>
+              <SquarePenIcon /> New session
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => void actions.close()}>
               <PowerIcon /> Close conversation
             </DropdownMenuItem>
           </DropdownMenuContent>

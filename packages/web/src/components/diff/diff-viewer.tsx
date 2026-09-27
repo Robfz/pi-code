@@ -1,0 +1,122 @@
+/**
+ * Diff viewer (`docs/design/03-web-client.md`, "Diffs"): `@git-diff-view/react`, unified on
+ * narrow screens and split from 1024px, following the app theme. Large patches are guarded
+ * behind a "Show anyway" button; patches the library can't render fall back to plain text.
+ */
+
+import { useTheme } from "next-themes";
+import { Component, lazy, memo, type ReactNode, Suspense, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { parsePatch } from "./parse-patch";
+import { useMediaQuery } from "./use-media-query";
+
+/** Diff body lines above which rendering waits for an explicit "Show anyway". */
+export const LARGE_DIFF_LINES = 1500;
+const LARGE_DIFF_CHARS = 400_000;
+
+export const WIDE_QUERY = "(min-width: 1024px)";
+
+const DiffViewImpl = lazy(() => import("./diff-view-impl"));
+
+class DiffErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function PlainPatch({ patch }: { patch: string }) {
+  return (
+    <pre className="max-h-96 overflow-auto whitespace-pre font-mono text-xs">
+      {patch.split("\n").map((line, i) => (
+        <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: static lines of a patch
+          key={i}
+          className={cn(
+            "block",
+            line.startsWith("+") && "bg-emerald-500/15",
+            line.startsWith("-") && "bg-red-500/15",
+          )}
+        >
+          {line || " "}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
+export interface DiffViewerProps {
+  /** Unified patch text (one file). */
+  patch: string;
+  /** Name used for highlighting and headers when the patch has none. */
+  fileName?: string;
+  className?: string;
+  /** Override the large-patch threshold (lines). */
+  maxLines?: number;
+}
+
+export const DiffViewer = memo(function DiffViewer({
+  patch,
+  fileName,
+  className,
+  maxLines = LARGE_DIFF_LINES,
+}: DiffViewerProps) {
+  const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
+  const wide = useMediaQuery(WIDE_QUERY);
+  const { resolvedTheme, forcedTheme } = useTheme();
+  const [force, setForce] = useState(false);
+
+  if (parsed.binary && parsed.hunks.length === 0) {
+    return <p className="text-xs text-muted-foreground">Binary file, no text diff.</p>;
+  }
+  if (parsed.hunks.length === 0) {
+    return <p className="text-xs text-muted-foreground">No changes.</p>;
+  }
+  const large = parsed.lineCount > maxLines || patch.length > LARGE_DIFF_CHARS;
+  if (large && !force) {
+    return (
+      <div
+        data-testid="diff-too-large"
+        className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+      >
+        <span>
+          Large diff ({parsed.lineCount} lines, +{parsed.additions} −{parsed.deletions}).
+        </span>
+        <Button size="sm" variant="outline" onClick={() => setForce(true)}>
+          Show anyway
+        </Button>
+      </div>
+    );
+  }
+
+  const oldName = parsed.oldName ?? fileName ?? parsed.newName;
+  const newName = parsed.newName ?? fileName ?? parsed.oldName;
+  return (
+    <div
+      data-testid="diff-viewer"
+      data-mode={wide ? "split" : "unified"}
+      className={cn("min-w-0 overflow-hidden rounded-md border text-xs", className)}
+    >
+      <DiffErrorBoundary fallback={<PlainPatch patch={patch} />}>
+        <Suspense fallback={<p className="p-2 text-muted-foreground">Loading diff…</p>}>
+          <DiffViewImpl
+            oldName={oldName}
+            newName={newName}
+            hunks={parsed.hunks}
+            wide={wide}
+            dark={(forcedTheme ?? resolvedTheme) === "dark"}
+          />
+        </Suspense>
+      </DiffErrorBoundary>
+    </div>
+  );
+});

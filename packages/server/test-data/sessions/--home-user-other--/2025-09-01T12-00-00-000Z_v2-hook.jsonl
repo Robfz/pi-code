@@ -1,0 +1,7 @@
+{"type":"session","version":2,"id":"v2-hook","timestamp":"2025-09-01T12:00:00.000Z","cwd":"/home/user/other"}
+{"type":"message","id":"h0000001","parentId":null,"timestamp":"2025-09-01T12:00:01.000Z","message":{"role":"hookMessage","customType":"x","content":"injected","display":true,"timestamp":1756728001000}}
+this line is not JSON {{{
+{"type":"message","id":"h0000002","parentId":"h0000001","timestamp":"2025-09-01T12:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"v2 question"}],"timestamp":1756728002000}}
+{"type":"session_info","id":"h0000003","parentId":"h0000002","timestamp":"2025-09-01T12:00:03.000Z","name":"Named then cleared"}
+{"type":"session_info","id":"h0000004","parentId":"h0000003","timestamp":"2025-09-01T12:00:04.000Z"}
+{"type":"message","id":"h0000005","parentId":"h0000004","timestamp":"2025-09-01T12:00:09

@@ -1,4 +1,5 @@
 import type { Snapshot } from "@pi-code/protocol";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,6 +10,7 @@ import {
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
+import { createQueryClient } from "@/lib/query-client";
 import { ConversationStoreProvider } from "@/store/context";
 import { type ConversationStore, createConversationStore } from "@/store/conversation-store";
 import { makeSnapshot } from "./fixtures";
@@ -24,8 +26,14 @@ export function hydratedStore(patch: Partial<Snapshot> = {}): ConversationStore 
 
 /** Render inside a store provider and a minimal router (for `Link` / `useNavigate`). */
 export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
+  const queryClient = createQueryClient();
+  queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
   const rootRoute = createRootRoute({
-    component: () => <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>,
+    component: () => (
+      <QueryClientProvider client={queryClient}>
+        <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>
+      </QueryClientProvider>
+    ),
   });
   const catchAll = createRoute({
     getParentRoute: () => rootRoute,
@@ -38,7 +46,7 @@ export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
   });
   await router.load();
   const result = render(<RouterProvider router={router as never} />);
-  return { ...result, router };
+  return { ...result, router, queryClient };
 }
 
 export interface FetchCall {

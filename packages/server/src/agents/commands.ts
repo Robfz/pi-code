@@ -1,6 +1,8 @@
 import {
   type AgentId,
   isAllowedRpcCommandType,
+  type NavigateBody,
+  type NavigateResponse,
   type RpcCommandBody,
   type UiResponseBody,
 } from "@pi-code/protocol";
@@ -65,11 +67,11 @@ export type CommandOutcome = { status: 200; data: unknown } | { status: 202; dat
 
 /** Rejects requests for agents that can't take them. */
 export function assertAcceptsInput(agent: Agent): void {
-  if (agent.status === "exited" || agent.host.status !== "running") {
-    throw new ApiError("agent_exited", "pi has exited; restart the agent");
-  }
   if (agent.status === "awaiting_trust") {
     throw new ApiError("agent_busy", "the agent is waiting for the project-trust decision");
+  }
+  if (agent.status === "exited" || !agent.hasHost || agent.host.status !== "running") {
+    throw new ApiError("agent_exited", "pi has exited; restart the agent");
   }
 }
 
@@ -106,7 +108,9 @@ export async function runCommand(
       break;
   }
 
+  const sessionChanging = SESSION_CHANGING_COMMANDS.has(command.type);
   const execute = async (): Promise<CommandOutcome> => {
+    if (sessionChanging) pipeline.beginUiRefresh();
     const data = await agent.host.send(command, sendOptions(command));
     await pipeline.afterCommand(command.type, data);
     return {
@@ -114,7 +118,93 @@ export async function runCommand(
       data: command.type === "get_commands" ? withoutPiCodeCommands(data) : data,
     };
   };
-  return SESSION_CHANGING_COMMANDS.has(command.type) ? pipeline.exclusive(execute) : execute();
+  return sessionChanging ? pipeline.exclusive(execute) : execute();
+}
+
+/** The pi-code extension's tree-navigation command (see packages/pi-extension). */
+export const TREE_COMMAND = "pi-code-tree";
+
+/** Validates a `POST /tree/navigate` body. */
+export function parseNavigateBody(value: unknown): NavigateBody {
+  if (
+    isObject(value) &&
+    typeof value.entryId === "string" &&
+    value.entryId !== "" &&
+    typeof value.summarize === "boolean" &&
+    (value.customInstructions === undefined || typeof value.customInstructions === "string")
+  ) {
+    const body: NavigateBody = { entryId: value.entryId, summarize: value.summarize };
+    if (value.customInstructions !== undefined) body.customInstructions = value.customInstructions;
+    return body;
+  }
+  throw new ApiError(
+    "invalid_body",
+    "expected { entryId: string, summarize: boolean, customInstructions?: string }",
+  );
+}
+
+/**
+ * Makes sure this pi process has the pi-code extension loaded. Without it, `/pi-code-tree …`
+ * would reach the model as a plain prompt.
+ */
+async function assertTreeCommand(agent: Agent): Promise<void> {
+  if (agent.hasTreeCommand) return;
+  const data = await agent.host.send<{ commands?: unknown }>({ type: "get_commands" });
+  const commands = isObject(data) && Array.isArray(data.commands) ? data.commands : [];
+  agent.hasTreeCommand = commands.some((c: unknown) => isObject(c) && c.name === TREE_COMMAND);
+  if (!agent.hasTreeCommand) {
+    throw new ApiError(
+      "internal",
+      `tree navigation needs the pi-code extension, but pi has no ${TREE_COMMAND} command (was pi started with --extension packages/pi-extension/src/index.ts?)`,
+    );
+  }
+}
+
+/**
+ * In-place tree navigation (`POST /tree/navigate`) through the pi-code extension's
+ * `/pi-code-tree` command. pi answers the prompt once the navigation (and its optional branch
+ * summary) is done; the server then resyncs (`transcript_reset`). `cancelled` when the leaf
+ * didn't move. A failing navigation surfaces as pi's `extension_error` → `pi_error`.
+ */
+export async function navigateTree(agent: Agent, body: NavigateBody): Promise<NavigateResponse> {
+  assertAcceptsInput(agent);
+  const pipeline = agent.pipeline;
+  const assertIdle = () => {
+    if (pipeline.isStreaming()) {
+      throw new ApiError("agent_busy", "the agent is running; wait for it to finish or abort it");
+    }
+  };
+  assertIdle();
+  if (!pipeline.transcript.entries.some((e) => e.id === body.entryId)) {
+    throw new ApiError("invalid_body", `no entry ${body.entryId} in this session`);
+  }
+  return pipeline.exclusive(async () => {
+    assertAcceptsInput(agent);
+    assertIdle();
+    await assertTreeCommand(agent);
+    const host = agent.host;
+    const leafBefore = pipeline.transcript.leafId;
+    let failure: string | undefined;
+    const onEvent = (event: { type: string }) => {
+      const e = event as { type: string; extensionPath?: unknown; error?: unknown };
+      if (e.type === "extension_error" && e.extensionPath === `command:${TREE_COMMAND}`) {
+        failure = typeof e.error === "string" ? e.error : "tree navigation failed";
+      }
+    };
+    host.on("event", onEvent);
+    try {
+      const args = JSON.stringify(body);
+      await host.send(
+        { type: "prompt", message: `/${TREE_COMMAND} ${args}` },
+        { timeoutMs: Number.POSITIVE_INFINITY },
+      );
+    } finally {
+      host.off("event", onEvent);
+    }
+    await pipeline.resync();
+    if (failure !== undefined) throw new ApiError("pi_error", failure);
+    return { cancelled: pipeline.transcript.leafId === leafBefore };
+  });
 }
 
 /**

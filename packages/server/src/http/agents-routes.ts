@@ -1,15 +1,18 @@
-import type { OpenAgentBody } from "@pi-code/protocol";
+import type { OpenAgentBody, TrustBody } from "@pi-code/protocol";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { validator } from "hono/validator";
 import type { AgentManager } from "../agents/agent-manager.ts";
 import {
   assertAcceptsInput,
+  navigateTree,
+  parseNavigateBody,
   parseRpcCommand,
   parseUiResponse,
   runCommand,
 } from "../agents/commands.ts";
 import { ApiError, errorEnvelope } from "../errors.ts";
+import { gitDiff, gitStatus } from "../git/git.ts";
 import { eventStream, type SseOptions } from "./sse.ts";
 
 /** `prompt.images` are base64: allow large bodies on `/rpc`. */
@@ -26,6 +29,14 @@ function parseOpenBody(value: unknown): OpenAgentBody {
   throw new ApiError("invalid_body", "expected { cwd: string } or { sessionFile: string }");
 }
 
+function parseTrustBody(value: unknown): TrustBody {
+  if (typeof value === "object" && value !== null) {
+    const trusted = (value as Record<string, unknown>).trusted;
+    if (typeof trusted === "boolean") return { trusted };
+  }
+  throw new ApiError("invalid_body", "expected { trusted: boolean }");
+}
+
 export interface AgentsRoutesOptions {
   sse?: SseOptions;
 }
@@ -39,15 +50,45 @@ export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = 
       validator("json", (value) => parseOpenBody(value)),
       async (c) => {
         const body = c.req.valid("json");
-        if (!("cwd" in body)) {
-          // Resuming a session file lands with the full lifecycle (S10).
-          throw new ApiError("invalid_body", "opening a sessionFile is not supported yet");
+        if ("sessionFile" in body) {
+          const { agent, existing } = await manager.openSession(body.sessionFile);
+          return existing
+            ? c.json({ agent: agent.info() }, 200)
+            : c.json({ agent: agent.info() }, 201);
         }
         const agent = await manager.open({ cwd: body.cwd });
         return c.json({ agent: agent.info() }, 201);
       },
     )
     .get("/:id", (c) => c.json({ agent: manager.require(c.req.param("id")).info() }, 200))
+    .post(
+      "/:id/trust",
+      validator("json", (value) => parseTrustBody(value)),
+      (c) => {
+        const agent = manager.trust(c.req.param("id"), c.req.valid("json").trusted);
+        return c.json({ agent: agent.info() }, 200);
+      },
+    )
+    .post("/:id/restart", async (c) => {
+      const agent = await manager.restart(c.req.param("id"));
+      return c.json({ agent: agent.info() }, 200);
+    })
+    .post(
+      "/:id/tree/navigate",
+      validator("json", (value) => parseNavigateBody(value)),
+      async (c) => {
+        const agent = manager.require(c.req.param("id"));
+        return c.json(await navigateTree(agent, c.req.valid("json")), 200);
+      },
+    )
+    .get("/:id/git/diff", async (c) => {
+      const agent = manager.require(c.req.param("id"));
+      return c.json({ files: await gitDiff(agent.cwd) }, 200);
+    })
+    .get("/:id/git/status", async (c) => {
+      const agent = manager.require(c.req.param("id"));
+      return c.json({ status: await gitStatus(agent.cwd) }, 200);
+    })
     .delete("/:id", async (c) => {
       await manager.close(c.req.param("id"));
       return c.body(null, 204);

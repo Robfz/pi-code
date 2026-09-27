@@ -1,5 +1,5 @@
 import { createMemoryHistory } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
@@ -74,8 +74,9 @@ describe("App", () => {
     const router = renderApp();
     const user = userEvent.setup();
     expect(await screen.findByText("No open conversations.")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("New conversation"), "/home/me/gamma");
-    await user.click(screen.getByRole("button", { name: /Start/ }));
+    await user.click(screen.getByRole("button", { name: "New conversation" }));
+    await user.type(await screen.findByLabelText("Folder path"), "/home/me/gamma");
+    await user.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/new1"));
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ cwd: "/home/me/gamma" });
     expect(await screen.findByRole("heading", { name: "gamma" })).toBeInTheDocument();
@@ -90,9 +91,12 @@ describe("App", () => {
     );
     renderApp();
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText("New conversation"), "/etc");
-    await user.click(screen.getByRole("button", { name: /Start/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("path is outside $HOME");
+    await user.click(await screen.findByRole("button", { name: "New conversation" }));
+    await user.type(await screen.findByLabelText("Folder path"), "/etc");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(
+      await within(screen.getByTestId("project-picker")).findByText("path is outside $HOME"),
+    ).toBeInTheDocument();
   });
 
   it("renders placeholder routes", async () => {

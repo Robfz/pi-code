@@ -13,10 +13,18 @@ import type {
   AgentResponse,
   AgentsResponse,
   AllowedRpcCommandType,
+  DirSuggestion,
+  DirsResponse,
   HealthResponse,
+  NavigateBody,
+  NavigateResponse,
   OpenAgentBody,
+  ProjectSummary,
+  ProjectsResponse,
   RpcCommandBody,
   RpcCommandResult,
+  SessionSummary,
+  SessionsResponse,
   Snapshot,
   UiResponseBody,
 } from "@pi-code/protocol";
@@ -153,4 +161,27 @@ export function ackAgent(id: AgentId): Promise<void> {
 /** SSE URL; `since` is the snapshot's `seq` on the first connect. */
 export function eventsUrl(id: AgentId, since: number): string {
   return new URL(agentPath(id, `/events?since=${since}`), origin()).toString();
+}
+
+// ---------------------------------------------------------------------------
+// Catalog and tree navigation
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  return (await request<ProjectsResponse>("GET", "/api/projects")).projects;
+}
+
+/** Sessions, most recent first; all projects when `cwd` is absent. */
+export async function listSessions(cwd?: string): Promise<SessionSummary[]> {
+  const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+  return (await request<SessionsResponse>("GET", `/api/sessions${query}`)).sessions;
+}
+
+/** Directory autocomplete under `$HOME` (`prefix` may start with `~`). */
+export async function listDirs(prefix: string): Promise<DirSuggestion[]> {
+  return (await request<DirsResponse>("GET", `/api/fs/dirs?prefix=${encodeURIComponent(prefix)}`))
+    .dirs;
+}
+
+export function navigateTree(id: AgentId, body: NavigateBody): Promise<NavigateResponse> {
+  return request<NavigateResponse>("POST", agentPath(id, "/tree/navigate"), body);
 }

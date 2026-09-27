@@ -91,3 +91,7 @@ const toolCallIdsOf = memoByIdentity((branch: SessionEntry[]) => {
 /** Ids of tool calls in committed assistant messages on the active branch. */
 export const selectBranchToolCallIds = (s: ConversationState): Set<string> =>
   toolCallIdsOf(selectActiveBranch(s));
+
+/** Session name: pi's state once known (it tracks renames and session switches), else the agent's. */
+export const selectSessionName = (s: ConversationState): string | undefined =>
+  s.state ? s.state.sessionName : s.agent.sessionName;

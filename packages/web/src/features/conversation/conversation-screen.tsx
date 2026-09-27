@@ -1,11 +1,13 @@
 import { useRef } from "react";
 import { useConversation } from "@/store/context";
+import { ActionSheets } from "./action-sheets";
 import { AgentStatePanel, TrustSheet } from "./agent-state";
 import { Composer } from "./composer";
 import { DialogHost } from "./dialogs/dialog-host";
-import { DocumentTitle, NoticeToaster, StatusChips, Widgets } from "./extension-ui";
+import { DocumentTitle, NoticeToaster, Widgets } from "./extension-ui";
 import { ConversationHeader } from "./header";
 import { QueueDisplay } from "./queue-display";
+import { StatusBar } from "./status-bar";
 import { LiveSection } from "./transcript/live-section";
 import { Transcript } from "./transcript/transcript";
 import { useStickToBottom } from "./use-stick-to-bottom";
@@ -32,10 +34,11 @@ export function ConversationScreen() {
         <Widgets placement="aboveEditor" />
         {!exited && <Composer />}
         <Widgets placement="belowEditor" />
-        <StatusChips />
+        <StatusBar />
       </div>
       <DialogHost />
       <TrustSheet />
+      <ActionSheets />
       <NoticeToaster />
       <DocumentTitle />
     </div>

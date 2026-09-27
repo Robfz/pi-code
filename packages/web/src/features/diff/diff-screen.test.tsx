@@ -1,0 +1,155 @@
+import type { GitFileDiff } from "@pi-code/protocol";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { loadedDiff, stubCanvas, stubMatchMedia } from "@/components/diff/testing";
+import { stubFetch } from "@/test/render";
+import { fixtureEditPatch } from "@/tools/testing";
+import { DiffScreen } from "./diff-screen";
+
+const editPatch = fixtureEditPatch;
+
+const gitPatch = () => `diff --git a/notes.txt b/notes.txt\nindex 1..2 100644\n${editPatch()}`;
+
+async function renderScreen(agentId = "a1") {
+  const rootRoute = createRootRoute({ component: () => <Outlet /> });
+  const conversation = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/agents/$agentId",
+    component: () => <p>conversation</p>,
+  });
+  const diff = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/agents/$agentId/diff",
+    component: DiffScreen,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([conversation, diff]),
+    history: createMemoryHistory({ initialEntries: [`/agents/${agentId}/diff`] }),
+  });
+  await router.load();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  return router;
+}
+
+const file = (patch: Partial<GitFileDiff>): GitFileDiff => ({
+  path: "notes.txt",
+  status: "modified",
+  binary: false,
+  tooLarge: false,
+  ...patch,
+});
+
+beforeAll(stubCanvas);
+afterEach(() => vi.unstubAllGlobals());
+
+describe("DiffScreen", () => {
+  it("lists files with status and counts; tapping a file shows its patch", async () => {
+    stubMatchMedia(() => false);
+    const { calls } = stubFetch(() => [
+      200,
+      {
+        files: [
+          file({ patch: gitPatch() }),
+          file({
+            path: "new.ts",
+            status: "untracked",
+            patch: "--- /dev/null\n+++ b/new.ts\n@@ -0,0 +1,2 @@\n+a\n+b\n",
+          }),
+          file({ path: "b.ts", oldPath: "a.ts", status: "renamed", patch: "" }),
+        ],
+      },
+    ]);
+    await renderScreen("agent-7");
+    const rows = await screen.findAllByTestId("diff-file");
+    expect(calls).toEqual([
+      { url: "/api/agents/agent-7/git/diff", method: "GET", body: undefined },
+    ]);
+    expect(rows).toHaveLength(3);
+    expect(screen.getByText("3 files changed ·")).toBeInTheDocument();
+    const [notes, added, renamed] = rows as [HTMLElement, HTMLElement, HTMLElement];
+    expect(within(notes).getByTitle("Modified")).toHaveTextContent("M");
+    expect(notes).toHaveTextContent("+1 −1");
+    expect(within(added).getByTitle("Untracked")).toHaveTextContent("U");
+    expect(added).toHaveTextContent("+2 −0");
+    expect(renamed).toHaveTextContent("a.ts → b.ts");
+
+    await userEvent.setup().click(within(notes).getByRole("button"));
+    expect(await loadedDiff(notes)).toHaveTextContent("I like banana bread.");
+    await userEvent.setup().click(within(renamed).getByRole("button"));
+    expect(within(renamed).getByText("No textual changes.")).toBeInTheDocument();
+  });
+
+  it("binary and too-large files", async () => {
+    stubFetch(() => [
+      200,
+      {
+        files: [
+          file({ path: "logo.png", binary: true }),
+          file({ path: "dump.sql", tooLarge: true }),
+        ],
+      },
+    ]);
+    await renderScreen();
+    const [binary, large] = (await screen.findAllByTestId("diff-file")) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(binary).toHaveTextContent("binary");
+    expect(large).toHaveTextContent("too large");
+    const user = userEvent.setup();
+    await user.click(within(binary).getByRole("button"));
+    expect(within(binary).getByText("Binary file, no text diff.")).toBeInTheDocument();
+    await user.click(within(large).getByRole("button"));
+    expect(within(large).getByText(/too large to show here/)).toBeInTheDocument();
+  });
+
+  it("not a git repository", async () => {
+    stubFetch(() => [404, { error: { code: "not_a_git_repo", message: "Not a git repository" } }]);
+    await renderScreen();
+    expect(await screen.findByText("This project isn't a git repository.")).toBeInTheDocument();
+  });
+
+  it("clean working tree, refresh refetches", async () => {
+    let files: GitFileDiff[] = [];
+    const { calls } = stubFetch(() => [200, { files }]);
+    await renderScreen();
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+    files = [file({ patch: gitPatch() })];
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByTestId("diff-file")).toBeInTheDocument();
+    expect(calls).toHaveLength(2);
+  });
+
+  it("other errors offer a retry; back link goes to the conversation", async () => {
+    let fail = true;
+    stubFetch(() =>
+      fail ? [500, { error: { code: "internal", message: "git crashed" } }] : [200, { files: [] }],
+    );
+    const router = await renderScreen("a9");
+    // One automatic retry (after ~1s) before the error shows.
+    expect(
+      await screen.findByText(/Couldn't load the diff: git crashed/, {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    fail = false;
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Back to conversation" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a9"));
+  });
+});

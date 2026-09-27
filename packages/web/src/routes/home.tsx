@@ -1,12 +1,13 @@
 import type { AgentInfo, Attention } from "@pi-code/protocol";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { FolderIcon, HistoryIcon, LoaderIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { errorMessage, listAgents, openAgent } from "@/lib/api";
+import { ProjectPicker } from "@/features/catalog/project-picker";
+import { SessionList } from "@/features/catalog/session-list";
+import { errorMessage, listAgents, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
@@ -62,56 +63,40 @@ function AgentRow({ agent }: { agent: AgentInfo }) {
   );
 }
 
-/** Minimal "New conversation": a folder path → `POST /api/agents { cwd }` (picker in W7). */
-function NewConversation() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [cwd, setCwd] = useState("");
-  const open = useMutation({
-    mutationFn: (path: string) => openAgent({ cwd: path }),
-    onSuccess: (agent) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
-      void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } });
-    },
-  });
+const RECENT_SESSIONS = 10;
+
+function RecentSessions() {
+  const sessions = useQuery({ queryKey: queryKeys.sessions(), queryFn: () => listSessions() });
   return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const path = cwd.trim();
-        if (path !== "") open.mutate(path);
-      }}
-    >
-      <label htmlFor="new-cwd" className="text-sm font-medium">
-        New conversation
-      </label>
-      <div className="flex gap-2">
-        <Input
-          id="new-cwd"
-          value={cwd}
-          onChange={(event) => setCwd(event.target.value)}
-          placeholder="/home/you/project"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          className="h-10 font-mono text-base md:text-sm"
-        />
-        <Button type="submit" className="h-10" disabled={open.isPending || cwd.trim() === ""}>
-          {open.isPending ? <LoaderIcon className="animate-spin" /> : <PlusIcon />}
-          Start
+    <section className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">Recent sessions</h2>
+        <Button variant="link" size="sm" className="h-auto px-0" asChild>
+          <Link to="/sessions">All sessions</Link>
         </Button>
       </div>
-      {open.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {errorMessage(open.error)}
+      {sessions.isPending && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderIcon className="size-4 animate-spin" /> Loading…
         </p>
       )}
-    </form>
+      {sessions.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {errorMessage(sessions.error)}
+        </p>
+      )}
+      {sessions.data?.length === 0 && (
+        <p className="text-sm text-muted-foreground">No sessions yet.</p>
+      )}
+      {sessions.data && sessions.data.length > 0 && (
+        <SessionList sessions={sessions.data.slice(0, RECENT_SESSIONS)} label="Recent sessions" />
+      )}
+    </section>
   );
 }
 
 export function HomeScreen() {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const agents = useQuery({
     queryKey: queryKeys.agents,
     queryFn: listAgents,
@@ -135,7 +120,10 @@ export function HomeScreen() {
         </nav>
       </header>
 
-      <NewConversation />
+      <Button className="h-11" onClick={() => setPickerOpen(true)}>
+        <PlusIcon /> New conversation
+      </Button>
+      <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} />
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-muted-foreground">Open conversations</h2>
@@ -163,6 +151,8 @@ export function HomeScreen() {
           </ul>
         )}
       </section>
+
+      <RecentSessions />
     </div>
   );
 }

@@ -9,15 +9,16 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  Link,
   Outlet,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { ChevronLeftIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
+import { SessionsScreen } from "@/features/catalog/sessions-screen";
 import { ConversationRoot } from "@/features/conversation/conversation-root";
 import { ConversationScreen } from "@/features/conversation/conversation-screen";
+import { DiffScreen } from "@/features/diff/diff-screen";
+import { TreeScreen } from "@/features/tree/tree-screen";
 import { HomeScreen } from "@/routes/home";
 import { PlaceholderScreen } from "@/routes/placeholder";
 
@@ -41,7 +42,10 @@ const sessionsRoute = createRoute({
   path: "/sessions",
   validateSearch: (search: Record<string, unknown>): { cwd?: string } =>
     typeof search.cwd === "string" ? { cwd: search.cwd } : {},
-  component: () => <PlaceholderScreen title="Sessions" />,
+  component: function SessionsRoute() {
+    const { cwd } = sessionsRoute.useSearch();
+    return <SessionsScreen {...(cwd ? { cwd } : {})} />;
+  },
 });
 
 const agentRoute = createRoute({
@@ -63,27 +67,16 @@ const conversationRoute = createRoute({
   component: ConversationScreen,
 });
 
-function BackToConversation() {
-  const { agentId } = agentRoute.useParams();
-  return (
-    <Button variant="ghost" size="icon" asChild>
-      <Link to="/agents/$agentId" params={{ agentId }} aria-label="Back to conversation">
-        <ChevronLeftIcon />
-      </Link>
-    </Button>
-  );
-}
-
 const treeRoute = createRoute({
   getParentRoute: () => agentRoute,
   path: "/tree",
-  component: () => <PlaceholderScreen title="Session tree" back={<BackToConversation />} />,
+  component: TreeScreen,
 });
 
 const diffRoute = createRoute({
   getParentRoute: () => agentRoute,
   path: "/diff",
-  component: () => <PlaceholderScreen title="Git diff" back={<BackToConversation />} />,
+  component: DiffScreen,
 });
 
 const shareRoute = createRoute({

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AgentInfo, AgentStatus } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
+import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { fakePiCommand, isAlive } from "../testing/stub-process.ts";
 import {
@@ -65,6 +66,7 @@ function app() {
     port: PORT,
     staticDir: root,
     manager,
+    catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
     piVersion: async () => "test",
   });
 }

@@ -1,10 +1,16 @@
 /**
- * Registers every tool renderer. Import once (the conversation screen does) before rendering
- * tool calls. Add built-in renderers (W10–W12) here: `import "./bash";` etc.
+ * Registers every tool renderer (and the custom message cards of the same extensions). Import
+ * once (the conversation screen does, through `tool-call-view`) before rendering tool calls.
  */
 
 import { genericToolRenderer } from "./generic";
 import { setFallbackToolRenderer } from "./registry";
+import "./builtin";
+import "./file-edits";
+import "./subagent";
+import "./web-access";
+import "./mcp";
+import "./custom-messages";
 
 setFallbackToolRenderer(genericToolRenderer);
 

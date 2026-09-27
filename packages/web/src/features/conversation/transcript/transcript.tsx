@@ -29,7 +29,11 @@ export function renderEntry(entry: SessionEntry): ReactNode {
           return <BashExecutionView bash={message} />;
         case "custom":
           return message.display ? (
-            <CustomMessageView customType={message.customType} content={message.content} />
+            <CustomMessageView
+              customType={message.customType}
+              content={message.content}
+              details={message.details}
+            />
           ) : null;
         case "compactionSummary":
           return (
@@ -54,7 +58,11 @@ export function renderEntry(entry: SessionEntry): ReactNode {
     }
     case "custom_message":
       return entry.display ? (
-        <CustomMessageView customType={entry.customType} content={entry.content} />
+        <CustomMessageView
+          customType={entry.customType}
+          content={entry.content}
+          details={entry.details}
+        />
       ) : null;
     case "compaction":
       return (

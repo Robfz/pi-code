@@ -18,6 +18,7 @@ import {
 import type { AgentHostOptions } from "../agents/agent-host.ts";
 import { AgentManager, type AgentManagerDeps } from "../agents/agent-manager.ts";
 import { createApp } from "../app.ts";
+import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { fakePiCommand } from "./stub-process.ts";
 
@@ -32,6 +33,8 @@ export interface HarnessOptions {
   eventLogCapacity?: number;
   hostOptions?: AgentHostOptions;
   ssePingMs?: number;
+  /** Pipeline tuning (e.g. a stub git status, a short debounce). */
+  pipeline?: AgentManagerDeps["pipeline"];
 }
 
 export interface Received {
@@ -189,7 +192,10 @@ export class Harness {
   readonly root: string;
   readonly home: string;
   readonly project: string;
+  /** pi's agent dir for this harness (`sessions/`, `trust.json`). */
+  readonly agentDir: string;
   readonly manager: AgentManager;
+  readonly catalog: SessionCatalog;
   /** Fixture name or path used for agents opened from now on. */
   fixture: string;
   private server: ServerType | undefined;
@@ -201,6 +207,8 @@ export class Harness {
     this.home = join(this.root, "home");
     this.project = join(this.home, "project");
     mkdirSync(this.project, { recursive: true });
+    this.agentDir = join(this.root, "agent");
+    mkdirSync(join(this.agentDir, "sessions"), { recursive: true });
     this.fixture = opts.fixture ?? "plain-answer";
     const fakeOpts = {
       ...(opts.speed !== undefined ? { speed: opts.speed } : {}),
@@ -213,6 +221,13 @@ export class Harness {
       command: opts.command ?? (() => fakePiCommand(this.fixture, fakeOpts)),
       ...(opts.eventLogCapacity !== undefined ? { eventLogCapacity: opts.eventLogCapacity } : {}),
       ...(opts.hostOptions !== undefined ? { hostOptions: opts.hostOptions } : {}),
+      // Project-trust pre-check against `<root>/agent/trust.json`; sessions in `<root>/agent`.
+      agentDir: this.agentDir,
+      ...(opts.pipeline !== undefined ? { pipeline: opts.pipeline } : {}),
+    });
+    this.catalog = new SessionCatalog({
+      agentDir: this.agentDir,
+      ownerOf: (file) => this.manager.ownerOf(file),
     });
   }
 
@@ -230,6 +245,7 @@ export class Harness {
       port: this.port,
       staticDir: this.root,
       manager: this.manager,
+      catalog: this.catalog,
       piVersion: async () => "test",
       ...(opts.ssePingMs !== undefined ? { sse: { pingMs: opts.ssePingMs } } : {}),
     });

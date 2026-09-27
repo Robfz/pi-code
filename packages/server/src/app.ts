@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AgentManager } from "./agents/agent-manager.ts";
+import type { SessionCatalog } from "./catalog/sessions.ts";
 import { errorEnvelope, isApiError } from "./errors.ts";
 import { agentsRoutes } from "./http/agents-routes.ts";
+import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
 import type { SseOptions } from "./http/sse.ts";
 import { spaHandler } from "./http/static.ts";
@@ -16,6 +18,8 @@ export interface AppDeps {
   /** Built SPA directory. */
   staticDir: string;
   manager: AgentManager;
+  /** Sessions and projects (read-only over pi's sessions dir). */
+  catalog: SessionCatalog;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
   /** SSE tuning (tests shorten the ping interval). */
@@ -27,6 +31,7 @@ function apiRoutes(deps: AppDeps) {
   return new Hono()
     .basePath("/api")
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
+    .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}));
 }
 

@@ -1,0 +1,32 @@
+/** Short relative time ("just now", "5m ago", "3h ago", "2d ago", then a date). */
+export function formatRelative(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(then).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(new Date(then).getFullYear() !== new Date(now).getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
+/** Dollar cost with precision that stays meaningful for small amounts. */
+export function formatCost(cost: number): string {
+  if (!Number.isFinite(cost)) return "$0.00";
+  return `$${cost < 1 ? cost.toFixed(3) : cost.toFixed(2)}`;
+}
+
+/** Compact token count (1.2k, 34k, 1.1M). */
+export function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  if (tokens < 10_000) return `${(tokens / 1000).toFixed(1)}k`;
+  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
+  return `${(tokens / 1_000_000).toFixed(1)}M`;
+}

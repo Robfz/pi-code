@@ -2,15 +2,26 @@ import type { ImageContent, TextContent } from "@pi-code/protocol";
 import { PuzzleIcon } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 import { contentText } from "@/lib/content";
+import { getCustomMessageRenderer } from "./custom-message-registry";
 
 /** Extension message with `display: true`: markdown of `content` in a small card. */
 export function CustomMessageView({
   customType,
   content,
+  details,
 }: {
   customType: string;
   content: string | (TextContent | ImageContent)[];
+  details?: unknown;
 }) {
+  const Card = getCustomMessageRenderer(customType);
+  if (Card) {
+    return (
+      <div data-testid="custom-message" data-custom-type={customType}>
+        <Card customType={customType} content={content} details={details} />
+      </div>
+    );
+  }
   return (
     <div
       data-testid="custom-message"

@@ -9,13 +9,14 @@
  * Then (from packages/server):
  *   SMOKE_URL=http://localhost:4199 pnpm exec tsx ../../scripts/smoke.ts [scenario numbers…]
  *
- * Creates a scratch git repo under ~/tmp (deleted at the end unless SMOKE_KEEP=1). pi writes
- * the scratch sessions to its usual sessions dir. Prints PASS / FAIL / SKIP per scenario;
+ * Creates scratch dirs under ~/tmp and deletes them at the end with the sessions pi wrote for
+ * them in ~/.pi/agent/sessions (unless SMOKE_KEEP=1). Scenario 12 (project trust) backs up
+ * ~/.pi/agent/trust.json and restores it byte-identically. Prints PASS / FAIL / SKIP per scenario;
  * SMOKE_DEBUG=1 also prints the event types a failed scenario saw.
  */
 // biome-ignore-all lint/suspicious/noExplicitAny: loosely typed JSON from the wire
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -1073,6 +1074,207 @@ async function main() {
     }
   });
 
+  await scenario(10.6, "catalog: projects, sessions, fs/dirs", async () => {
+    const snap = (await api("GET", `/api/agents/${agentId}/snapshot`)).json;
+    const file = snap.agent.sessionFile as string;
+    const projects = (await api("GET", "/api/projects")).json.projects as Json[];
+    const project = projects.find((p) => p.cwd === scratch);
+    assert(project, `scratch not in /api/projects (${projects.length} projects)`);
+    assert(project.sessionCount >= 2 && project.isGitRepo === true, JSON.stringify(project));
+    const r = await api("GET", `/api/sessions?cwd=${encodeURIComponent(scratch)}`);
+    assert(r.status === 200, `sessions → ${r.status}`);
+    const sessions = r.json.sessions as Json[];
+    assert(
+      sessions.every((x) => x.cwd === scratch),
+      "cwd filter leaked other projects",
+    );
+    const mine = sessions.find((x) => x.file === file);
+    assert(mine, `agent's session ${file} not listed (${sessions.map((x) => x.file)})`);
+    assert(mine.ownedBy === agentId, `ownedBy ${mine.ownedBy}`);
+    assert(mine.name === "smoke session", `name ${mine.name}`);
+    assert(
+      typeof mine.firstMessage === "string" && mine.firstMessage.length <= 200,
+      `firstMessage ${mine.firstMessage}`,
+    );
+    assert(Date.parse(mine.updatedAt) >= Date.parse(mine.createdAt), "updatedAt < createdAt");
+    const all = (await api("GET", "/api/sessions")).json.sessions as Json[];
+    assert(all.length >= sessions.length, "all sessions < project sessions");
+    const tilde = `~/${scratch.slice(homedir().length + 1)}`;
+    const dirs = (await api("GET", `/api/fs/dirs?prefix=${encodeURIComponent(tilde.slice(0, -3))}`))
+      .json.dirs as Json[];
+    const dir = dirs.find((d) => d.path === scratch);
+    assert(dir?.isGitRepo === true && dir.hasSessions === true, `fs/dirs: ${JSON.stringify(dirs)}`);
+    const outside = await api("GET", "/api/fs/dirs?prefix=/etc/");
+    assert(outside.json?.error?.code === "outside_home", `/etc → ${outside.status}`);
+    return `${sessions.length} sessions in scratch, ${projects.length} projects`;
+  });
+
+  await scenario(10.7, "git status / diff", async () => {
+    writeFileSync(join(scratch, "README.md"), "# smoke\n\nchanged by the smoke test\n");
+    writeFileSync(join(scratch, "untracked.txt"), "brand new\n");
+    writeFileSync(join(scratch, "blob.bin"), Buffer.from([0, 1, 2, 0, 3]));
+    const status = (await api("GET", `/api/agents/${agentId}/git/status`)).json.status;
+    assert(status?.dirty === true && typeof status.branch === "string", JSON.stringify(status));
+    const diff = await api("GET", `/api/agents/${agentId}/git/diff`);
+    assert(diff.status === 200, `diff → ${diff.status} ${diff.text.slice(0, 200)}`);
+    const files = Object.fromEntries((diff.json.files as Json[]).map((f) => [f.path, f]));
+    assert(
+      files["README.md"]?.status === "modified",
+      `README: ${JSON.stringify(files["README.md"])}`,
+    );
+    assert(files["README.md"].patch.includes("+changed by the smoke test"), "README patch");
+    assert(
+      files["untracked.txt"]?.status === "untracked" &&
+        files["untracked.txt"].patch.includes("+brand new"),
+      `untracked: ${JSON.stringify(files["untracked.txt"])}`,
+    );
+    assert(files["blob.bin"]?.binary === true && files["blob.bin"].patch === undefined, "binary");
+    // The pipeline refreshes git status 2 s after a bash command / turn end.
+    const from = s.events.length;
+    await rpcOk(agentId, { type: "bash", command: "true" });
+    await s.waitFor((e) => e.type === "bash_done", "bash_done", 10_000, from);
+    await sleep(2500);
+    const snap = (await api("GET", `/api/agents/${agentId}/snapshot`)).json;
+    assert(snap.gitStatus?.dirty === true, `snapshot gitStatus ${JSON.stringify(snap.gitStatus)}`);
+    return `${Object.keys(files).length} files, branch ${status.branch}`;
+  });
+
+  await scenario(10.8, "tree navigate (summarize false, then true)", async () => {
+    const snap0 = await assertTranscriptConsistent(agentId);
+    const byId = new Map((snap0.transcript.entries as Json[]).map((e) => [e.id, e]));
+    const branch: Json[] = [];
+    for (let id = snap0.transcript.leafId; id; id = byId.get(id)?.parentId) {
+      branch.unshift(byId.get(id) as Json);
+    }
+    const user1 = branch.find((e) => e.type === "message" && e.message.role === "user");
+    assert(user1, "no user message on the active branch");
+    const assistant1 = branch.find(
+      (e) => e.parentId === user1.id && e.type === "message" && e.message.role === "assistant",
+    );
+    assert(assistant1, "no assistant reply to the first user message");
+
+    const bad = await api("POST", `/api/agents/${agentId}/tree/navigate`, {
+      entryId: "nope",
+      summarize: false,
+    });
+    assert(bad.status === 400, `unknown entry → ${bad.status}`);
+
+    let from = s.events.length;
+    const a = await api("POST", `/api/agents/${agentId}/tree/navigate`, {
+      entryId: user1.id,
+      summarize: false,
+    });
+    assert(a.status === 200 && a.json.cancelled === false, `navigate A → ${a.status} ${a.text}`);
+    await s.waitFor((e) => e.type === "transcript_reset", "reset after A", 10_000, from);
+    let snap = await assertTranscriptConsistent(agentId);
+    assert(
+      snap.transcript.leafId === user1.parentId,
+      `leaf ${snap.transcript.leafId} ≠ parent of user1`,
+    );
+    assert(
+      snap.live.editorText?.text === entryText(user1),
+      `editorText ${snap.live.editorText?.text}`,
+    );
+
+    await promptAndSettle(agentId, s, "Reply with exactly the word: branch");
+    const leafBefore = (await api("GET", `/api/agents/${agentId}/snapshot`)).json.transcript.leafId;
+    from = s.events.length;
+    const b = await api("POST", `/api/agents/${agentId}/tree/navigate`, {
+      entryId: assistant1.id,
+      summarize: true,
+      customInstructions: "One short sentence.",
+    });
+    assert(b.status === 200 && b.json.cancelled === false, `navigate B → ${b.status} ${b.text}`);
+    await s.waitFor((e) => e.type === "transcript_reset", "reset after B", 10_000, from);
+    snap = await assertTranscriptConsistent(agentId);
+    const leaf = (snap.transcript.entries as Json[]).find((e) => e.id === snap.transcript.leafId);
+    assert(
+      leaf?.type === "branch_summary" &&
+        leaf.parentId === assistant1.id &&
+        leaf.fromId === leafBefore,
+      `leaf after B: ${JSON.stringify(leaf).slice(0, 300)}`,
+    );
+    return `summary: ${JSON.stringify(String(leaf.summary).slice(0, 80))}`;
+  });
+
+  await scenario(10.9, "open {sessionFile}: double-open, resume, kill → restart", async () => {
+    const snap = (await api("GET", `/api/agents/${agentId}/snapshot`)).json;
+    const again = await api("POST", "/api/agents", { sessionFile: snap.agent.sessionFile });
+    assert(
+      again.status === 200 && again.json.agent.id === agentId,
+      `double-open → ${again.status} ${again.text.slice(0, 200)}`,
+    );
+    const missing = await api("POST", "/api/agents", {
+      sessionFile: join(scratch, "nope.jsonl"),
+    });
+    assert(missing.json?.error?.code === "session_not_found", `missing → ${missing.status}`);
+    const sessions = (await api("GET", `/api/sessions?cwd=${encodeURIComponent(scratch)}`)).json
+      .sessions as Json[];
+    const free = sessions.find((x) => !x.ownedBy && x.firstMessage);
+    assert(free, "no unowned session with messages to resume");
+    const before = new Set(piPids());
+    const r = await api("POST", "/api/agents", { sessionFile: free.file });
+    assert(r.status === 201, `resume → ${r.status} ${r.text.slice(0, 200)}`);
+    const bId = r.json.agent.id as string;
+    try {
+      const bs = new Sse(bId, { since: 0 });
+      await bs.waitFor(
+        (e) => e.type === "agent_status" && e.agent.status === "ready",
+        "B ready",
+        60_000,
+      );
+      const b = await assertTranscriptConsistent(bId);
+      assert(b.agent.sessionFile === free.file, `B sessionFile ${b.agent.sessionFile}`);
+      assert(b.agent.cwd === scratch, `B cwd ${b.agent.cwd}`);
+      assert(
+        b.transcript.entries.some((e: Json) => e.type === "message"),
+        "B has no messages",
+      );
+      const owned = (await api("GET", `/api/sessions?cwd=${encodeURIComponent(scratch)}`)).json
+        .sessions as Json[];
+      assert(owned.find((x) => x.file === free.file)?.ownedBy === bId, "ownedBy not B");
+
+      const pids = piPids().filter((p) => !before.has(p));
+      assert(pids.length === 1, `B pids: ${pids}`);
+      process.kill(pids[0] as number, "SIGKILL");
+      await bs.waitFor(
+        (e) => e.type === "agent_status" && e.agent.status === "exited",
+        "B exited",
+        10_000,
+      );
+      const exited = (await api("GET", `/api/agents/${bId}`)).json.agent;
+      assert(
+        exited.status === "exited" && Array.isArray(exited.stderrTail),
+        JSON.stringify(exited).slice(0, 200),
+      );
+      const busy = await rpc(bId, { type: "get_state" });
+      assert(busy.json?.error?.code === "agent_exited", `rpc on exited → ${busy.status}`);
+      const from = bs.events.length;
+      const rs = await api("POST", `/api/agents/${bId}/restart`, {});
+      assert(
+        rs.status === 200 && rs.json.agent.status === "starting",
+        `restart → ${rs.status} ${rs.text.slice(0, 200)}`,
+      );
+      await bs.waitFor(
+        (e) => e.type === "agent_status" && e.agent.status === "ready",
+        "B ready again",
+        60_000,
+        from,
+      );
+      const b2 = await assertTranscriptConsistent(bId);
+      assert(b2.agent.sessionFile === free.file, "restart changed the session file");
+      assert(
+        JSON.stringify(b2.transcript.entries.map((e: Json) => e.id)) ===
+          JSON.stringify(b.transcript.entries.map((e: Json) => e.id)),
+        "restarted transcript differs",
+      );
+      bs.close();
+      return `resumed ${b.transcript.entries.length} entries, restarted`;
+    } finally {
+      await api("DELETE", `/api/agents/${bId}`, {});
+    }
+  });
+
   let spend = 0;
   if (agentId) {
     const stats = (await api("GET", `/api/agents/${agentId}/snapshot`)).json?.stats;
@@ -1099,12 +1301,73 @@ async function main() {
   if ((await api("GET", `/api/agents/${agentId}`)).status === 200) {
     await api("DELETE", `/api/agents/${agentId}`, {});
   }
+
+  await scenario(12, "project trust: awaiting_trust → POST /trust → saved", async () => {
+    const trustFile = join(homedir(), ".pi", "agent", "trust.json");
+    const backup = existsSync(trustFile) ? readFileSync(trustFile) : undefined;
+    const dir = join(homedir(), "tmp", `pi-code-smoke-trust-${Date.now()}`);
+    scratchDirs.push(dir);
+    mkdirSync(join(dir, ".pi"), { recursive: true });
+    writeFileSync(join(dir, ".pi", "settings.json"), "{}\n");
+    const ids: string[] = [];
+    try {
+      const r = await api("POST", "/api/agents", { cwd: dir });
+      assert(r.status === 201, `open → ${r.status} ${r.text}`);
+      const info = r.json.agent;
+      ids.push(info.id);
+      assert(info.status === "awaiting_trust", `status ${info.status}`);
+      assert(info.trustPrompt?.cwd === dir && info.attention === "input", JSON.stringify(info));
+      const busy = await rpc(info.id, { type: "get_state" });
+      assert(busy.json?.error?.code === "agent_busy", `rpc while awaiting → ${busy.status}`);
+      const ts = new Sse(info.id, { since: 0 });
+      const t = await api("POST", `/api/agents/${info.id}/trust`, { trusted: true });
+      assert(
+        t.status === 200 && t.json.agent.status === "starting",
+        `trust → ${t.status} ${t.text}`,
+      );
+      await ts.waitFor(
+        (e) => e.type === "agent_status" && e.agent.status === "ready",
+        "ready",
+        60_000,
+      );
+      ts.close();
+      const saved = JSON.parse(readFileSync(trustFile, "utf8"));
+      assert(saved[dir] === true, `trust.json has no entry for ${dir}`);
+      const again = await api("POST", "/api/agents", { cwd: dir });
+      ids.push(again.json.agent.id);
+      assert(again.json.agent.status === "starting", `saved decision → ${again.json.agent.status}`);
+      return "decision saved by pi; second open spawned directly";
+    } finally {
+      for (const id of ids) await api("DELETE", `/api/agents/${id}`, {});
+      if (backup === undefined) rmSync(trustFile, { force: true });
+      else writeFileSync(trustFile, backup);
+      const now = existsSync(trustFile) ? readFileSync(trustFile) : undefined;
+      assert(
+        backup === undefined ? now === undefined : now !== undefined && backup.equals(now),
+        "trust.json not restored byte-identically",
+      );
+    }
+  });
+
   console.log(`session cost ≈ $${spend.toFixed(4)}`);
   finish(scratch);
 }
 
+/** Extra scratch dirs created by scenarios (removed with their pi sessions by `finish`). */
+const scratchDirs: string[] = [];
+
 function finish(scratch: string) {
-  if (process.env.SMOKE_KEEP !== "1") rmSync(scratch, { recursive: true, force: true });
+  if (process.env.SMOKE_KEEP !== "1") {
+    for (const dir of [scratch, ...scratchDirs]) {
+      rmSync(dir, { recursive: true, force: true });
+      // pi's session dir for that cwd: `--<path with / as ->--`.
+      const encoded = `--${dir.replace(/^\//, "").replace(/[/\\:]/g, "-")}--`;
+      rmSync(join(homedir(), ".pi", "agent", "sessions", encoded), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
   const failed = results.filter((r) => r.status === "FAIL");
   console.log(
     `\n${results.filter((r) => r.status === "PASS").length} passed, ${failed.length} failed, ${results.filter((r) => r.status === "SKIP").length} skipped`,

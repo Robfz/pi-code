@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentManager } from "./agents/agent-manager.ts";
 import { createApp } from "./app.ts";
+import { SessionCatalog } from "./catalog/sessions.ts";
 import type { ErrorEnvelope } from "./errors.ts";
 import { piVersionProbe } from "./pi-version.ts";
 
@@ -31,6 +32,7 @@ beforeAll(() => {
     port: PORT,
     staticDir: dist,
     manager,
+    catalog: new SessionCatalog({ agentDir: join(dist, "agent") }),
     piVersion: async () => "9.9.9",
   });
 });
