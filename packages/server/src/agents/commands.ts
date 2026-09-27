@@ -107,7 +107,7 @@ export async function runCommand(
   }
 
   const execute = async (): Promise<CommandOutcome> => {
-    const data = await agent.host.send(command);
+    const data = await agent.host.send(command, sendOptions(command));
     await pipeline.afterCommand(command.type, data);
     return {
       status: 200,
@@ -115,6 +115,18 @@ export async function runCommand(
     };
   };
   return SESSION_CHANGING_COMMANDS.has(command.type) ? pipeline.exclusive(execute) : execute();
+}
+
+/**
+ * pi answers a `prompt` that runs an extension command (`/name …`) only once the command's
+ * handler returns, which can take arbitrarily long (e.g. it waits for a dialog answer), so
+ * those prompts get no response timeout. Other prompts are answered on acceptance.
+ */
+function sendOptions(command: RpcCommandBody): { timeoutMs?: number } {
+  if (command.type === "prompt" && command.message.trimStart().startsWith("/")) {
+    return { timeoutMs: Number.POSITIVE_INFINITY };
+  }
+  return {};
 }
 
 function withoutPiCodeCommands(data: unknown): unknown {

@@ -86,7 +86,8 @@ interface Pending {
   command: string;
   resolve: (data: unknown) => void;
   reject: (err: Error) => void;
-  timer: NodeJS.Timeout;
+  /** Absent when the command waits indefinitely. */
+  timer: NodeJS.Timeout | undefined;
 }
 
 /** After `exit`, how long to wait for stdio to close before finalizing anyway. */
@@ -192,6 +193,7 @@ export class AgentHost extends EventEmitter<AgentHostEvents> {
   /**
    * Sends a command and resolves with pi's `response.data`. Rejects with an `ApiError`:
    * `pi_error` (pi answered `success: false`), `pi_timeout`, or `agent_exited`.
+   * `timeoutMs: Infinity` waits for as long as the process lives.
    */
   send<T = unknown>(command: HostCommand, opts: { timeoutMs?: number } = {}): Promise<T> {
     return this.request<T>(command, opts).response;
@@ -210,15 +212,17 @@ export class AgentHost extends EventEmitter<AgentHostEvents> {
     const line = `${JSON.stringify({ ...command, id })}\n`;
     const response = new Promise<T>((resolve, reject) => {
       const timeoutMs = opts.timeoutMs ?? this.commandTimeoutMs;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(
-          new ApiError(
-            "pi_timeout",
-            `pi did not answer ${command.type} within ${Math.round(timeoutMs / 1000)} s`,
-          ),
-        );
-      }, timeoutMs);
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            this.pending.delete(id);
+            reject(
+              new ApiError(
+                "pi_timeout",
+                `pi did not answer ${command.type} within ${Math.round(timeoutMs / 1000)} s`,
+              ),
+            );
+          }, timeoutMs)
+        : undefined;
       this.pending.set(id, {
         command: command.type,
         resolve: resolve as (data: unknown) => void,

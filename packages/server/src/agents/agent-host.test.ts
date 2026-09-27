@@ -139,6 +139,27 @@ describe("AgentHost framing (stub process)", () => {
     expect(errors).toEqual(["response to unknown id t1"]);
   });
 
+  it("waits indefinitely with timeoutMs: Infinity", async () => {
+    const host = stubHost({ commandTimeoutMs: 50 });
+    let settled = false;
+    const pending = host.send({ type: "silent" }, { timeoutMs: Number.POSITIVE_INFINITY });
+    pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    expect(settled).toBe(false);
+    await host.send({
+      type: "script",
+      chunks: chunksOf(line(response("t1", "late")) + line(response("t2", 2))),
+    });
+    expect(await pending).toBe("late");
+  });
+
   it("reports unparseable lines and id-less responses as protocol errors", async () => {
     const host = stubHost();
     const errors: string[] = [];

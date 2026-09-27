@@ -291,7 +291,7 @@ export class AgentPipeline {
         break;
       case "compaction_end":
         if (!event.aborted && event.errorMessage === undefined) {
-          events.push(...(await this.resetTranscript()));
+          events.push(...(await this.resetSession()));
         } else {
           events.push(...(await this.syncEntries()));
         }
@@ -388,14 +388,14 @@ export class AgentPipeline {
 
   /**
    * Side effects of a successful command response, queued behind the records received so far:
-   * session changes → `transcript_reset`; other non-query commands → entry sync (many create
+   * session changes → `transcript_reset` + `stats`; other non-query commands → entry sync (many create
    * entries without any event), plus `state` for state-mutating ones. Resolves once published.
    */
   afterCommand(type: string, data: unknown): Promise<void> {
     if (isQueryCommand(type)) return Promise.resolve();
     return this.enqueue(async () => {
       if (SESSION_CHANGING_COMMANDS.has(type)) {
-        if (!isCancelled(data)) this.publishAll(await this.resetTranscript());
+        if (!isCancelled(data)) this.publishAll(await this.resetSession());
         return;
       }
       const events = await this.syncEntries();
@@ -513,6 +513,15 @@ export class AgentPipeline {
       this.warnUnlessExited("transcript reset", e);
       return [];
     }
+  }
+
+  /**
+   * `transcript_reset` followed by fresh `stats`: after a session change or a compaction the
+   * cached stats describe another session file or the pre-compaction context.
+   */
+  private async resetSession(): Promise<ServerEvent[]> {
+    const reset = await this.resetTranscript();
+    return reset.length === 0 ? reset : [...reset, ...(await this.fetchStats())];
   }
 
   private async fetchStats(): Promise<ServerEvent[]> {

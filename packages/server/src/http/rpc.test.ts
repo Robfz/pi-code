@@ -174,6 +174,28 @@ describe("command rules", () => {
     expect(res.body.error?.code).toBe("pi_timeout");
   });
 
+  it("doesn't time out prompts that run extension commands", async () => {
+    // pi answers `/command` prompts only when the handler returns (it may await a dialog).
+    const h = await start({
+      command: () => ({ bin: STUB_BIN, args: STUB_ARGS }),
+      hostOptions: { commandTimeoutMs: 200 },
+    });
+    const { body } = await h.json<{ agent: AgentInfo }>("POST", "/api/agents", {
+      cwd: h.project,
+    });
+    const plain = await h.rpc(body.agent.id, { type: "prompt", message: "hello" });
+    expect(plain.body.error?.code).toBe("pi_timeout");
+    const command = h.rpc(body.agent.id, { type: "prompt", message: "/smoke-dialog" });
+    const outcome = await Promise.race([
+      command.then(() => "answered"),
+      new Promise((r) => setTimeout(() => r("pending"), 600)),
+    ]);
+    expect(outcome).toBe("pending");
+    await h.close();
+    harness = undefined;
+    await command.catch(() => {});
+  });
+
   it("rejects switch_session to a session owned by another agent", async () => {
     const h = await start();
     const a = await h.open();
@@ -277,6 +299,10 @@ describe("command rules", () => {
       expect(h.manager.require(agent.id).pipeline.snapshot().seq).toBeGreaterThan(seq);
       await client.waitForSeq(seqOf(h, agent.id));
       expect(eventsAfter(client, seq, "transcript_reset"), command.type).toHaveLength(1);
+      // Stats of the old session would be stale: refreshed right after the reset.
+      const labels = client.events.filter((r) => (r.seq ?? 0) > seq).map((r) => r.event.type);
+      const reset = labels.indexOf("transcript_reset");
+      expect(labels[reset + 1], command.type).toBe("stats");
     }
     const final = await h.snapshot(agent.id);
     expect(final.agent.sessionFile).not.toBe(beforeFork);
