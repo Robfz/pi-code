@@ -5,6 +5,7 @@ import type { AgentManager } from "./agents/agent-manager.ts";
 import { errorEnvelope, isApiError } from "./errors.ts";
 import { agentsRoutes } from "./http/agents-routes.ts";
 import { requestGuards } from "./http/guards.ts";
+import type { SseOptions } from "./http/sse.ts";
 import { spaHandler } from "./http/static.ts";
 
 export interface AppDeps {
@@ -17,6 +18,8 @@ export interface AppDeps {
   manager: AgentManager;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
+  /** SSE tuning (tests shorten the ping interval). */
+  sse?: SseOptions;
 }
 
 /** The typed `/api` routes. Chained so `AppType` carries them for the web's `hc` client. */
@@ -24,7 +27,7 @@ function apiRoutes(deps: AppDeps) {
   return new Hono()
     .basePath("/api")
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
-    .route("/agents", agentsRoutes(deps.manager));
+    .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}));
 }
 
 /** Builds the Hono app: guards, `/api` routes, error envelope, static SPA. */

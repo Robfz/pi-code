@@ -1,22 +1,18 @@
-import type { ErrorCode, ErrorEnvelope } from "./types-temp.ts";
+import { API_ERROR_STATUS, type ApiErrorCode } from "@pi-code/protocol";
+
+/**
+ * Contract error codes plus two server-internal ones: `not_found` (no such route) and
+ * `internal` (unexpected failures).
+ */
+export type ErrorCode = ApiErrorCode | "not_found" | "internal";
+
+export interface ErrorEnvelope {
+  error: { code: ErrorCode; message: string };
+}
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
-  invalid_body: 400,
-  outside_home: 400,
-  command_not_allowed: 400,
-  streaming_behavior_required: 400,
-  forbidden_origin: 403,
-  forbidden_host: 403,
+  ...API_ERROR_STATUS,
   not_found: 404,
-  agent_not_found: 404,
-  session_not_found: 404,
-  not_a_git_repo: 404,
-  dialog_not_found: 404,
-  session_owned: 409,
-  agent_exited: 409,
-  agent_busy: 409,
-  pi_error: 502,
-  pi_timeout: 504,
   internal: 500,
 };
 

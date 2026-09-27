@@ -1,7 +1,7 @@
 /**
  * Fake `pi --mode rpc`: replays a recorded fixture (see scripts/record-fixture.ts) over stdin/stdout.
  *
- *   node test/fake-pi.ts <fixture.jsonl> [--speed=0|1|N]
+ *   node test/fake-pi.ts <fixture.jsonl> [--speed=0|1|N] [--delay-get-entries=MS]
  *
  * (Node 24 runs this file directly via type stripping; `tsx test/fake-pi.ts` works too.)
  *
@@ -16,11 +16,15 @@
  *   fake answers any query the client sends, at any time:
  *     - `get_entries [since]` from an entry list rebuilt from the recorded `get_entries`
  *       responses up to the current position (including the next recorded one in the current
- *       segment, so a sync right after `message_end` sees that entry, as with real pi);
+ *       segment, so a sync right after `message_end` sees that entry, as with real pi), plus
+ *       entries pi creates without any event (bash, compaction, labels, model changes, …) once
+ *       the replay passes their creation time (estimated from entry timestamps);
  *     - other queries with the nearest recorded response of that command type.
  * - A gating command that doesn't match the next recorded one gets `success: false` and a note on
  *   stderr. Commands received while a segment is still replaying are queued.
  * - `--speed=0` (default) replays instantly, `1` with the recorded spacing, `N` N× faster.
+ * - `--delay-get-entries=MS` answers `get_entries` MS milliseconds late (a slow pi), computed
+ *   when the query arrives.
  * - `err` lines go to stderr. The process exits when stdin closes.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
@@ -53,13 +57,28 @@ export function loadFixture(path: string): FixtureLine[] {
 /** Spawns the fake pi on a fixture (name like "plain-answer", or a path). */
 export function spawnFakePi(
   fixture: string,
-  opts: { speed?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    speed?: number;
+    delayGetEntriesMs?: number;
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): ChildProcessWithoutNullStreams {
-  return spawn(
-    process.execPath,
-    [FAKE_PI_PATH, fixturePath(fixture), `--speed=${opts.speed ?? 0}`],
-    { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ["pipe", "pipe", "pipe"] },
-  );
+  return spawn(process.execPath, [FAKE_PI_PATH, ...fakePiArgs(fixture, opts)], {
+    cwd: opts.cwd,
+    env: opts.env ?? process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+/** Arguments after the script path for a fake pi run. */
+export function fakePiArgs(
+  fixture: string,
+  opts: { speed?: number; delayGetEntriesMs?: number } = {},
+): string[] {
+  const args = [fixturePath(fixture), `--speed=${opts.speed ?? 0}`];
+  if (opts.delayGetEntriesMs) args.push(`--delay-get-entries=${opts.delayGetEntriesMs}`);
+  return args;
 }
 
 const isQuery = (type: unknown) => typeof type === "string" && type.startsWith("get_");
@@ -95,7 +114,84 @@ interface Segment {
   end: number; // fixture index where this segment ends (exclusive)
 }
 
-function run(fixtureFile: string, speed: number) {
+/**
+ * Entries pi creates without an event (bash, compaction, labels, model / thinking changes,
+ * branch summaries, startup entries) show up only in the next recorded `get_entries` response,
+ * often a segment later than real pi has them. Estimate when each was created: the recorded
+ * clock is aligned with entry timestamps through message entries, whose `message_end` line time
+ * is known. Candidates are restricted to entries first seen in the session "epoch" they belong
+ * to (a full `get_entries` that doesn't extend the previous list starts a new epoch), so entries
+ * of a later session never leak into an earlier one.
+ */
+interface EventlessEntry {
+  entry: Rec;
+  epoch: number;
+  createdT: number;
+}
+
+function eventlessEntries(fx: FixtureLine[], recordedQueries: Map<string, Rec>) {
+  const messageEnds = new Set<string>();
+  const messageEndT = new Map<string, number>();
+  for (const l of fx) {
+    if (l.dir !== "out" || !isObj(l.line) || l.line.type !== "message_end") continue;
+    const m = l.line.message as Rec;
+    const key = `${String(m.role)}:${String(m.timestamp)}`;
+    messageEnds.add(key);
+    messageEndT.set(key, l.t);
+  }
+  const keyOf = (e: Rec) =>
+    e.type === "message" && isObj(e.message)
+      ? `${String(e.message.role)}:${String(e.message.timestamp)}`
+      : undefined;
+
+  const epochByIndex = new Map<number, number>(); // fixture index of a response → epoch
+  const firstSeen = new Map<string, { entry: Rec; epoch: number }>();
+  let list: Rec[] = [];
+  let epoch = 0;
+  fx.forEach((l, i) => {
+    const r = l.line;
+    if (l.dir !== "out" || !isObj(r) || r.type !== "response" || r.command !== "get_entries") {
+      return;
+    }
+    const req = typeof r.id === "string" ? recordedQueries.get(r.id) : undefined;
+    if (!req || r.success !== true) return;
+    const entries = (r.data as { entries: Rec[] }).entries;
+    if (req.since === undefined) {
+      if (!list.every((e, j) => entries[j]?.id === e.id)) epoch++;
+      list = [...entries];
+    } else {
+      const known = new Set(list.map((e) => e.id));
+      list.push(...entries.filter((e) => !known.has(e.id)));
+    }
+    epochByIndex.set(i, epoch);
+    for (const e of entries) {
+      if (typeof e.id === "string" && !firstSeen.has(e.id))
+        firstSeen.set(e.id, { entry: e, epoch });
+    }
+  });
+
+  let t0 = Number.NEGATIVE_INFINITY;
+  for (const { entry } of firstSeen.values()) {
+    const key = keyOf(entry);
+    const t = key === undefined ? undefined : messageEndT.get(key);
+    if (t !== undefined) t0 = Math.max(t0, Date.parse(String(entry.timestamp)) - t);
+  }
+  const candidates: EventlessEntry[] = [];
+  if (Number.isFinite(t0)) {
+    for (const { entry, epoch: ep } of firstSeen.values()) {
+      const key = keyOf(entry);
+      if (key !== undefined && messageEnds.has(key)) continue; // arrives with its message_end
+      const createdT = Date.parse(String(entry.timestamp)) - t0;
+      if (Number.isFinite(createdT)) candidates.push({ entry, epoch: ep, createdT });
+    }
+    candidates.sort((a, b) => a.createdT - b.createdT);
+  }
+  const createdTOf = (entry: Rec | undefined) =>
+    entry === undefined ? Number.NEGATIVE_INFINITY : Date.parse(String(entry.timestamp)) - t0;
+  return { epochByIndex, candidates, createdTOf };
+}
+
+function run(fixtureFile: string, speed: number, delayGetEntriesMs = 0) {
   const fx = loadFixture(fixtureFile);
 
   // Recorded query commands by id, so their responses can be recognised and dropped.
@@ -107,6 +203,7 @@ function run(fixtureFile: string, speed: number) {
   }
   const isRecordedQueryResponse = (r: unknown) =>
     isObj(r) && r.type === "response" && typeof r.id === "string" && recordedQueries.has(r.id);
+  const eventless = eventlessEntries(fx, recordedQueries);
 
   // Segments between gating commands.
   const segments: Segment[] = [{ gateT: 0, lines: [], end: 0 }];
@@ -168,6 +265,7 @@ function run(fixtureFile: string, speed: number) {
     const upTo = visibleUpTo("get_entries");
     let entries: Rec[] = [];
     let leafId: unknown = null;
+    let epoch = 0;
     for (let i = 0; i <= upTo && i < fx.length; i++) {
       const l = fx[i] as FixtureLine;
       if (l.dir !== "out" || !isObj(l.line) || l.line.command !== "get_entries") continue;
@@ -180,6 +278,19 @@ function run(fixtureFile: string, speed: number) {
         entries.push(...data.entries.filter((e) => !known.has(e.id)));
       }
       leafId = data.leafId;
+      epoch = eventless.epochByIndex.get(i) ?? epoch;
+    }
+    // Event-less entries real pi already has at this point of the replay.
+    const now = pos >= 0 ? (fx[pos] as FixtureLine).t : 0;
+    const known = new Set(entries.map((e) => e.id));
+    const extra = eventless.candidates.filter(
+      (c) => c.epoch === epoch && c.createdT <= now && !known.has(c.entry.id),
+    );
+    if (extra.length > 0) {
+      entries = [...entries, ...extra.map((c) => c.entry)];
+      const last = extra[extra.length - 1] as EventlessEntry;
+      const leaf = entries.find((e) => e.id === leafId);
+      if (last.createdT >= eventless.createdTOf(leaf)) leafId = last.entry.id;
     }
     if (cmd.since !== undefined) {
       const at = entries.findIndex((e) => e.id === cmd.since);
@@ -304,7 +415,12 @@ function run(fixtureFile: string, speed: number) {
       return;
     }
     if (isQuery(cmd.type)) {
-      out(withId(answerQuery(cmd), cmd));
+      const response = withId(answerQuery(cmd), cmd);
+      if (cmd.type === "get_entries" && delayGetEntriesMs > 0) {
+        setTimeout(() => out(response), delayGetEntriesMs);
+      } else {
+        out(response);
+      }
       return;
     }
     queue.push(cmd);
@@ -332,9 +448,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const args = process.argv.slice(2);
   const file = args.find((a) => !a.startsWith("--"));
   const speedArg = args.find((a) => a.startsWith("--speed="));
+  const delayArg = args.find((a) => a.startsWith("--delay-get-entries="));
   if (!file) {
-    process.stderr.write("usage: fake-pi.ts <fixture.jsonl> [--speed=0|1|N]\n");
+    process.stderr.write(
+      "usage: fake-pi.ts <fixture.jsonl> [--speed=0|1|N] [--delay-get-entries=MS]\n",
+    );
     process.exit(2);
   }
-  run(file, speedArg ? Number(speedArg.slice("--speed=".length)) : 0);
+  run(
+    file,
+    speedArg ? Number(speedArg.slice("--speed=".length)) : 0,
+    delayArg ? Number(delayArg.slice("--delay-get-entries=".length)) : 0,
+  );
 }

@@ -9,7 +9,7 @@
  * It exits when stdin ends, unless `STUB_IGNORE_EOF` is set; `STUB_IGNORE_TERM` ignores SIGTERM.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { FAKE_PI_PATH, fixturePath } from "../../../../test/fake-pi.ts";
+import { FAKE_PI_PATH, fakePiArgs } from "../../../../test/fake-pi.ts";
 
 const STUB_SOURCE = String.raw`
 const write = (stream, data) => new Promise((r) => stream.write(data, r));
@@ -68,8 +68,11 @@ export function chunksOf(text: string | Uint8Array, splitAt: number[] = []): str
 }
 
 /** `bin` + `args` running the fake pi on a fixture (name or path). */
-export function fakePiCommand(fixture: string): { bin: string; args: string[] } {
-  return { bin: process.execPath, args: [FAKE_PI_PATH, fixturePath(fixture), "--speed=0"] };
+export function fakePiCommand(
+  fixture: string,
+  opts: { speed?: number; delayGetEntriesMs?: number } = {},
+): { bin: string; args: string[] } {
+  return { bin: process.execPath, args: [FAKE_PI_PATH, ...fakePiArgs(fixture, opts)] };
 }
 
 /** Whether a process with this pid is still alive. */

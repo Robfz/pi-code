@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { JsonAgentSessionEvent, RpcExtensionUIRequest } from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiError } from "../errors.ts";
 import { chunksOf, fakePiCommand, isAlive, spawnStub } from "../testing/stub-process.ts";
-import type { PiEvent, PiUiRequest } from "../types-temp.ts";
 import { AgentHost, type AgentHostOptions, type HostStatus } from "./agent-host.ts";
 
 const hosts: AgentHost[] = [];
@@ -29,7 +29,9 @@ function fakePi(fixture: string, opts: AgentHostOptions = {}) {
 }
 
 function record(host: AgentHost) {
-  const seen: Array<{ kind: "event"; event: PiEvent } | { kind: "ui"; request: PiUiRequest }> = [];
+  const seen: Array<
+    { kind: "event"; event: JsonAgentSessionEvent } | { kind: "ui"; request: RpcExtensionUIRequest }
+  > = [];
   host.on("event", (event) => seen.push({ kind: "event", event }));
   host.on("ui_request", (request) => seen.push({ kind: "ui", request }));
   return seen;
@@ -294,7 +296,7 @@ describe("AgentHost with fake pi", () => {
     const dialogs: string[] = [];
     host.on("ui_request", (req) => {
       const answer = answers[req.method];
-      if (!answer || req.timeout !== undefined) return;
+      if (!answer || ("timeout" in req && req.timeout !== undefined)) return;
       dialogs.push(req.method);
       host.sendNoReply({ type: "extension_ui_response", id: req.id, ...answer } as never);
     });

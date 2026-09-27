@@ -1,0 +1,14 @@
+import { QueryClient } from "@tanstack/react-query";
+
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { staleTime: 5_000, retry: 1, refetchOnWindowFocus: true },
+    },
+  });
+}
+
+export const queryKeys = {
+  agents: ["agents"] as const,
+  health: ["health"] as const,
+};

@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentInfo, AgentStatus } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
+import type { ErrorEnvelope } from "../errors.ts";
 import { fakePiCommand, isAlive } from "../testing/stub-process.ts";
-import type { AgentInfo, AgentStatus, ErrorEnvelope } from "../types-temp.ts";
 import {
   AgentManager,
   type AgentManagerDeps,

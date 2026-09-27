@@ -2,17 +2,18 @@ import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { ApiError } from "../errors.ts";
 import type {
   AgentId,
   AgentInfo,
   AgentStatus,
   Attention,
-  PiEvent,
-  PiSessionState,
-  PiUiRequest,
-} from "../types-temp.ts";
+  JsonAgentSessionEvent,
+  RpcExtensionUIRequest,
+  RpcSessionState,
+} from "@pi-code/protocol";
+import { ApiError } from "../errors.ts";
 import { AgentHost, type AgentHostOptions, type HostExit } from "./agent-host.ts";
+import { AgentPipeline, type AttentionTrigger } from "./pipeline.ts";
 
 /** Whether `path` is `dir` or below it (both absolute, already resolved). */
 function isInside(dir: string, path: string): boolean {
@@ -33,12 +34,12 @@ export interface SpawnRequest {
 }
 
 /**
- * Per-agent records, in stdout order, for the event pipeline (S4). `status` records are emitted
- * whenever the agent's `AgentInfo` changes status.
+ * Per-agent records, in stdout order, as observed before they enter the agent's pipeline.
+ * `status` records follow every published `agent_status` (status or attention changes).
  */
 export type AgentRecord =
-  | { kind: "event"; event: PiEvent }
-  | { kind: "ui_request"; request: PiUiRequest }
+  | { kind: "event"; event: JsonAgentSessionEvent }
+  | { kind: "ui_request"; request: RpcExtensionUIRequest }
   | { kind: "status"; agent: AgentInfo };
 
 export type AgentRecordHandler = (agent: Agent, record: AgentRecord) => void;
@@ -48,9 +49,13 @@ export interface AgentManagerDeps {
   home: string;
   /** Builds the command line for an agent (the real one runs `pi --mode rpc …`). */
   command: (req: SpawnRequest) => SpawnSpec;
-  /** Receives every agent record; replaceable later with `setRecordHandler`. */
+  /** Observes every agent record; replaceable later with `setRecordHandler`. */
   onRecord?: AgentRecordHandler;
+  /** Notification triggers (finished / failed / input), for push (S12). */
+  onTrigger?: (trigger: AttentionTrigger) => void;
   hostOptions?: AgentHostOptions;
+  /** Events kept per agent for SSE replay. Default 10,000. */
+  eventLogCapacity?: number;
   newId?: () => AgentId;
 }
 
@@ -68,7 +73,7 @@ export function piCommand(piBin: string, extensionPath: string): (req: SpawnRequ
   });
 }
 
-/** One conversation: its pi process plus the server's view of it. */
+/** One conversation: its pi process, its event pipeline, and the server's view of it. */
 export class Agent {
   readonly id: AgentId;
   readonly cwd: string;
@@ -76,14 +81,21 @@ export class Agent {
   readonly host: AgentHost;
   status: AgentStatus = "starting";
   attention: Attention = "none";
-  /** Last `get_state` data. */
-  state: PiSessionState | null = null;
+  /** Cached `get_state` data (kept current by the pipeline). */
+  state: RpcSessionState | null = null;
+  readonly pipeline: AgentPipeline;
 
-  constructor(id: AgentId, cwd: string, host: AgentHost) {
+  constructor(
+    id: AgentId,
+    cwd: string,
+    host: AgentHost,
+    pipelineOptions: ConstructorParameters<typeof AgentPipeline>[1] = {},
+  ) {
     this.id = id;
     this.cwd = cwd;
     this.host = host;
     this.startedAt = new Date().toISOString();
+    this.pipeline = new AgentPipeline(this, pipelineOptions);
   }
 
   info(): AgentInfo {
@@ -91,7 +103,7 @@ export class Agent {
       id: this.id,
       cwd: this.cwd,
       status: this.status,
-      isStreaming: this.state?.isStreaming ?? false,
+      isStreaming: this.status !== "exited" && (this.state?.isStreaming ?? false),
       attention: this.attention,
       startedAt: this.startedAt,
     };
@@ -108,7 +120,7 @@ export class Agent {
 }
 
 export interface AgentManagerEvents {
-  /** An agent's info changed (status transitions). */
+  /** An agent's info changed (status or attention). */
   agent: [AgentInfo];
   /** An agent was closed and removed. */
   closed: [AgentId];
@@ -147,9 +159,24 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
     return [...this.agents.values()].map((a) => a.info());
   }
 
+  /** The agent (other than `except`) that has `sessionFile` open, if any. */
+  ownerOf(sessionFile: string, except?: AgentId): AgentId | undefined {
+    for (const agent of this.agents.values()) {
+      if (
+        agent.id !== except &&
+        agent.status !== "exited" &&
+        agent.state?.sessionFile === sessionFile
+      ) {
+        return agent.id;
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Opens a new agent with a new session in `cwd` (must resolve inside `$HOME`). Returns right
-   * away with `status: "starting"`; the agent becomes `ready` after its first `get_state`.
+   * away with `status: "starting"`; the pipeline makes it `ready` once state and transcript are
+   * loaded.
    */
   async open(req: { cwd: string }): Promise<Agent> {
     const cwd = await this.resolveCwd(req.cwd);
@@ -160,18 +187,30 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
       ...(spec.env ? { env: spec.env } : {}),
       ...this.deps.hostOptions,
     });
-    const agent = new Agent(id, cwd, host);
+    const agent: Agent = new Agent(id, cwd, host, {
+      ...(this.deps.eventLogCapacity ? { eventLogCapacity: this.deps.eventLogCapacity } : {}),
+      onAgentInfo: (info) => {
+        this.emit("agent", info);
+        this.record(agent, { kind: "status", agent: info });
+      },
+      onTrigger: (trigger) => this.deps.onTrigger?.(trigger),
+    });
     this.agents.set(id, agent);
 
-    host.on("event", (event) => this.record(agent, { kind: "event", event }));
-    host.on("ui_request", (request) => this.record(agent, { kind: "ui_request", request }));
+    host.on("event", (event) => {
+      this.record(agent, { kind: "event", event });
+      agent.pipeline.onEvent(event);
+    });
+    host.on("ui_request", (request) => {
+      this.record(agent, { kind: "ui_request", request });
+      agent.pipeline.onUiRequest(request);
+    });
     host.on("protocol_error", (err) => {
       console.warn(`[agent ${id}] ${err.message}`);
     });
     host.on("exit", (exit) => this.onExit(agent, exit));
 
-    this.publishStatus(agent);
-    void this.initialize(agent);
+    agent.pipeline.start();
     return agent;
   }
 
@@ -179,6 +218,8 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
   async close(id: AgentId): Promise<void> {
     const agent = this.require(id);
     await agent.host.close();
+    await agent.pipeline.enqueue(() => {}); // the final `agent_status` reaches subscribers
+    agent.pipeline.dispose();
     if (this.agents.get(id) === agent) {
       this.agents.delete(id);
       this.emit("closed", id);
@@ -190,33 +231,14 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
     await Promise.all([...this.agents.keys()].map((id) => this.close(id).catch(() => {})));
   }
 
-  private async initialize(agent: Agent): Promise<void> {
-    try {
-      const state = await agent.host.send<PiSessionState>({ type: "get_state" });
-      if (agent.status !== "starting") return;
-      agent.state = state;
-      agent.status = "ready";
-      this.publishStatus(agent);
-    } catch (e) {
-      if (agent.host.status === "running") {
-        console.warn(`[agent ${agent.id}] initial get_state failed: ${(e as Error).message}`);
-      }
-    }
-  }
-
   private onExit(agent: Agent, exit: HostExit): void {
+    // Set right away so commands get `agent_exited`; published in order by the pipeline.
     agent.status = "exited";
     if (!exit.requested) {
       const why = exit.error?.message ?? `code ${exit.code}, signal ${exit.signal}`;
       console.warn(`[agent ${agent.id}] pi exited unexpectedly (${why})`);
     }
-    this.publishStatus(agent);
-  }
-
-  private publishStatus(agent: Agent): void {
-    const info = agent.info();
-    this.emit("agent", info);
-    this.record(agent, { kind: "status", agent: info });
+    agent.pipeline.onExit();
   }
 
   private record(agent: Agent, record: AgentRecord): void {

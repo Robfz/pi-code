@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentManager } from "./agents/agent-manager.ts";
 import { createApp } from "./app.ts";
+import type { ErrorEnvelope } from "./errors.ts";
 import { piVersionProbe } from "./pi-version.ts";
-import type { ErrorEnvelope } from "./types-temp.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const PORT = 4180;

@@ -1,8 +1,37 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import type {
+  JsonAgentSessionEvent,
+  RpcExtensionUIRequest,
+  RpcExtensionUIResponse,
+} from "@pi-code/protocol";
 import { ApiError } from "../errors.ts";
-import type { PiCommand, PiEvent, PiResponse, PiUiRequest, PiUiResponse } from "../types-temp.ts";
 import { LineSplitter } from "./jsonl.ts";
+
+/**
+ * A command as written to pi, without the correlation id. Loose on purpose: framing and
+ * correlation don't depend on the command (the HTTP layer validates what reaches pi).
+ */
+export interface HostCommand {
+  type: string;
+  [key: string]: unknown;
+}
+
+/** A pi `response` record, as read for correlation. */
+interface ResponseRecord {
+  id?: string;
+  type: "response";
+  command: string;
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+/** A command in flight: its id (known before pi answers) and pi's `response.data`. */
+export interface HostRequest<T> {
+  id: string;
+  response: Promise<T>;
+}
 
 /** `running` → `closing` (after `close()`) → `exited`; or `running` → `exited` on a crash. */
 export type HostStatus = "running" | "closing" | "exited";
@@ -24,9 +53,9 @@ export interface HostProtocolError {
 
 export interface AgentHostEvents {
   /** Every stdout record that isn't a response or an extension UI request (pi session events). */
-  event: [PiEvent];
+  event: [JsonAgentSessionEvent];
   /** `extension_ui_request` records. */
-  ui_request: [PiUiRequest];
+  ui_request: [RpcExtensionUIRequest];
   /** One stderr line (diagnostics only). */
   stderr: [string];
   /** Unparseable stdout lines, id-less responses (`parse` errors), responses to unknown ids. */
@@ -164,14 +193,22 @@ export class AgentHost extends EventEmitter<AgentHostEvents> {
    * Sends a command and resolves with pi's `response.data`. Rejects with an `ApiError`:
    * `pi_error` (pi answered `success: false`), `pi_timeout`, or `agent_exited`.
    */
-  send<T = unknown>(command: PiCommand, opts: { timeoutMs?: number } = {}): Promise<T> {
+  send<T = unknown>(command: HostCommand, opts: { timeoutMs?: number } = {}): Promise<T> {
+    return this.request<T>(command, opts).response;
+  }
+
+  /**
+   * Like `send`, but also returns the command id right away (e.g. to match
+   * `bash_execution_update` records to the `bash` command before pi answers).
+   */
+  request<T = unknown>(command: HostCommand, opts: { timeoutMs?: number } = {}): HostRequest<T> {
     if (this._status !== "running") {
-      return Promise.reject(this.notRunningError());
+      return { id: "", response: Promise.reject(this.notRunningError()) };
     }
     this.nextId += 1;
     const id = `${this.idPrefix}${this.nextId}`;
     const line = `${JSON.stringify({ ...command, id })}\n`;
-    return new Promise<T>((resolve, reject) => {
+    const response = new Promise<T>((resolve, reject) => {
       const timeoutMs = opts.timeoutMs ?? this.commandTimeoutMs;
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -190,10 +227,11 @@ export class AgentHost extends EventEmitter<AgentHostEvents> {
       });
       this.write(line);
     });
+    return { id, response };
   }
 
   /** Writes a record that gets no response (`extension_ui_response`). */
-  sendNoReply(record: PiUiResponse): void {
+  sendNoReply(record: RpcExtensionUIResponse): void {
     if (this._status !== "running") throw this.notRunningError();
     this.write(`${JSON.stringify(record)}\n`);
   }
@@ -285,12 +323,13 @@ export class AgentHost extends EventEmitter<AgentHostEvents> {
       return;
     }
     const type = (record as { type?: unknown }).type;
-    if (type === "response") this.onResponse(record as PiResponse);
-    else if (type === "extension_ui_request") this.safeEmit("ui_request", record as PiUiRequest);
-    else this.safeEmit("event", record as PiEvent);
+    if (type === "response") this.onResponse(record as ResponseRecord);
+    else if (type === "extension_ui_request") {
+      this.safeEmit("ui_request", record as RpcExtensionUIRequest);
+    } else this.safeEmit("event", record as JsonAgentSessionEvent);
   }
 
-  private onResponse(response: PiResponse): void {
+  private onResponse(response: ResponseRecord): void {
     const pending = typeof response.id === "string" ? this.pending.get(response.id) : undefined;
     if (!pending) {
       this.safeEmit("protocol_error", {
