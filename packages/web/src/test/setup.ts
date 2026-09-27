@@ -17,6 +17,10 @@ if (typeof window.matchMedia !== "function") {
     }) as MediaQueryList;
 }
 window.scrollTo = () => {};
+// sonner's swipe handling (toast action clicks).
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.scrollTo = () => {};
 
 afterEach(() => {

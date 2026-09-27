@@ -12,21 +12,22 @@ import {
   Outlet,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { useTheme } from "next-themes";
-import { Button } from "@/components/ui/button";
 import { SessionsScreen } from "@/features/catalog/sessions-screen";
 import { ConversationRoot } from "@/features/conversation/conversation-root";
 import { ConversationScreen } from "@/features/conversation/conversation-screen";
 import { DiffScreen } from "@/features/diff/diff-screen";
+import { AppShell } from "@/features/pwa/app-shell";
+import { SettingsScreen } from "@/features/settings/settings-screen";
+import { ShareScreen } from "@/features/share/share-screen";
 import { TreeScreen } from "@/features/tree/tree-screen";
 import { HomeScreen } from "@/routes/home";
 import { PlaceholderScreen } from "@/routes/placeholder";
 
 const rootRoute = createRootRoute({
   component: () => (
-    <div className="min-h-dvh bg-background text-foreground">
+    <AppShell>
       <Outlet />
-    </div>
+    </AppShell>
   ),
   notFoundComponent: () => <PlaceholderScreen title="Not found">No such page.</PlaceholderScreen>,
 });
@@ -79,45 +80,12 @@ const diffRoute = createRoute({
   component: DiffScreen,
 });
 
+/** Share target (`?title&text&url`); the screen reads the raw query string itself. */
 const shareRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/share",
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { title?: string; text?: string; url?: string } => {
-    const out: { title?: string; text?: string; url?: string } = {};
-    for (const key of ["title", "text", "url"] as const) {
-      const value = search[key];
-      if (typeof value === "string") out[key] = value;
-    }
-    return out;
-  },
-  component: () => <PlaceholderScreen title="Send to…" />,
+  component: ShareScreen,
 });
-
-function SettingsScreen() {
-  const { theme, setTheme } = useTheme();
-  return (
-    <PlaceholderScreen title="Settings">
-      <section className="flex flex-col gap-2">
-        <h2 className="font-medium text-foreground">Theme</h2>
-        <div className="flex gap-2">
-          {(["system", "dark", "light"] as const).map((option) => (
-            <Button
-              key={option}
-              size="sm"
-              variant={theme === option ? "default" : "outline"}
-              onClick={() => setTheme(option)}
-            >
-              {option[0]?.toUpperCase()}
-              {option.slice(1)}
-            </Button>
-          ))}
-        </div>
-      </section>
-    </PlaceholderScreen>
-  );
-}
 
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,

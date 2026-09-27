@@ -3,7 +3,7 @@ import { ChevronLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 
-/** Screen shell for routes whose content lands in later tasks. */
+/** Simple screen shell: back-to-Home button, title, content (defaults to "Coming soon."). */
 export function PlaceholderScreen({
   title,
   back,

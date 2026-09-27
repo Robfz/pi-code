@@ -33,6 +33,21 @@ describe("web_search (web-search fixture)", () => {
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
+  it("keeps 'Review in curator' reachable when the call is collapsed", async () => {
+    render(
+      <ToolCallView
+        {...propsAt(call, { update: 1 })}
+        curatorUrl="https://host.ts.net:8443/?session=abc"
+      />,
+    );
+    await expand(); // collapse the running call
+    expect(header()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("link", { name: /Review in curator/ })).toHaveAttribute(
+      "href",
+      "https://host.ts.net:8443/?session=abc",
+    );
+  });
+
   it("done: result count, then source links and full results when expanded", async () => {
     render(<ToolCallView {...propsAt(call, "end")} />);
     expect(header()).toHaveTextContent("· 5 sources");

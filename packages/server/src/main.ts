@@ -1,11 +1,7 @@
-import { serve } from "@hono/node-server";
-import { AgentManager, piCommand } from "./agents/agent-manager.ts";
-import { createApp } from "./app.ts";
-import { SessionCatalog } from "./catalog/sessions.ts";
-import { ConfigError, loadConfig } from "./config.ts";
-import { piVersionProbe } from "./pi-version.ts";
+import { type Config, ConfigError, loadConfig } from "./config.ts";
+import { LISTEN_HOST, startServer } from "./server.ts";
 
-let config: ReturnType<typeof loadConfig>;
+let config: Config;
 try {
   config = loadConfig();
 } catch (e) {
@@ -16,41 +12,34 @@ try {
   throw e;
 }
 
-const LISTEN_HOST = "127.0.0.1";
-
-const manager = new AgentManager({
-  home: config.home,
-  command: piCommand(config.piBin, config.extensionPath),
-  agentDir: config.agentDir,
-});
-
-const catalog = new SessionCatalog({
-  agentDir: config.agentDir,
-  ownerOf: (file) => manager.ownerOf(file),
-});
-
-const app = createApp({
-  hostname: config.hostname,
-  port: config.port,
-  staticDir: config.staticDir,
-  manager,
-  catalog,
-  piVersion: piVersionProbe(config.piBin),
-});
-
-const server = serve({ fetch: app.fetch, port: config.port, hostname: LISTEN_HOST }, (info) => {
-  console.log(
-    `pi-code server listening on http://${LISTEN_HOST}:${info.port} (https://${config.hostname})`,
-  );
-});
-
-let shuttingDown = false;
-async function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  server.close();
-  await manager.closeAll();
-  process.exit(0);
+let running: Awaited<ReturnType<typeof startServer>>;
+try {
+  running = await startServer(config);
+} catch (e) {
+  console.error(`pi-code: failed to start: ${(e as Error).message}`);
+  process.exit(1);
 }
-process.on("SIGINT", () => void shutdown());
-process.on("SIGTERM", () => void shutdown());
+
+console.log(
+  `pi-code server listening on http://${LISTEN_HOST}:${running.port} (https://${config.hostname}), ` +
+    `curator proxy on http://${LISTEN_HOST}:${running.curatorPort}`,
+);
+
+let signals = 0;
+function onSignal(signal: NodeJS.Signals) {
+  signals += 1;
+  if (signals > 1) {
+    console.error(`pi-code: ${signal} again, exiting now`);
+    process.exit(1);
+  }
+  console.log(`pi-code: ${signal}, closing agents…`);
+  running.shutdown().then(
+    () => process.exit(0),
+    (e: unknown) => {
+      console.error("pi-code: shutdown failed:", e);
+      process.exit(1);
+    },
+  );
+}
+process.on("SIGINT", onSignal);
+process.on("SIGTERM", onSignal);

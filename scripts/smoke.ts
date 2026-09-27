@@ -1349,6 +1349,32 @@ async function main() {
     }
   });
 
+  await scenario(13, "push endpoints; curator listener", async () => {
+    const key = await api("GET", "/api/push/vapid-key");
+    assert(
+      key.status === 200 && typeof key.json?.publicKey === "string",
+      `vapid-key → ${key.status}`,
+    );
+    const endpoint = `https://push.invalid/smoke-${Date.now()}`;
+    const sub = await api("POST", "/api/push/subscriptions", {
+      endpoint,
+      expirationTime: null,
+      keys: { p256dh: "smoke", auth: "smoke" },
+    });
+    assert(sub.status === 204, `subscribe → ${sub.status} ${sub.text}`);
+    const bad = await api("POST", "/api/push/subscriptions", { endpoint });
+    assert(bad.status === 400, `invalid subscription → ${bad.status}`);
+    const del = await api("DELETE", "/api/push/subscriptions", { endpoint });
+    assert(del.status === 204, `unsubscribe → ${del.status} ${del.text}`);
+    // The curator proxy listens on PI_CODE_CURATOR_PORT (default: main port + 1).
+    const curatorBase =
+      process.env.SMOKE_CURATOR_URL ?? `http://localhost:${Number(new URL(BASE).port || 80) + 1}`;
+    const unknown = await fetch(`${curatorBase}/?session=unknown-smoke-token`).catch(() => null);
+    if (unknown === null) return `SKIP curator listener not reachable at ${curatorBase}`;
+    assert(unknown.status === 404, `unknown curator token → ${unknown.status}`);
+    return "vapid key, subscribe/unsubscribe, curator 404";
+  });
+
   console.log(`session cost ≈ $${spend.toFixed(4)}`);
   finish(scratch);
 }

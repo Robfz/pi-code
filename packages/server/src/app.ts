@@ -7,8 +7,10 @@ import { errorEnvelope, isApiError } from "./errors.ts";
 import { agentsRoutes } from "./http/agents-routes.ts";
 import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
+import { pushRoutes } from "./http/push-routes.ts";
 import type { SseOptions } from "./http/sse.ts";
 import { spaHandler } from "./http/static.ts";
+import type { PushService } from "./push/push-service.ts";
 
 export interface AppDeps {
   /** Tailnet hostname (Host allowlist, origin checks). */
@@ -22,6 +24,8 @@ export interface AppDeps {
   catalog: SessionCatalog;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
+  /** Web Push (routes answer `not_found` without it). */
+  push?: PushService;
   /** SSE tuning (tests shorten the ping interval). */
   sse?: SseOptions;
 }
@@ -32,7 +36,8 @@ function apiRoutes(deps: AppDeps) {
     .basePath("/api")
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
-    .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}));
+    .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}))
+    .route("/push", pushRoutes(deps.push));
 }
 
 /** Builds the Hono app: guards, `/api` routes, error envelope, static SPA. */

@@ -37,7 +37,7 @@ export function SessionsScreen({ cwd }: { cwd?: string }) {
             const value = event.target.value;
             void navigate({ to: "/sessions", search: value ? { cwd: value } : {} });
           }}
-          className="h-10 rounded-md border bg-background px-2 text-base text-foreground md:text-sm"
+          className="h-10 w-full min-w-0 rounded-md border bg-background px-2 text-base text-foreground md:text-sm"
         >
           <option value="">All projects</option>
           {projectOptions.map((path) => (
@@ -60,7 +60,13 @@ export function SessionsScreen({ cwd }: { cwd?: string }) {
           </Button>
         </div>
       )}
-      {sessions.data?.length === 0 && <p className="text-sm text-muted-foreground">No sessions.</p>}
+      {sessions.data?.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {cwd
+            ? "No sessions in this project yet."
+            : "No sessions yet — start a new conversation from Home."}
+        </p>
+      )}
       {sessions.data && sessions.data.length > 0 && (
         <SessionList sessions={sessions.data} showProject={!cwd} />
       )}

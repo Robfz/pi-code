@@ -4,12 +4,11 @@
  * curator** (the proxied URL from the `curator` event, opened in a new tab).
  */
 
-import { ExternalLinkIcon } from "lucide-react";
 import { Markdown } from "@/components/markdown";
-import { Button } from "@/components/ui/button";
 import { toolResultText } from "@/lib/content";
 import {
   asRecord,
+  CuratorButton,
   ErrorOutput,
   ExternalLink,
   Images,
@@ -53,18 +52,6 @@ function queriesOf(args: unknown): string[] {
 
 function details(props: ToolRendererProps) {
   return asRecord(props.result?.details) ?? asRecord(asRecord(props.partialResult)?.details);
-}
-
-function CuratorButton({ url }: { url?: string }) {
-  if (!url) return null;
-  return (
-    <Button asChild size="sm" variant="outline" className="self-start">
-      <a href={url} target="_blank" rel="noopener noreferrer">
-        <ExternalLinkIcon />
-        Review in curator
-      </a>
-    </Button>
-  );
 }
 
 function SourceList({ sources }: { sources: SourceLink[] }) {

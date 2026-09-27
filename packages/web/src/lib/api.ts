@@ -27,6 +27,7 @@ import type {
   SessionsResponse,
   Snapshot,
   UiResponseBody,
+  VapidKeyResponse,
 } from "@pi-code/protocol";
 import { isApiError } from "@pi-code/protocol";
 import type { AppType } from "@pi-code/server";
@@ -56,8 +57,14 @@ export function isApiRequestError(error: unknown, code?: string): error is ApiRe
   return error instanceof ApiRequestError && (code === undefined || error.code === code);
 }
 
+/** `fetch` rejections (no network, server down): "Failed to fetch", "Load failed", … */
+export function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError && /fetch|network|load failed/i.test(error.message);
+}
+
 /** Human-readable message for any thrown value. */
 export function errorMessage(error: unknown): string {
+  if (isNetworkError(error)) return "Can't reach the pi-code server.";
   if (error instanceof Error) return error.message;
   return String(error);
 }
@@ -184,4 +191,20 @@ export async function listDirs(prefix: string): Promise<DirSuggestion[]> {
 
 export function navigateTree(id: AgentId, body: NavigateBody): Promise<NavigateResponse> {
   return request<NavigateResponse>("POST", agentPath(id, "/tree/navigate"), body);
+}
+
+// ---------------------------------------------------------------------------
+// Push
+
+export async function getVapidKey(): Promise<string> {
+  return (await request<VapidKeyResponse>("GET", "/api/push/vapid-key")).publicKey;
+}
+
+/** Upload the browser's subscription (idempotent: the server keys it by endpoint). */
+export function savePushSubscription(subscription: PushSubscriptionJSON): Promise<void> {
+  return request<void>("POST", "/api/push/subscriptions", subscription);
+}
+
+export function deletePushSubscription(endpoint: string): Promise<void> {
+  return request<void>("DELETE", "/api/push/subscriptions", { endpoint });
 }

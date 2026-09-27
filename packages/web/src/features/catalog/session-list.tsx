@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@pi-code/protocol";
+import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
 import { CircleDotIcon, LoaderIcon, MessageSquareIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { baseName } from "@/lib/content";
@@ -14,12 +14,15 @@ export function SessionList({
   sessions,
   showProject = true,
   label = "Sessions",
+  onOpened,
 }: {
   sessions: SessionSummary[];
   showProject?: boolean;
   label?: string;
+  /** Runs with the agent before navigating to it. */
+  onOpened?: (agent: AgentInfo) => void;
 }) {
-  const open = useOpenAgent();
+  const open = useOpenAgent(onOpened ? { onOpened } : {});
   const pendingFile = open.isPending ? (open.variables as { sessionFile?: string }) : undefined;
   return (
     <ul className="flex flex-col gap-2" aria-label={label}>

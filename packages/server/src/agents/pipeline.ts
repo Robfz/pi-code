@@ -24,6 +24,7 @@ import {
   type Transcript,
   type UiResponseBody,
 } from "@pi-code/protocol";
+import { type CuratorHook, curatorUrlOf } from "../curator/registry.ts";
 import { ApiError, isApiError } from "../errors.ts";
 import { gitStatus } from "../git/git.ts";
 import type { AgentHost, HostCommand } from "./agent-host.ts";
@@ -43,7 +44,7 @@ export interface PipelineAgent {
   info(): AgentInfo;
 }
 
-/** A notification trigger (push notifications hook in here, S12). */
+/** A notification trigger (push notifications hook in here). */
 export type AttentionTrigger =
   | { kind: "finished" | "failed"; agentId: string; message: AssistantMessage }
   | { kind: "input"; agentId: string; request: DialogRequest }
@@ -60,6 +61,8 @@ export interface PipelineOptions {
   gitStatus?: (cwd: string) => Promise<GitStatus | null>;
   /** Delay between `turn_end` (or `bash` completion) and the git status refresh. Default 2 s. */
   gitDebounceMs?: number;
+  /** Curator proxy registry (`details.curatorUrl` → `curator` event). */
+  curator?: CuratorHook;
 }
 
 /** Synthetic `extension_ui_request` ids the server publishes to clear stale statuses/widgets. */
@@ -287,6 +290,7 @@ export class AgentPipeline {
 
   /** pi exited (`agent.status` is already `exited`): drop dialogs, publish the status. */
   onExit(): void {
+    this.opts.curator?.releaseAgent(this.agent.id);
     void this.enqueue(() => {
       for (const dialog of [...this.live.dialogs]) {
         clearTimeout(this.dialogTimers.get(dialog.request.id));
@@ -301,6 +305,7 @@ export class AgentPipeline {
   /** The agent was removed: stop timers and end event streams. */
   dispose(): void {
     this.disposed = true;
+    this.opts.curator?.releaseAgent(this.agent.id);
     for (const timer of this.dialogTimers.values()) clearTimeout(timer);
     this.dialogTimers.clear();
     clearTimeout(this.gitTimer);
@@ -334,6 +339,13 @@ export class AgentPipeline {
         // End of the run: every event of it is published, so nothing needs holding back.
         events.push(...(await this.syncEntries({ gated: false })));
         break;
+      case "tool_execution_update":
+        events.push(...this.curatorEvents(event.toolCallId, event.partialResult));
+        break;
+      case "tool_execution_end":
+        // The tool is done, so is its curator.
+        this.opts.curator?.release(this.agent.id, event.toolCallId);
+        break;
       case "turn_end":
         events.push(...(await this.fetchStats()));
         this.scheduleGitStatus();
@@ -365,13 +377,29 @@ export class AgentPipeline {
     }
   }
 
+  /** Registers a running tool's curator and returns the `curator` event (once per URL). */
+  private curatorEvents(toolCallId: string, partialResult: unknown): ServerEvent[] {
+    const curator = this.opts.curator;
+    const raw = curator && curatorUrlOf(partialResult);
+    if (!curator || raw === undefined) return [];
+    const url = curator.register(this.agent.id, toolCallId, raw);
+    if (url === undefined || this.live.curator[toolCallId] === url) return [];
+    return [{ type: "curator", toolCallId, url }];
+  }
+
+  /**
+   * End of a run: `finished` when the last assistant message stopped normally (`stop` /
+   * `length`), `failed` on an error (after retries); user aborts notify nothing.
+   */
   private onRunSettled(): void {
     const message = this.runAssistant;
     this.runAssistant = undefined;
     if (message === undefined) return;
     const reason = effectiveStopReason(message);
-    if (reason === "aborted") return;
-    const kind = reason === "error" ? "failed" : "finished";
+    let kind: "finished" | "failed";
+    if (reason === "stop" || reason === "length") kind = "finished";
+    else if (reason === "error") kind = "failed";
+    else return;
     if (this.agent.attention !== "input") this.setAttention(kind);
     this.opts.onTrigger?.({ kind, agentId: this.agent.id, message });
   }

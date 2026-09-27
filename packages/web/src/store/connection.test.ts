@@ -238,6 +238,22 @@ describe("ConversationConnection", () => {
     connection.stop();
   });
 
+  it("acks attention raised while the conversation is visible", async () => {
+    const { connection } = setup();
+    connection.start();
+    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    latest().open();
+    latest().emit({ type: "agent_status", agent: makeAgent({ attention: "none" }) }, 6);
+    expect(deps.ack).not.toHaveBeenCalled();
+    latest().emit({ type: "agent_status", agent: makeAgent({ attention: "finished" }) }, 7);
+    expect(deps.ack).toHaveBeenCalledWith("a1");
+
+    fakeDocument.visibilityState = "hidden";
+    latest().emit({ type: "agent_status", agent: makeAgent({ attention: "input" }) }, 8);
+    expect(deps.ack).toHaveBeenCalledTimes(1);
+    connection.stop();
+  });
+
   it("resyncs when pi becomes ready", async () => {
     snapshots = [
       makeSnapshot({ seq: 1, agent: makeAgent({ status: "starting" }) }),

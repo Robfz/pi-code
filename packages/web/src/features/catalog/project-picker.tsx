@@ -1,4 +1,4 @@
-import type { DirSuggestion } from "@pi-code/protocol";
+import type { AgentInfo, DirSuggestion } from "@pi-code/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
@@ -74,12 +74,17 @@ async function resolvePath(
 export function ProjectPicker({
   open,
   onOpenChange,
+  title = "New conversation",
+  onOpened,
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
+  title?: string;
+  /** Runs with the new agent before navigating to it. */
+  onOpened?: (agent: AgentInfo) => void;
 }) {
   const queryClient = useQueryClient();
-  const openAgent = useOpenAgent({ toastErrors: false });
+  const openAgent = useOpenAgent({ toastErrors: false, ...(onOpened ? { onOpened } : {}) });
   const [path, setPath] = useState("");
   const [resolveError, setResolveError] = useState<string | null>(null);
   const prefix = useDebouncedValue(
@@ -131,7 +136,7 @@ export function ProjectPicker({
         className="max-h-[90dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
       >
         <SheetHeader className="pr-12">
-          <SheetTitle>New conversation</SheetTitle>
+          <SheetTitle>{title}</SheetTitle>
           <SheetDescription>Pick a project folder under your home directory.</SheetDescription>
         </SheetHeader>
         <form

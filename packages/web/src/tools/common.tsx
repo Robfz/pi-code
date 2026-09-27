@@ -1,8 +1,10 @@
 /** Shared pieces for tool renderers: argument access, code blocks, notices, error output. */
 
 import type { ImageContent } from "@pi-code/protocol";
+import { ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Markdown } from "@/components/markdown";
+import { Button } from "@/components/ui/button";
 import { contentImages, imageSrc, toolResultText } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import { OutputBlock } from "./generic";
@@ -178,5 +180,18 @@ export function ExternalLink({ href, children }: { href: string; children: React
     >
       {children}
     </a>
+  );
+}
+
+/** "Review in curator": the proxied curator URL from the `curator` event, in a new tab. */
+export function CuratorButton({ url }: { url?: string | undefined }) {
+  if (!url) return null;
+  return (
+    <Button asChild size="sm" variant="outline" className="self-start">
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <ExternalLinkIcon />
+        Review in curator
+      </a>
+    </Button>
   );
 }

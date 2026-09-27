@@ -86,7 +86,9 @@ function RecentSessions() {
         </p>
       )}
       {sessions.data?.length === 0 && (
-        <p className="text-sm text-muted-foreground">No sessions yet.</p>
+        <p className="text-sm text-muted-foreground">
+          No sessions yet — they appear here once you've talked to pi.
+        </p>
       )}
       {sessions.data && sessions.data.length > 0 && (
         <SessionList sessions={sessions.data.slice(0, RECENT_SESSIONS)} label="Recent sessions" />
@@ -141,7 +143,10 @@ export function HomeScreen() {
           </div>
         )}
         {agents.data && agents.data.length === 0 && (
-          <p className="text-sm text-muted-foreground">No open conversations.</p>
+          <div className="flex flex-col gap-0.5 rounded-xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            <p>No open conversations.</p>
+            <p className="text-xs">Start a new one, or tap a session below to resume it.</p>
+          </div>
         )}
         {agents.data && agents.data.length > 0 && (
           <ul className={cn("flex flex-col gap-2")} aria-label="Open conversations">

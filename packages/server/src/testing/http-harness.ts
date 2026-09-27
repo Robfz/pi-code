@@ -10,6 +10,7 @@ import { type ServerType, serve } from "@hono/node-server";
 import {
   type AgentInfo,
   applyServerEventToCaches,
+  type PushPayload,
   reduceLive,
   type ServerEvent,
   type SessionCaches,
@@ -19,7 +20,11 @@ import type { AgentHostOptions } from "../agents/agent-host.ts";
 import { AgentManager, type AgentManagerDeps } from "../agents/agent-manager.ts";
 import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
+import { CuratorRegistry } from "../curator/registry.ts";
 import type { ErrorEnvelope } from "../errors.ts";
+import { type PushSendOptions, PushService } from "../push/push-service.ts";
+import { SubscriptionStore } from "../push/subscriptions.ts";
+import { loadVapidDetails } from "../push/vapid.ts";
 import { fakePiCommand } from "./stub-process.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
@@ -35,6 +40,20 @@ export interface HarnessOptions {
   ssePingMs?: number;
   /** Pipeline tuning (e.g. a stub git status, a short debounce). */
   pipeline?: AgentManagerDeps["pipeline"];
+  /**
+   * Web Push with a recording sender (keys and subscriptions in `<root>/data`). `failWith`
+   * makes sends to an endpoint reject with that HTTP status.
+   */
+  push?: boolean | { failWith?: (endpoint: string) => number | undefined };
+  /** Curator registry wired into the pipelines (`harness.curators`). */
+  curator?: boolean;
+}
+
+/** A push message the harness's fake sender received. */
+export interface SentPush {
+  endpoint: string;
+  payload: PushPayload;
+  options: PushSendOptions;
 }
 
 export interface Received {
@@ -196,6 +215,12 @@ export class Harness {
   readonly agentDir: string;
   readonly manager: AgentManager;
   readonly catalog: SessionCatalog;
+  /** pi-code's data dir (VAPID keys, push subscriptions). */
+  readonly dataDir: string;
+  push: PushService | undefined;
+  /** Push messages sent (successfully or not), in order. */
+  readonly pushes: SentPush[] = [];
+  readonly curators: CuratorRegistry | undefined;
   /** Fixture name or path used for agents opened from now on. */
   fixture: string;
   private server: ServerType | undefined;
@@ -209,7 +234,15 @@ export class Harness {
     mkdirSync(this.project, { recursive: true });
     this.agentDir = join(this.root, "agent");
     mkdirSync(join(this.agentDir, "sessions"), { recursive: true });
+    this.dataDir = join(this.root, "data");
     this.fixture = opts.fixture ?? "plain-answer";
+    this.curators = opts.curator
+      ? new CuratorRegistry({ hostname: HOSTNAME, proxyPort: 4181 })
+      : undefined;
+    const pipeline = {
+      ...opts.pipeline,
+      ...(this.curators !== undefined ? { curator: this.curators } : {}),
+    };
     const fakeOpts = {
       ...(opts.speed !== undefined ? { speed: opts.speed } : {}),
       ...(opts.delayGetEntriesMs !== undefined
@@ -223,7 +256,8 @@ export class Harness {
       ...(opts.hostOptions !== undefined ? { hostOptions: opts.hostOptions } : {}),
       // Project-trust pre-check against `<root>/agent/trust.json`; sessions in `<root>/agent`.
       agentDir: this.agentDir,
-      ...(opts.pipeline !== undefined ? { pipeline: opts.pipeline } : {}),
+      pipeline,
+      onTrigger: (trigger) => void this.push?.notify(trigger),
     });
     this.catalog = new SessionCatalog({
       agentDir: this.agentDir,
@@ -240,6 +274,28 @@ export class Harness {
       );
     });
     this.port = (this.server.address() as AddressInfo).port;
+    if (opts.push) {
+      const failWith = typeof opts.push === "object" ? opts.push.failWith : undefined;
+      this.push = new PushService({
+        vapid: await loadVapidDetails(this.dataDir, HOSTNAME),
+        store: new SubscriptionStore(this.dataDir),
+        agents: this.manager,
+        send: async (sub, payload, options) => {
+          this.pushes.push({
+            endpoint: sub.endpoint,
+            payload: JSON.parse(payload) as PushPayload,
+            options,
+          });
+          const status = failWith?.(sub.endpoint);
+          if (status !== undefined) {
+            throw Object.assign(new Error(`push service answered ${status}`), {
+              statusCode: status,
+            });
+          }
+          return { statusCode: 201 };
+        },
+      });
+    }
     app = createApp({
       hostname: HOSTNAME,
       port: this.port,
@@ -247,6 +303,7 @@ export class Harness {
       manager: this.manager,
       catalog: this.catalog,
       piVersion: async () => "test",
+      ...(this.push !== undefined ? { push: this.push } : {}),
       ...(opts.ssePingMs !== undefined ? { sse: { pingMs: opts.ssePingMs } } : {}),
     });
   }
@@ -333,6 +390,7 @@ export class Harness {
   async close(): Promise<void> {
     await Promise.all(this.clients.map((c) => c.close()));
     await this.manager.closeAll();
+    await this.push?.idle();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());

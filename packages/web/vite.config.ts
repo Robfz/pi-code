@@ -5,6 +5,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+/** Dark theme background (`--background` in `src/index.css`). */
+const THEME_COLOR = "#0a0a0a";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -14,13 +17,42 @@ export default defineConfig({
       srcDir: "src",
       filename: "sw.ts",
       injectRegister: false,
+      // The glob below already precaches the icons.
+      includeManifestIcons: false,
       manifest: {
+        id: "/",
         name: "pi-code",
         short_name: "pi-code",
-        display: "standalone",
+        description: "Drive the pi coding agent on your Mac from your phone.",
         start_url: "/",
-        theme_color: "#0a0a0a",
-        background_color: "#0a0a0a",
+        scope: "/",
+        display: "standalone",
+        orientation: "any",
+        theme_color: THEME_COLOR,
+        background_color: THEME_COLOR,
+        categories: ["developer", "productivity"],
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          {
+            src: "/icons/maskable-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/icons/maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          { src: "/favicon.svg", sizes: "any", type: "image/svg+xml" },
+        ],
+        share_target: {
+          action: "/share",
+          method: "GET",
+          params: { title: "title", text: "text", url: "url" },
+        },
       },
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],

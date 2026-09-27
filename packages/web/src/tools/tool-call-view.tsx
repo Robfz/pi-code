@@ -2,6 +2,7 @@ import { ChevronRightIcon, CircleAlertIcon, LoaderIcon, WrenchIcon } from "lucid
 import { memo, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useUiPrefs } from "@/store/ui-prefs";
+import { CuratorButton } from "./common";
 import "./index";
 import { getToolRenderer, type ToolRendererProps } from "./registry";
 
@@ -63,6 +64,12 @@ export const ToolCallView = memo(function ToolCallView(props: ToolCallViewProps)
       {expanded && (
         <div className="border-t px-2.5 py-2">
           <Body {...rendererProps} />
+        </div>
+      )}
+      {!expanded && props.curatorUrl && (
+        // The curator waits for a review: keep its button reachable when collapsed.
+        <div className="flex border-t px-2.5 py-2">
+          <CuratorButton url={props.curatorUrl} />
         </div>
       )}
     </div>

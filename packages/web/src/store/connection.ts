@@ -4,7 +4,8 @@
  * 1. `GET /snapshot` → `hydrate`.
  * 2. `EventSource(/events?since=<seq>)`; each message → `apply(event, id)`.
  * 3. `resync` → close, back to 1.
- * 4. `visibilitychange` → visible: back to 1 if the EventSource is closed; `POST /ack`.
+ * 4. `visibilitychange` → visible: back to 1 if the EventSource is closed; `POST /ack`
+ *    (also when an `agent_status` raises attention while the page is visible).
  * 5. `stop()` (unmount) → close.
  *
  * EventSource reconnects by itself (with `Last-Event-ID`) after transient errors; only when it
@@ -167,6 +168,14 @@ export class ConversationConnection {
     const wasReady = store.agent.status === "ready";
     store.apply(event, seq);
     this.store.getState().setConnection("live");
+    // Attention raised while the conversation is on screen: it has been seen already.
+    if (
+      event.type === "agent_status" &&
+      event.agent.attention !== "none" &&
+      this.deps.document.visibilityState === "visible"
+    ) {
+      this.deps.ack(this.agentId).catch(() => {});
+    }
     // pi just became ready: the snapshot now has state, stats and the startup transcript.
     if (event.type === "agent_status" && event.agent.status === "ready" && !wasReady) {
       void this.sync();

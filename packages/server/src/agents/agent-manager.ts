@@ -57,10 +57,10 @@ export interface AgentManagerDeps {
    */
   agentDir?: string;
   /** Pipeline tuning (git status, debounce). */
-  pipeline?: Pick<PipelineOptions, "gitStatus" | "gitDebounceMs">;
+  pipeline?: Pick<PipelineOptions, "gitStatus" | "gitDebounceMs" | "curator">;
   /** Observes every agent record; replaceable later with `setRecordHandler`. */
   onRecord?: AgentRecordHandler;
-  /** Notification triggers (finished / failed / input), for push (S12). */
+  /** Notification triggers (finished / failed / input), for push. */
   onTrigger?: (trigger: AttentionTrigger) => void;
   hostOptions?: AgentHostOptions;
   /** Events kept per agent for SSE replay. Default 10,000. */

@@ -233,6 +233,12 @@ describe("restart", () => {
       .filter((r) => r.event.type === "agent_status")
       .map((r) => (r.event as Extract<ServerEvent, { type: "agent_status" }>).agent.status);
     expect(statuses.slice(-3)).toEqual(["exited", "starting", "ready"]);
+    // The `exited` status event carries the exit code and stderr tail.
+    const exitedEvent = client.events.find(
+      (r) => r.event.type === "agent_status" && r.event.agent.status === "exited",
+    )?.event as Extract<ServerEvent, { type: "agent_status" }>;
+    expect(exitedEvent.agent.exitCode).toBe(3);
+    expect(exitedEvent.agent.stderrTail).toContain("fatal: crashed");
     await prompt(h, a.id, "again");
     expect((await h.snapshot(a.id)).transcript.entries).toHaveLength(4);
   });
