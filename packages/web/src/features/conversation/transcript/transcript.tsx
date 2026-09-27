@@ -2,12 +2,13 @@ import type { SessionEntry } from "@pi-code/protocol";
 import { TagIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { formatTokens } from "@/lib/time";
 import { useConversation } from "@/store/context";
 import { selectActiveBranch, selectLabels } from "@/store/selectors";
 import { AssistantMessageView } from "./assistant-message";
 import { BashExecutionView } from "./bash-execution";
 import { CustomMessageView } from "./custom-message";
-import { formatTokens, Marker, SummaryDivider } from "./dividers";
+import { Marker, SummaryDivider } from "./dividers";
 import { UserMessageView } from "./user-message";
 
 /**
@@ -100,7 +101,10 @@ const EntryView = memo(function EntryView({
   const content = renderEntry(entry);
   if (content === null) return null;
   return (
-    <div data-entry-id={entry.id} className="flex min-w-0 flex-col gap-1">
+    <div
+      data-entry-id={entry.id}
+      className="flex min-w-0 flex-col gap-1 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
+    >
       {label !== undefined && (
         <Badge variant="outline" className="self-end" data-testid="entry-label">
           <TagIcon /> {label}

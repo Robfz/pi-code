@@ -117,6 +117,7 @@ export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = 
         const agent = manager.require(c.req.param("id"));
         const outcome = await runCommand(agent, c.req.valid("json"), {
           ownerOf: (file, except) => manager.ownerOf(file, except),
+          resolveSessionFile: (file) => manager.resolveSessionFile(file),
         });
         return outcome.status === 202
           ? c.json({ data: outcome.data }, 202)

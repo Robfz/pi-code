@@ -14,6 +14,7 @@ class NoopEventSource {
   onmessage = null;
   onerror = null;
   constructor(readonly url: string) {}
+  addEventListener() {}
   close() {}
 }
 

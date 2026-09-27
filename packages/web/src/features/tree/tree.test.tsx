@@ -1,5 +1,5 @@
-import { initialLiveState, type SessionEntry, type SessionTreeNode } from "@pi-code/protocol";
-import { screen, waitFor, within } from "@testing-library/react";
+import { initialLiveState, type SessionEntry } from "@pi-code/protocol";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,16 +44,17 @@ const toolResult = (id: string, parent: string) =>
     message: { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "ok" }] },
   });
 
-function node(e: SessionEntry, children: SessionTreeNode[] = [], label?: string): SessionTreeNode {
-  return { entry: e, children, ...(label ? { label } : {}) };
-}
+const label = (id: string, targetId: string, text: string | undefined) =>
+  entry(id, null, { type: "label", targetId, label: text });
 
 /**
  * u1 → a1 ─┬→ u2 [label "checkpoint"] → a2 (tool only) → tr → a3 (leaf)
  *          └→ u3 → a4
  *                   └→ compaction
+ *
+ * Entries in session order, like the store's transcript (all branches).
  */
-function sampleTree(): { tree: SessionTreeNode[]; leafId: string } {
+function sampleTree(): { entries: SessionEntry[]; leafId: string } {
   const u1 = user("u1", null, "Build the thing");
   const a1 = assistant("a1", "u1", [{ type: "text", text: "Sure, plan below" }]);
   const u2 = user("u2", "a1", "Go with plan A");
@@ -69,17 +70,37 @@ function sampleTree(): { tree: SessionTreeNode[]; leafId: string } {
     tokensBefore: 12345,
   });
   return {
-    tree: [
-      node(u1, [
-        node(a1, [
-          node(u2, [node(a2, [node(tr, [node(a3)])])], "checkpoint"),
-          node(u3, [node(a4, [node(compaction)])]),
-        ]),
-      ]),
+    entries: [
+      u1,
+      a1,
+      u2,
+      a2,
+      tr,
+      a3,
+      u3,
+      a4,
+      compaction,
+      label("l1", "u2", "old name"),
+      label("l2", "u2", "checkpoint"),
     ],
     leafId: "a3",
   };
 }
+
+function sampleStore(running = false) {
+  const { entries, leafId } = sampleTree();
+  return hydratedStore({
+    transcript: { entries, leafId },
+    ...(running ? { live: { ...initialLiveState(), run: { active: true } } } : {}),
+  });
+}
+
+const labelsOf = (entries: SessionEntry[]) =>
+  new Map(
+    entries.flatMap((e) =>
+      e.type === "label" && e.label ? [[e.targetId, e.label] as [string, string]] : [],
+    ),
+  );
 
 const rpcBodies = (calls: FetchCall[]) =>
   calls.filter((c) => c.url === "/api/agents/a1/rpc").map((c) => c.body);
@@ -88,7 +109,6 @@ function handler(navigateResult: { cancelled: boolean } = { cancelled: false }) 
   return (call: FetchCall): [number, unknown] | undefined => {
     if (call.url === "/api/agents/a1/rpc") {
       const type = (call.body as { type: string }).type;
-      if (type === "get_tree") return [200, { data: sampleTree() }];
       if (type === "fork") return [200, { data: { text: "Try plan B instead", cancelled: false } }];
     }
     if (call.url === "/api/agents/a1/tree/navigate") return [200, navigateResult];
@@ -97,13 +117,11 @@ function handler(navigateResult: { cancelled: boolean } = { cancelled: false }) 
 }
 
 async function renderTree(running = false) {
-  const store = hydratedStore(
-    running ? { live: { ...initialLiveState(), run: { active: true } } } : {},
-  );
+  const store = sampleStore(running);
   const result = await renderWithStore(<TreeScreen />, store);
   await result.router.navigate({ to: "/agents/$agentId/tree", params: { agentId: "a1" } });
   await screen.findAllByTestId("tree-row");
-  return result;
+  return { ...result, store };
 }
 
 const rows = () => screen.getAllByTestId("tree-row");
@@ -121,8 +139,8 @@ afterEach(() => {
 
 describe("tree model", () => {
   it("hides tool traffic, keeps markers, indents only at branch points", () => {
-    const { tree, leafId } = sampleTree();
-    const model = buildTreeModel(tree, leafId);
+    const { entries, leafId } = sampleTree();
+    const model = buildTreeModel(entries, leafId, labelsOf(entries));
     const flat = flattenTree(model, new Set());
     expect(flat.map((r) => [r.item.id, r.depth])).toEqual([
       ["u1", 0],
@@ -136,30 +154,24 @@ describe("tree model", () => {
     expect(model.currentId).toBe("a3");
     expect([...model.activePath].sort()).toEqual(["a1", "a3", "u1", "u2"]);
     expect(model.items.get("u2")?.label).toBe("checkpoint");
-    expect(model.items.get("c1")?.text).toBe("Context compacted (12,345 tokens)");
+    expect(model.items.get("c1")?.text).toBe("Context compacted (12k tokens)");
     // Collapsing a branch point hides its subtree.
     expect(flattenTree(model, new Set(["a1"])).map((r) => r.item.id)).toEqual(["u1", "a1"]);
   });
 
   it("maps a hidden leaf to its nearest shown ancestor", () => {
-    const { tree } = sampleTree();
-    expect(buildTreeModel(tree, "tr").currentId).toBe("u2");
+    const { entries } = sampleTree();
+    expect(buildTreeModel(entries, "tr").currentId).toBe("u2");
   });
 
   it("caps indentation depth", async () => {
     // A chain of nested branch points deeper than MAX_INDENT.
-    let child: SessionTreeNode | undefined;
-    for (let i = MAX_INDENT + 3; i >= 0; i--) {
-      const u = user(`n${i}`, i === 0 ? null : `n${i - 1}`, `msg ${i}`);
-      const sibling = node(user(`s${i}`, `n${i}`, `side ${i}`));
-      child = node(u, child ? [child, sibling] : []);
+    const entries: SessionEntry[] = [];
+    for (let i = 0; i <= MAX_INDENT + 3; i++) {
+      entries.push(user(`n${i}`, i === 0 ? null : `n${i - 1}`, `msg ${i}`));
+      if (i > 0) entries.push(user(`s${i}`, `n${i - 1}`, `side ${i}`));
     }
-    stubFetch((call) =>
-      call.url === "/api/agents/a1/rpc"
-        ? [200, { data: { tree: [child], leafId: "n0" } }]
-        : undefined,
-    );
-    await renderWithStore(<TreeScreen />, hydratedStore());
+    await renderWithStore(<TreeScreen />, hydratedStore({ transcript: { entries, leafId: "n0" } }));
     await screen.findAllByTestId("tree-row");
     const deepest = rows().find((r) => r.dataset.entryId === `n${MAX_INDENT + 3}`);
     expect(Number(deepest?.dataset.depth)).toBeGreaterThan(MAX_INDENT);
@@ -184,7 +196,29 @@ describe("TreeScreen", () => {
     expect(row("u2")).toHaveTextContent("checkpoint");
     expect(row("a3")).toHaveAttribute("data-current", "true");
     expect(within(row("a3")).getByText("current")).toBeInTheDocument();
-    expect(row("c1")).toHaveTextContent("Context compacted (12,345 tokens)");
+    expect(row("c1")).toHaveTextContent("Context compacted (12k tokens)");
+  });
+
+  it("follows the store: new entries, labels and leaf moves update the tree without fetching", async () => {
+    const { calls } = stubFetch(handler());
+    const { store } = await renderTree();
+    act(() => {
+      store.setState((s) => ({
+        transcript: {
+          entries: [
+            ...s.transcript.entries,
+            user("u4", "a3", "One more thing"),
+            label("l3", "u2", undefined),
+            label("l4", "u4", "latest"),
+          ],
+          leafId: "u4",
+        },
+      }));
+    });
+    expect(row("u4")).toHaveAttribute("data-current", "true");
+    expect(row("u4")).toHaveTextContent("latest");
+    expect(row("u2")).not.toHaveTextContent("checkpoint");
+    expect(calls.filter((c) => c.url === "/api/agents/a1/rpc")).toEqual([]);
   });
 
   it("collapses and expands a branch point", async () => {

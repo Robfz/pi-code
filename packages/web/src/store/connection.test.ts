@@ -2,7 +2,12 @@ import type { ServerEvent, Snapshot } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "@/lib/api";
 import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtures";
-import { type ConnectionDeps, ConversationConnection, type EventSourceLike } from "./connection";
+import {
+  type ConnectionDeps,
+  ConversationConnection,
+  type EventSourceLike,
+  STALE_AFTER_MS,
+} from "./connection";
 import { createConversationStore } from "./conversation-store";
 
 class FakeEventSource implements EventSourceLike {
@@ -12,6 +17,16 @@ class FakeEventSource implements EventSourceLike {
   onmessage: EventSourceLike["onmessage"] = null;
   onerror: EventSourceLike["onerror"] = null;
   closed = false;
+  private pingListeners: (() => void)[] = [];
+
+  addEventListener(_type: "ping", listener: () => void) {
+    this.pingListeners.push(listener);
+  }
+
+  /** The server's `event: ping` keep-alive. */
+  ping() {
+    for (const listener of this.pingListeners) listener();
+  }
 
   constructor(readonly url: string) {
     FakeEventSource.instances.push(this);
@@ -93,6 +108,7 @@ beforeEach(() => {
     retryDelays: [1_000, 5_000],
     document: fakeDocument as unknown as Document,
     window: fakeWindow as unknown as ConnectionDeps["window"],
+    now: () => Date.now(),
   };
 });
 
@@ -235,6 +251,41 @@ describe("ConversationConnection", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(deps.ack).toHaveBeenCalledTimes(2);
+    connection.stop();
+  });
+
+  it("on visible: resyncs a stream that went silent (no message or ping for 35 s)", async () => {
+    vi.useFakeTimers();
+    const { connection } = setup();
+    connection.start();
+    await vi.advanceTimersByTimeAsync(0);
+    latest().open();
+
+    // Pings keep a quiet stream alive.
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(15_000);
+      latest().ping();
+    }
+    fakeDocument.setVisibility("hidden");
+    fakeDocument.setVisibility("visible");
+    expect(deps.fetchSnapshot).toHaveBeenCalledTimes(1);
+
+    // So do messages.
+    await vi.advanceTimersByTimeAsync(30_000);
+    latest().emit({ type: "pi", event: { type: "agent_start" } }, 6);
+    await vi.advanceTimersByTimeAsync(30_000);
+    fakeDocument.setVisibility("visible");
+    expect(deps.fetchSnapshot).toHaveBeenCalledTimes(1);
+
+    // The tab was suspended: the stream looks open but nothing arrived for too long.
+    fakeDocument.setVisibility("hidden");
+    await vi.advanceTimersByTimeAsync(STALE_AFTER_MS + 1);
+    const stale = latest();
+    fakeDocument.setVisibility("visible");
+    expect(deps.fetchSnapshot).toHaveBeenCalledTimes(2);
+    expect(stale.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeEventSource.instances).toHaveLength(2);
     connection.stop();
   });
 

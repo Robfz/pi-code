@@ -33,10 +33,7 @@ export function strList(value: unknown, key: string): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
-export function truncate(text: string, max = 80): string {
-  const line = text.split("\n")[0] ?? "";
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
+export { truncate } from "@/lib/content";
 
 /** Tool arguments' file path (`path`, or `file_path` as some models send). */
 export function argPath(args: unknown): string | undefined {
@@ -169,8 +166,17 @@ export function isActive(status: ToolRendererProps["status"]): boolean {
   return status === "running" || status === "streaming";
 }
 
-/** External link that opens in a new tab. */
+/** An `http(s)://` URL: the only kind tool / extension data may turn into a link. */
+export function isWebUrl(url: string | undefined): url is string {
+  return url !== undefined && /^https?:\/\//i.test(url);
+}
+
+/**
+ * External link that opens in a new tab. `href` comes from tool or extension data, so anything
+ * but an `http(s)://` URL (`javascript:`, `data:`, relative paths, …) stays plain text.
+ */
 export function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  if (!isWebUrl(href)) return <span className="break-all">{children}</span>;
   return (
     <a
       href={href}
@@ -183,9 +189,15 @@ export function ExternalLink({ href, children }: { href: string; children: React
   );
 }
 
-/** "Review in curator": the proxied curator URL from the `curator` event, in a new tab. */
+/**
+ * "Review in curator": the proxied curator URL from the `curator` event, in a new tab (plain
+ * text unless it is an `http(s)://` URL).
+ */
 export function CuratorButton({ url }: { url?: string | undefined }) {
   if (!url) return null;
+  if (!isWebUrl(url)) {
+    return <p className="text-xs break-all text-muted-foreground">Curator: {url}</p>;
+  }
   return (
     <Button asChild size="sm" variant="outline" className="self-start">
       <a href={url} target="_blank" rel="noopener noreferrer">

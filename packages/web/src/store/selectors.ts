@@ -59,9 +59,12 @@ export const selectToolResults = (s: ConversationState): Map<string, ToolResultM
 export const selectLabels = (s: ConversationState): Map<string, string> =>
   labelsOf(s.transcript.entries);
 
-/** A run is in progress (prompts need a `streamingBehavior`). */
-export const selectIsRunning = (s: ConversationState): boolean =>
-  s.live.run.active || s.state?.isStreaming === true;
+/**
+ * A run is in progress (prompts need a `streamingBehavior`). `live.run.active` follows the same
+ * `agent_start` / `agent_settled` events as the cached `state.isStreaming`, and is also cleared
+ * when pi exits, which the cached state isn't.
+ */
+export const selectIsRunning = (s: ConversationState): boolean => s.live.run.active;
 
 export const selectStreaming = (s: ConversationState) => s.live.streaming;
 export const selectPendingUser = (s: ConversationState) => s.live.pendingUser;
@@ -72,10 +75,8 @@ export const selectStatuses = (s: ConversationState) => s.live.statuses;
 export const selectWidgets = (s: ConversationState) => s.live.widgets;
 export const selectNotices = (s: ConversationState) => s.live.notices;
 export const selectEditorText = (s: ConversationState) => s.live.editorText;
-export const selectTitle = (s: ConversationState) => s.live.title;
 export const selectRun = (s: ConversationState) => s.live.run;
 export const selectBash = (s: ConversationState) => s.live.bash;
-export const selectCurator = (s: ConversationState) => s.live.curator;
 export const selectAgent = (s: ConversationState) => s.agent;
 export const selectConnection = (s: ConversationState) => s.connection;
 

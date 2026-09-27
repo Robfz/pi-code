@@ -9,6 +9,8 @@ import { createAppRouter } from "@/router";
 
 type AppRouter = ReturnType<typeof createAppRouter>;
 
+const BOTTOM_TOAST_OFFSET = "calc(9rem + env(safe-area-inset-bottom))";
+
 /** Providers (theme, query, router, toasts). Tests pass their own router / query client. */
 export function App({ router, queryClient }: { router?: AppRouter; queryClient?: QueryClient }) {
   const [client] = useState(() => queryClient ?? createQueryClient());
@@ -18,7 +20,13 @@ export function App({ router, queryClient }: { router?: AppRouter; queryClient?:
       <QueryClientProvider client={client}>
         <TooltipProvider>
           <RouterProvider router={appRouter} />
-          <Toaster position="top-center" closeButton />
+          <Toaster
+            position="top-center"
+            closeButton
+            // Bottom toasts (the update prompt) clear the composer and status bar.
+            offset={{ bottom: BOTTOM_TOAST_OFFSET }}
+            mobileOffset={{ bottom: BOTTOM_TOAST_OFFSET }}
+          />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

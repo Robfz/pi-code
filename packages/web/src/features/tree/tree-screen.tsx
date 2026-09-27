@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   BotIcon,
@@ -9,7 +8,6 @@ import {
   GitMergeIcon,
   LoaderIcon,
   MapPinIcon,
-  RefreshCwIcon,
   ShrinkIcon,
   UserIcon,
 } from "lucide-react";
@@ -27,11 +25,10 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useSessionActions } from "@/features/conversation/session-actions";
-import { errorMessage, navigateTree, rpc } from "@/lib/api";
-import { queryKeys } from "@/lib/query-client";
+import { errorMessage, navigateTree } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
-import { selectIsRunning } from "@/store/selectors";
+import { selectIsRunning, selectLabels } from "@/store/selectors";
 import { buildTreeModel, flattenTree, type TreeItem, type TreeRow } from "./tree-model";
 
 /** Indentation stops growing past this depth so rows stay readable on phones. */
@@ -237,27 +234,27 @@ function Row({
   );
 }
 
-/** `/agents/$agentId/tree`: the session tree with Go here / Fork from here. */
+/**
+ * `/agents/$agentId/tree`: the session tree with Go here / Fork from here. Built from the live
+ * store's transcript (every branch) and labels, so it follows SSE updates without refetching.
+ */
 export function TreeScreen() {
   const agentId = useConversation((s) => s.agentId);
+  const hydrated = useConversation((s) => s.hydrated);
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
   const running = useConversation(selectIsRunning);
-  const version = useConversation((s) => `${s.transcript.entries.length}:${s.transcript.leafId}`);
+  const entries = useConversation((s) => s.transcript.entries);
+  const leafId = useConversation((s) => s.transcript.leafId);
+  const labels = useConversation(selectLabels);
   const actions = useSessionActions();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [navigateTarget, setNavigateTarget] = useState<TreeItem | null>(null);
   const [forking, setForking] = useState(false);
 
-  const tree = useQuery({
-    queryKey: queryKeys.tree(agentId, version),
-    queryFn: () => rpc(agentId, { type: "get_tree" }),
-    enabled: ready,
-    placeholderData: (previous) => previous,
-  });
   const model = useMemo(
-    () => (tree.data ? buildTreeModel(tree.data.tree, tree.data.leafId) : null),
-    [tree.data],
+    () => (hydrated ? buildTreeModel(entries, leafId, labels) : null),
+    [hydrated, entries, leafId, labels],
   );
   const rows = useMemo(() => (model ? flattenTree(model, collapsed) : []), [model, collapsed]);
   const disabled = running || !ready || forking;
@@ -271,15 +268,6 @@ export function TreeScreen() {
           </Link>
         </Button>
         <h1 className="flex-1 text-sm font-medium">Session tree</h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh"
-          disabled={!ready || tree.isFetching}
-          onClick={() => void tree.refetch()}
-        >
-          <RefreshCwIcon className={cn(tree.isFetching && "animate-spin")} />
-        </Button>
       </header>
       {running && (
         <p
@@ -290,18 +278,10 @@ export function TreeScreen() {
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 py-3">
-        {(!ready || tree.isPending) && !tree.isError && (
+        {!hydrated && (
           <p className="flex items-center gap-2 px-2 text-sm text-muted-foreground">
             <LoaderIcon className="size-4 animate-spin" /> Loading…
           </p>
-        )}
-        {tree.isError && (
-          <div role="alert" className="flex items-center gap-2 px-2 text-sm text-destructive">
-            {errorMessage(tree.error)}
-            <Button variant="outline" size="sm" onClick={() => void tree.refetch()}>
-              Retry
-            </Button>
-          </div>
         )}
         {model && rows.length === 0 && (
           <p className="px-2 text-sm text-muted-foreground">No messages yet.</p>

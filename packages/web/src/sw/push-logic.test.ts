@@ -88,12 +88,13 @@ describe("hasFocusedClient", () => {
 });
 
 describe("notificationFor", () => {
-  it("tags by agent and carries the URL", () => {
+  it("tags by agent (re-alerting on replacement) and carries the URL", () => {
     expect(notificationFor(payload)).toEqual({
       title: "alpha",
       options: {
         body: "All tests pass.",
         tag: "a1",
+        renotify: true,
         data: { url: "/agents/a1" },
         icon: NOTIFICATION_ICON,
         badge: NOTIFICATION_BADGE,

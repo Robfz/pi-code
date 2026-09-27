@@ -304,6 +304,46 @@ describe("built-in commands", () => {
     expect(await screen.findByTestId("thinking-sheet")).toBeInTheDocument();
   });
 
+  it("a compaction pi rejects isn't toasted (compaction_end shows it inline)", async () => {
+    const fetchStub = stubFetch((call) =>
+      (call.body as { type?: string } | undefined)?.type === "compact"
+        ? [502, { error: { code: "pi_error", message: "Nothing to compact" } }]
+        : handler(call),
+    );
+    const store = hydratedStore({ agent: makeAgent(), state: state() });
+    await renderWithStore(
+      <>
+        <LiveSection />
+        <Composer />
+      </>,
+      store,
+    );
+    const user = userEvent.setup();
+    await run(user, "/compact");
+    await waitFor(() => expect(rpcBodies(fetchStub.calls)).toContainEqual({ type: "compact" }));
+    act(() => {
+      store
+        .getState()
+        .apply({ type: "pi", event: { type: "compaction_start", reason: "manual" } }, 1);
+      store.getState().apply(
+        {
+          type: "pi",
+          event: {
+            type: "compaction_end",
+            reason: "manual",
+            result: undefined,
+            aborted: false,
+            willRetry: false,
+            errorMessage: "Compaction failed: Nothing to compact",
+          },
+        },
+        2,
+      );
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing to compact");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it("/compact [instructions] → compact", async () => {
     const { user, calls } = await setup();
     await run(user, "/compact focus on tests");
@@ -404,7 +444,6 @@ describe("bash prefixes", () => {
         { type: "bash", command: "git status", excludeFromContext: true },
       ]),
     );
-    await waitFor(() => expect(useConversationUi.getState().excludedBash["bash-1"]).toBe(true));
     const result: BashResult = {
       output: "clean\n",
       exitCode: 0,
@@ -412,8 +451,14 @@ describe("bash prefixes", () => {
       truncated: false,
     };
     const events: ServerEvent[] = [
-      { type: "bash_output", id: "bash-1", delta: "clean\n", command: "git status" },
-      { type: "bash_done", id: "bash-1", result, command: "git status" },
+      {
+        type: "bash_output",
+        id: "bash-1",
+        delta: "clean\n",
+        command: "git status",
+        excludeFromContext: true,
+      },
+      { type: "bash_done", id: "bash-1", result, command: "git status", excludeFromContext: true },
     ];
     act(() => {
       events.forEach((event, i) => {
@@ -445,6 +490,14 @@ describe("bash prefixes", () => {
 describe("image attach", () => {
   const png = () =>
     new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" });
+
+  // jsdom can't decode images: report a small bitmap.
+  beforeEach(() => {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 640, height: 480, close() {} })),
+    );
+  });
 
   it("is hidden when the model doesn't accept images", async () => {
     await setup(["text"]);
@@ -489,11 +542,25 @@ describe("image attach", () => {
     expect(screen.queryByRole("button", { name: "Attach image" })).toBeNull();
   });
 
+  it("toasts images that can't be read, and keeps the others", async () => {
+    const { user } = await setup(["text", "image"]);
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error("undecodable"));
+    await user.upload(screen.getByTestId("image-input") as HTMLInputElement, [png(), png()]);
+    const thumbs = await screen.findByRole("list", { name: "Attached images" });
+    expect(within(thumbs).getAllByRole("img")).toHaveLength(1);
+    expect(toast.error).toHaveBeenCalledWith("Couldn't read shot.png");
+  });
+
   it("ignores non-image files", async () => {
     await setup(["text", "image"]);
     const input = screen.getByTestId("image-input") as HTMLInputElement;
     fireEvent.change(input, {
-      target: { files: [new File(["x"], "notes.txt", { type: "text/plain" })] },
+      target: {
+        files: [
+          new File(["x"], "notes.txt", { type: "text/plain" }),
+          new File(["x"], "mystery", { type: "" }),
+        ],
+      },
     });
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();

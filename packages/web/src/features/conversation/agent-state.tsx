@@ -12,12 +12,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { closeAgent, errorMessage, restartAgent, trustAgent } from "@/lib/api";
-import { useConversation, useConversationStore } from "@/store/context";
+import { useConversation } from "@/store/context";
 import { selectAgent } from "@/store/selectors";
 
 /** Project-trust prompt for an `awaiting_trust` agent → `POST /trust`. */
 export function TrustSheet() {
-  const store = useConversationStore();
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
   const [busy, setBusy] = useState(false);
@@ -27,7 +26,8 @@ export function TrustSheet() {
   async function answer(trusted: boolean) {
     setBusy(true);
     try {
-      store.getState().setAgent(await trustAgent(agent.id, trusted));
+      // The `agent_status` event that follows carries the new status.
+      await trustAgent(agent.id, trusted);
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -77,7 +77,6 @@ export function TrustSheet() {
 
 /** Loading, starting and exited states shown in place of (or before) the transcript. */
 export function AgentStatePanel() {
-  const store = useConversationStore();
   const navigate = useNavigate();
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
@@ -116,7 +115,7 @@ export function AgentStatePanel() {
   async function restart() {
     setBusy(true);
     try {
-      store.getState().setAgent(await restartAgent(agent.id));
+      await restartAgent(agent.id);
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {

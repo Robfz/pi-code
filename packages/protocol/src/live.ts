@@ -63,9 +63,6 @@ export type DialogMethod = (typeof DIALOG_METHODS)[number];
 /** Extension UI request that waits for an answer. */
 export type DialogRequest = Extract<RpcExtensionUIRequest, { method: DialogMethod }>;
 
-/** Extension UI request pi sends without waiting for an answer. */
-export type FireAndForgetRequest = Exclude<RpcExtensionUIRequest, { method: DialogMethod }>;
-
 export interface PendingDialog {
   request: DialogRequest;
   receivedAt: number;
@@ -89,6 +86,8 @@ export interface BashRun {
   command: string;
   output: string;
   done?: BashResult;
+  /** A `!!` command: its output stays out of the model's context. */
+  excludeFromContext?: boolean;
 }
 
 export interface LiveState {
@@ -182,6 +181,8 @@ export function reduceLive(state: LiveState, event: ServerEvent): LiveState {
         command: event.command ?? prev?.command ?? "",
         output: (prev?.output ?? "") + event.delta,
       };
+      const exclude = event.excludeFromContext ?? prev?.excludeFromContext;
+      if (exclude !== undefined) run.excludeFromContext = exclude;
       return { ...state, bash: { ...state.bash, [event.id]: run } };
     }
     case "bash_done": {
@@ -191,8 +192,12 @@ export function reduceLive(state: LiveState, event: ServerEvent): LiveState {
         output: prev?.output ?? "",
         done: event.result,
       };
+      const exclude = event.excludeFromContext ?? prev?.excludeFromContext;
+      if (exclude !== undefined) run.excludeFromContext = exclude;
       return { ...state, bash: { ...state.bash, [event.id]: run } };
     }
+    case "live_reset":
+      return resetLive(state);
     case "agent_status":
       // pi is gone: nothing in flight will finish. Dialogs stay until `ui_resolved`.
       return event.agent.status === "exited" ? settle(state) : state;
@@ -400,6 +405,36 @@ function settle(state: LiveState): LiveState {
   const run: LiveRun = { active: false };
   if (state.run.lastError !== undefined) run.lastError = state.run.lastError;
   return { ...rest, run };
+}
+
+/**
+ * The pi process is gone or replaced: drop everything it had in flight. Extension UI (statuses,
+ * widgets, title, notices, editor text) and the last run error stay.
+ */
+function resetLive(state: LiveState): LiveState {
+  const settled = settle(state);
+  const empty = (record: Record<string, unknown>) => Object.keys(record).length === 0;
+  if (
+    settled === state &&
+    state.pendingUser === undefined &&
+    empty(state.tools) &&
+    empty(state.curator) &&
+    empty(state.bash) &&
+    state.dialogs.length === 0 &&
+    state.queue.steering.length === 0 &&
+    state.queue.followUp.length === 0
+  ) {
+    return state;
+  }
+  const { pendingUser: _, ...rest } = settled;
+  return {
+    ...rest,
+    tools: {},
+    curator: {},
+    queue: { steering: [], followUp: [] },
+    dialogs: [],
+    bash: {},
+  };
 }
 
 // ---------------------------------------------------------------------------

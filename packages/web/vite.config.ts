@@ -8,6 +8,10 @@ import { VitePWA } from "vite-plugin-pwa";
 /** Dark theme background (`--background` in `src/index.css`). */
 const THEME_COLOR = "#0a0a0a";
 
+/** Lazy Shiki chunks (grammars, themes, engine) go to their own folder, outside the precache. */
+const SHIKI_DIR = "shiki";
+const SHIKI_MODULE = /[\\/]node_modules[\\/](?:shiki|@shikijs|@streamdown[\\/]code)[\\/]/;
+
 export default defineConfig({
   plugins: [
     react(),
@@ -56,9 +60,21 @@ export default defineConfig({
       },
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
+        // Shiki's grammars and themes (hundreds of lazy chunks) load on demand, not at install.
+        globIgnores: [`**/${SHIKI_DIR}/**`],
       },
     }),
   ],
+  build: {
+    rolldownOptions: {
+      output: {
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.some((id) => SHIKI_MODULE.test(id))
+            ? `assets/${SHIKI_DIR}/[name]-[hash].js`
+            : "assets/[name]-[hash].js",
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

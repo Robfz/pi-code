@@ -237,7 +237,9 @@ group("SSE", () => {
     const agent = await h.open();
     const log = h.manager.require(agent.id).pipeline.log;
     const client = h.sse(agent.id);
-    await client.until(() => (client.comments.includes("ping") ? true : undefined));
+    await client.until(() => client.named.find((e) => e.name === "ping"));
+    // A named event without an `id:`: it doesn't move `Last-Event-ID` or the seq.
+    expect(client.named[0]).toEqual({ name: "ping", data: "{}" });
     expect(client.retry).toBe(2000);
     expect(client.events).toEqual([]);
     expect(log.subscriberCount).toBe(1);

@@ -4,8 +4,10 @@
  * 1. `GET /snapshot` → `hydrate`.
  * 2. `EventSource(/events?since=<seq>)`; each message → `apply(event, id)`.
  * 3. `resync` → close, back to 1.
- * 4. `visibilitychange` → visible: back to 1 if the EventSource is closed; `POST /ack`
- *    (also when an `agent_status` raises attention while the page is visible).
+ * 4. `visibilitychange` → visible: back to 1 if the EventSource is closed or silent for longer
+ *    than `STALE_AFTER_MS` (the server sends a `ping` event every 15 s, so a quiet stream after a
+ *    suspended tab is a dead one the browser hasn't noticed); `POST /ack` (also when an
+ *    `agent_status` raises attention while the page is visible).
  * 5. `stop()` (unmount) → close.
  *
  * EventSource reconnects by itself (with `Last-Event-ID`) after transient errors; only when it
@@ -22,10 +24,15 @@ export interface EventSourceLike {
   onopen: ((this: never, ev: Event) => unknown) | null;
   onmessage: ((this: never, ev: MessageEvent<string>) => unknown) | null;
   onerror: ((this: never, ev: Event) => unknown) | null;
+  /** Named events; the connection listens for the server's `ping` keep-alive. */
+  addEventListener(type: "ping", listener: () => void): void;
   close(): void;
 }
 
 export const EVENT_SOURCE_CLOSED = 2;
+
+/** A stream silent for this long (≥ 2 missed pings) is treated as dead when the page shows. */
+export const STALE_AFTER_MS = 35_000;
 
 export interface ConnectionDeps {
   fetchSnapshot(agentId: string): Promise<Snapshot>;
@@ -38,6 +45,7 @@ export interface ConnectionDeps {
   window: Pick<Window, "addEventListener" | "removeEventListener"> & {
     navigator: { onLine: boolean };
   };
+  now(): number;
 }
 
 export function defaultConnectionDeps(): ConnectionDeps {
@@ -49,6 +57,7 @@ export function defaultConnectionDeps(): ConnectionDeps {
     retryDelays: [1_000, 2_000, 5_000, 10_000],
     document,
     window,
+    now: Date.now,
   };
 }
 
@@ -65,6 +74,8 @@ export class ConversationConnection {
   private running = false;
   private failures = 0;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the current stream last showed signs of life (open, message or ping). */
+  private lastMessageAt = 0;
 
   constructor(store: ConversationStore, deps: Partial<ConnectionDeps> = {}) {
     this.store = store;
@@ -129,15 +140,22 @@ export class ConversationConnection {
     const since = this.store.getState().seq;
     const es = this.deps.createEventSource(this.deps.eventsUrl(this.agentId, since));
     this.es = es;
+    this.lastMessageAt = this.deps.now();
     es.onopen = () => {
       if (generation !== this.generation) return;
+      this.lastMessageAt = this.deps.now();
       this.failures = 0;
       this.store.getState().setConnection("live");
     };
     es.onmessage = (message) => {
       if (generation !== this.generation) return;
+      this.lastMessageAt = this.deps.now();
       this.handleMessage(message);
     };
+    es.addEventListener("ping", () => {
+      if (generation !== this.generation) return;
+      this.lastMessageAt = this.deps.now();
+    });
     es.onerror = () => {
       if (generation !== this.generation) return;
       if (es.readyState === EVENT_SOURCE_CLOSED) {
@@ -218,9 +236,13 @@ export class ConversationConnection {
     return this.es === null || this.es.readyState === EVENT_SOURCE_CLOSED;
   }
 
+  private isStale(): boolean {
+    return this.deps.now() - this.lastMessageAt > STALE_AFTER_MS;
+  }
+
   private readonly onVisibility = () => {
     if (this.deps.document.visibilityState !== "visible") return;
-    if (this.isClosed() && !this.syncing) {
+    if ((this.isClosed() || this.isStale()) && !this.syncing) {
       this.failures = 0;
       void this.sync();
     }

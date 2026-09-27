@@ -164,11 +164,28 @@ export type ServerEvent =
   /** Proxied curator URL for a running tool. */
   | { type: "curator"; toolCallId: string; url: string }
   /**
-   * `!` / `!!` streaming output. `id` is the rpc command id. `command` is optional so the live
-   * state can show what runs; the server should include it (it knows the command it sent).
+   * `!` / `!!` streaming output. `id` is the rpc command id. The server includes the
+   * `command` it sent, and `excludeFromContext: true` for `!!` commands.
    */
-  | { type: "bash_output"; id: string; delta: string; command?: string }
-  | { type: "bash_done"; id: string; result: BashResult; command?: string }
+  | {
+      type: "bash_output";
+      id: string;
+      delta: string;
+      command?: string;
+      excludeFromContext?: boolean;
+    }
+  | {
+      type: "bash_done";
+      id: string;
+      result: BashResult;
+      command?: string;
+      excludeFromContext?: boolean;
+    }
+  /**
+   * The pi process exited or was replaced: everything it had in flight (run, streaming
+   * message, pending user message, tools, curators, queue, dialogs, bash runs) is dropped.
+   */
+  | { type: "live_reset" }
   /** Agent status / attention changes. */
   | { type: "agent_status"; agent: AgentInfo }
   | { type: "resync" };

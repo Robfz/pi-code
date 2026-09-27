@@ -130,33 +130,36 @@ describe("DialogHost", () => {
     await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "x1", cancelled: true }]));
   });
 
-  it("shows a countdown and hides the dialog when it expires", async () => {
+  it("shows a countdown; at 0 the dialog stays until the server's ui_resolved", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const now = Date.now();
-    await renderWithStore(
-      <DialogHost />,
-      withDialogs({
-        request: {
-          ...base,
-          id: "t1",
-          method: "select",
-          title: "Quick",
-          options: ["x"],
-          timeout: 3000,
-        },
-        receivedAt: now,
-        expiresAt: now + 3000,
-      }),
-    );
+    const store = withDialogs({
+      request: {
+        ...base,
+        id: "t1",
+        method: "select",
+        title: "Quick",
+        options: ["x"],
+        timeout: 3000,
+      },
+      receivedAt: now,
+      expiresAt: now + 3000,
+    });
+    await renderWithStore(<DialogHost />, store);
     expect(screen.getByTestId("countdown")).toHaveTextContent("3s");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_100);
     });
     expect(screen.getByTestId("countdown")).toHaveTextContent("2s");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(screen.queryByTestId("dialog-select")).toBeNull();
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    expect(screen.getByTestId("countdown")).toHaveTextContent("0s");
+    expect(screen.getByTestId("dialog-select")).toBeInTheDocument();
+    act(() => store.getState().apply({ type: "ui_resolved", id: "t1" }, 1));
+    await waitFor(() => expect(screen.queryByTestId("dialog-select")).toBeNull());
   });
 
   it("hides a dialog answered elsewhere (dialog_not_found)", async () => {

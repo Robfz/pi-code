@@ -69,13 +69,8 @@ function post(client: Client, message: SwMessage): void {
 self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
-      let data: unknown = null;
-      try {
-        data = event.data?.json() ?? null;
-      } catch {
-        data = event.data?.text() ?? null;
-      }
-      const payload = parsePushPayload(data);
+      // `parsePushPayload` parses the JSON text (and rejects anything that isn't JSON).
+      const payload = parsePushPayload(event.data?.text() ?? null);
       if (!payload) return;
       await updateBadge(payload.badge);
       const clients = await windowClients();

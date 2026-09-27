@@ -9,10 +9,10 @@ React SPA, mobile-first, installable PWA. Source: `packages/web`.
 | Server data | TanStack Query (catalog, agents, models, commands, git diff) |
 | Live conversation | Zustand store fed by SSE through the shared reducer |
 | UI | Tailwind v4 + shadcn/ui |
-| Markdown / code | Streamdown (Shiki) |
+| Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand; grammars and themes are lazy chunks outside the precache) |
 | Diffs | `@git-diff-view/react` (unified on phones, split on wide screens) |
 | PWA | `vite-plugin-pwa`, `injectManifest` strategy (custom service worker) |
-| API client | Hono `hc` typed client + `EventSource` |
+| API client | Typed `fetch` wrapper per route (`src/lib/api.ts`, types from `@pi-code/protocol`) + `EventSource` |
 
 ## Routes
 
@@ -52,7 +52,7 @@ Connection lifecycle:
 1. `GET /snapshot` → `hydrate`.
 2. `new EventSource('/api/agents/:id/events?since=' + seq)`; each message → `apply`.
 3. `resync` → close, go back to 1.
-4. `visibilitychange` → visible: if the EventSource is closed, go back to 1; `POST /ack`.
+4. `visibilitychange` → visible: if the EventSource is closed, or nothing (message or `ping` event, sent every 15 s) arrived for 35 s, go back to 1; `POST /ack`.
 5. Unmount → close the EventSource.
 
 Components subscribe with selectors (`useStore(s => s.live.streaming)`), so token deltas only re-render the streaming message.
@@ -89,6 +89,8 @@ Dialogs render as bottom sheets over this screen.
 
 Assistant errors (`stopReason: error`) show the error message; `aborted` shows "Stopped".
 
+Markdown is untrusted (model output, fetched pages, extension messages), so it never loads remote resources on its own: `https:` images render as a placeholder (alt text + host) that loads the image on tap, inline `data:image/…` images render directly, and other image URLs never load. Raw HTML goes through Streamdown's sanitizer with `<picture>` / `<source>` removed, so `<img>` is the only resource-loading element left. Links rendered from tool or extension data are links only for `http(s)://` URLs (opened with `rel="noopener noreferrer"`), plain text otherwise.
+
 ### Tool renderers
 
 A registry keyed by `toolName`. Each renderer receives `{ args, status, partialResult, result: { content, details }, isError, expanded }`. Every tool has a collapsed one-line summary and an expanded body; a header toggle expands/collapses all (the TUI's Ctrl+O).
@@ -111,7 +113,7 @@ A registry keyed by `toolName`. Each renderer receives `{ args, status, partialR
 - Enter/Send: idle → `prompt`. While running, two actions: **Steer** (`streamingBehavior: "steer"`) and **Queue** (`"followUp"`). **Stop** → `abort`. **Stop & edit** → `clear_queue` then `abort`, restoring queued text into the composer.
 - Queue display (from `live.queue`) above the composer.
 - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
-- Image attach (camera or gallery, `accept="image/*"`), sent as `prompt.images`; hidden when the current model's `input` lacks `"image"`.
+- Image attach (camera or gallery, `accept="image/*"`, non-image files ignored), sent as `prompt.images`; hidden when the current model's `input` lacks `"image"`. Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
 - `set_editor_text` UI requests replace the composer text.
 - Slash autocomplete: built-in commands implemented by the client (below) + `get_commands` (extension, skill, template), excluding pi-code's own extension commands.
 
@@ -147,7 +149,7 @@ Built-in commands:
 | `setTitle` | `document.title` |
 | `set_editor_text` | Composer text |
 
-Dialog titles and messages are rendered with URLs linkified and a copy button next to each URL — this is the copy-paste flow for MCP OAuth (open the URL, approve, paste the redirect URL back into the input). Dialogs with `expiresAt` show a countdown. An agent with `status: "awaiting_trust"` shows a trust sheet (project path, what trusting loads) answered with `POST /trust`.
+Dialog titles and messages are rendered with URLs linkified and a copy button next to each URL — this is the copy-paste flow for MCP OAuth (open the URL, approve, paste the redirect URL back into the input). Dialogs with `expiresAt` show a countdown; at 0 the dialog stays until the server's `ui_resolved` (the device clock may be skewed). An agent with `status: "awaiting_trust"` shows a trust sheet (project path, what trusting loads) answered with `POST /trust`.
 
 ### Status bar
 
@@ -155,7 +157,7 @@ Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · c
 
 ## Tree screen
 
-`get_tree` rendered as an indented tree of user and assistant entries (tool traffic collapsed), labels as badges, the current leaf highlighted. Actions on an entry:
+The store's transcript (all branches) and labels rendered as an indented tree of user and assistant entries (tool traffic collapsed), labels as badges, the current leaf highlighted. Actions on an entry:
 
 - **Go here** → `POST /tree/navigate` with a "summarize the branch you're leaving?" choice (and optional instructions).
 - **Fork from here** (user messages) → `fork`.
@@ -177,7 +179,7 @@ Disabled while a run is active.
 **Service worker** (`src/sw.ts`, injectManifest):
 
 - Precaches the app shell; API requests always go to the network.
-- `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, data: { url } })`.
+- `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, renotify: true, data: { url } })`.
 - `notificationclick`: focus an existing window and navigate it to `url`, else `openWindow(url)`.
 
 **Notifications setup:** `/settings` has an "Enable notifications" button (permission must come from a user gesture) → `pushManager.subscribe` with the VAPID key → `POST /api/push/subscriptions`. The same flow works in desktop Chrome, which covers desktop notifications.

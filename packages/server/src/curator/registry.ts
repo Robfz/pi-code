@@ -11,10 +11,24 @@ export interface CuratorTarget {
   expiresAt: number;
 }
 
+/**
+ * Tools whose `details.curatorUrl` is trusted: pi-web-access's `web_search` is the only tool
+ * that starts a curator. Other tools could report any URL, which the proxy would then forward to.
+ */
+export const CURATOR_TOOLS: ReadonlySet<string> = new Set(["web_search"]);
+
 /** The pipeline's view of the registry. */
 export interface CuratorHook {
-  /** Registers a tool's `details.curatorUrl`; returns the proxied URL (undefined if unusable). */
-  register(agentId: string, toolCallId: string, curatorUrl: string): string | undefined;
+  /**
+   * Registers a tool's `details.curatorUrl`; returns the proxied URL (undefined when the tool
+   * isn't a curator tool or the URL isn't a local curator).
+   */
+  register(
+    agentId: string,
+    toolCallId: string,
+    toolName: string,
+    curatorUrl: string,
+  ): string | undefined;
   /** The tool finished: its curator is closed. */
   release(agentId: string, toolCallId: string): void;
   /** The agent's process is gone (exit or close): all its curators are closed. */
@@ -32,7 +46,13 @@ export interface CuratorRegistryOptions {
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{8,256}$/;
 
-/** Port and token from a pi-web-access curator URL (`http://<host>:<port>/?session=<token>`). */
+/** Loopback hostnames as `URL.hostname` spells them. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * Port and token from a pi-web-access curator URL (`http://<loopback>:<port>/?session=<token>`).
+ * Anything else (other schemes or hosts, no explicit port, no token) is rejected.
+ */
 export function parseCuratorUrl(raw: string): { port: number; token: string } | undefined {
   let url: URL;
   try {
@@ -40,7 +60,8 @@ export function parseCuratorUrl(raw: string): { port: number; token: string } | 
   } catch {
     return undefined;
   }
-  if (url.protocol !== "http:") return undefined;
+  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) return undefined;
+  if (!/^\d+$/.test(url.port)) return undefined;
   const port = Number(url.port);
   const token = url.searchParams.get("session");
   if (!Number.isInteger(port) || port < 1 || port > 65535) return undefined;
@@ -81,7 +102,14 @@ export class CuratorRegistry implements CuratorHook {
       : `https://${this.opts.hostname}:${CURATOR_PUBLIC_PORT}${q}`;
   }
 
-  register(agentId: string, toolCallId: string, curatorUrl: string): string | undefined {
+  register(
+    agentId: string,
+    toolCallId: string,
+    toolName: string,
+    curatorUrl: string,
+  ): string | undefined {
+    this.sweep();
+    if (!CURATOR_TOOLS.has(toolName)) return undefined;
     const parsed = parseCuratorUrl(curatorUrl);
     if (parsed === undefined) return undefined;
     this.targets.set(parsed.token, {
@@ -93,15 +121,18 @@ export class CuratorRegistry implements CuratorHook {
     return this.publicUrl(parsed.token);
   }
 
-  /** The live target of a token; expired registrations are dropped. */
+  /** The live target of a token. */
   lookup(token: string): CuratorTarget | undefined {
-    const target = this.targets.get(token);
-    if (target === undefined) return undefined;
-    if (target.expiresAt <= this.now()) {
-      this.targets.delete(token);
-      return undefined;
+    this.sweep();
+    return this.targets.get(token);
+  }
+
+  /** Drops expired registrations (tools that stopped reporting without ending). */
+  private sweep(): void {
+    const now = this.now();
+    for (const [token, t] of this.targets) {
+      if (t.expiresAt <= now) this.targets.delete(token);
     }
-    return target;
   }
 
   release(agentId: string, toolCallId: string): void {

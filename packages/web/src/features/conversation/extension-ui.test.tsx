@@ -139,6 +139,33 @@ describe("extension UI", () => {
     expect(toast.info).not.toHaveBeenCalled();
   });
 
+  it("a new store for the same agent (conversation reopened) doesn't replay its notices", async () => {
+    const withNotices = () =>
+      hydratedStore({
+        live: {
+          ...hydratedStore().getState().live,
+          notices: [
+            { id: "n1", message: "first", kind: "error", at: 0 },
+            { id: "n2", message: "second", kind: "warning", at: 0 },
+          ],
+        },
+      });
+    const first = await renderWithStore(<NoticeToaster />, withNotices());
+    first.unmount();
+    await renderWithStore(<NoticeToaster />, withNotices());
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("uses pi's session name for the title once known", async () => {
+    const store = hydratedStore();
+    store.setState({
+      state: { ...(store.getState().state ?? {}), sessionName: "Renamed" } as never,
+    });
+    await renderWithStore(<DocumentTitle />, store);
+    expect(document.title).toBe("Renamed · pi-code");
+  });
+
   it("falls back to the session name or folder for the title and restores it on unmount", async () => {
     const store = hydratedStore();
     const view = await renderWithStore(<DocumentTitle />, store);

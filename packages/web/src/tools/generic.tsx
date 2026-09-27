@@ -1,4 +1,4 @@
-import { prettyJson, toolResultText } from "@/lib/content";
+import { prettyJson, toolResultText, truncate } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import type { ToolRenderer, ToolRendererProps } from "./registry";
 
@@ -12,10 +12,7 @@ function hasArgs(args: unknown): boolean {
 export function argsHint(args: unknown): string | undefined {
   if (typeof args !== "object" || args === null) return undefined;
   for (const value of Object.values(args)) {
-    if (typeof value === "string" && value.trim() !== "") {
-      const line = value.split("\n")[0] ?? "";
-      return line.length > 80 ? `${line.slice(0, 80)}…` : line;
-    }
+    if (typeof value === "string" && value.trim() !== "") return truncate(value, 80);
   }
   return undefined;
 }

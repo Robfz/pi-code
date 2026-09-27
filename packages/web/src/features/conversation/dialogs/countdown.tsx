@@ -1,23 +1,25 @@
 import { TimerIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-/** Seconds left until `expiresAt` (server clock, ms since epoch); calls `onExpire` once at 0. */
-export function useCountdown(expiresAt: number | undefined, onExpire: () => void): number | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (expiresAt === undefined) return;
-    const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-  const remaining =
-    expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
-  useEffect(() => {
-    if (remaining === 0) onExpire();
-  }, [remaining, onExpire]);
-  return remaining;
+/** Whole seconds left until `expiresAt` (never negative). */
+function secondsLeft(expiresAt: number, now: number): number {
+  return Math.max(0, Math.ceil((expiresAt - now) / 1000));
 }
 
-export function CountdownBadge({ seconds }: { seconds: number | null }) {
+/**
+ * Seconds left until `expiresAt` (server clock, ms since epoch), ticking once per second on
+ * the second boundary. It only informs: the dialog stays until the server's `ui_resolved`, since
+ * this device's clock may be off.
+ */
+export function CountdownBadge({ expiresAt }: { expiresAt: number | undefined }) {
+  const [now, setNow] = useState(() => Date.now());
+  const seconds = expiresAt === undefined ? null : secondsLeft(expiresAt, now);
+  useEffect(() => {
+    if (expiresAt === undefined || seconds === 0) return;
+    const untilNextSecond = (expiresAt - now) % 1000 || 1000;
+    const timer = setTimeout(() => setNow(Date.now()), untilNextSecond);
+    return () => clearTimeout(timer);
+  }, [expiresAt, now, seconds]);
   if (seconds === null) return null;
   return (
     <span

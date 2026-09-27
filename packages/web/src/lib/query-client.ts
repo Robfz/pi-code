@@ -20,5 +20,4 @@ export const queryKeys = {
   commands: (agentId: string) => ["agent", agentId, "commands"] as const,
   stats: (agentId: string) => ["agent", agentId, "stats"] as const,
   forkMessages: (agentId: string) => ["agent", agentId, "fork-messages"] as const,
-  tree: (agentId: string, version: string) => ["agent", agentId, "tree", version] as const,
 };

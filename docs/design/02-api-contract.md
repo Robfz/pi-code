@@ -2,7 +2,7 @@
 
 HTTP + Server-Sent Events between the web client and the server. All types live in `packages/protocol` and are imported by both sides. pi's own protocol types are re-exported from `@earendil-works/pi-coding-agent` (type-only imports): `RpcCommand`, `RpcResponse`, `RpcSessionState`, `RpcExtensionUIRequest`, `RpcExtensionUIResponse`, `JsonAgentSessionEvent`, `ModelInfo`, plus message and session-entry types.
 
-The server uses Hono's typed routes; the client uses Hono's `hc` client for request/response typing. SSE is consumed with the browser's `EventSource`.
+Both sides share these types; the client calls the API through a small typed `fetch` wrapper. SSE is consumed with the browser's `EventSource`.
 
 ## Conventions
 
@@ -109,7 +109,9 @@ type OpenAgentBody = { cwd: string } | { sessionFile: string };
 - `{ cwd }` → new agent with a new session in that directory.
 - `{ sessionFile }` → resume. If the session is already open, returns the existing agent with `200`; otherwise `201`.
 
-→ `201 | 200 { agent: AgentInfo }`, returned immediately (`status: "awaiting_trust"` or `"starting"`); the client connects to snapshot/SSE right away. `400 outside_home`, `404 session_not_found`.
+→ `201 | 200 { agent: AgentInfo }`, returned immediately (`status: "awaiting_trust"` or `"starting"`); the client connects to snapshot/SSE right away. If the owning agent has exited, it is restarted and returned (same id, `200`).
+
+A session file must be an absolute path to an existing `.jsonl` file whose realpath is inside `$HOME` or pi's sessions dir (`<agentDir>/sessions`). `400 invalid_body` (not absolute), `400 outside_home`, `404 session_not_found`.
 
 ### `POST /api/agents/:id/trust`
 Answer the project-trust prompt of an `awaiting_trust` agent; the server then spawns pi, which saves the decision to pi's `trust.json`.
@@ -144,13 +146,15 @@ Clears attention (client calls it when the conversation becomes visible). → `2
 
 ## Events — `GET /api/agents/:id/events`
 
-`text/event-stream`. Each event: `id: <seq>` and `data: <ServerEvent JSON>`. `retry: 2000`. A `: ping` comment every 15 s.
+`text/event-stream`. Each event: `id: <seq>` and `data: <ServerEvent JSON>`. `retry: 2000`. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`) so clients can detect a dead stream; it is not a `ServerEvent`, doesn't advance `seq` and isn't replayed.
 
-Resume: send `Last-Event-ID` (EventSource does this automatically on reconnect) or `?since=<seq>` on first connect after a snapshot. If the server can't replay from there, the first event is `resync`.
+Resume: send `Last-Event-ID` (EventSource does this automatically on reconnect) or `?since=<seq>` on first connect after a snapshot. If the server can't replay from there, the first event is `resync` (without an `id:`). Without a resume point, only new events are sent.
+
+Once pi is up, the initial state arrives as `transcript_reset` → `stats` → (`git_status`) → `agent_status` with `status: "ready"`.
 
 ```ts
 type ServerEvent =
-  | { type: "pi"; event: JsonAgentSessionEvent }            // every pi session event, verbatim
+  | { type: "pi"; event: JsonAgentSessionEvent; receivedAt?: number } // every pi session event, verbatim; receivedAt = server clock (ms)
   | { type: "ui_request"; request: RpcExtensionUIRequest; receivedAt: number }
   | { type: "ui_resolved"; id: string }
   | { type: "entries_appended"; entries: SessionEntry[]; leafId: string | null }
@@ -159,15 +163,20 @@ type ServerEvent =
   | { type: "stats"; stats: SessionStats }                   // after each turn_end
   | { type: "git_status"; status: GitStatus | null }
   | { type: "curator"; toolCallId: string; url: string }     // proxied curator URL
-  | { type: "bash_output"; id: string; delta: string }       // `!` / `!!` streaming output
-  | { type: "bash_done"; id: string; result: BashResult }
+  | { type: "bash_output"; id: string; delta: string; command?: string; excludeFromContext?: boolean } // `!` / `!!` streaming output
+  | { type: "bash_done"; id: string; result: BashResult; command?: string; excludeFromContext?: boolean }
+  | { type: "live_reset" }                                   // pi exited or was respawned
   | { type: "agent_status"; agent: AgentInfo }               // status / attention changes
   | { type: "resync" };
 ```
 
+- `bash_*`: `id` is the rpc command id; `command` is the command line sent; `excludeFromContext: true` for commands sent with `excludeFromContext` (`!!`).
+- `curator`: only for pi-web-access `web_search` tools reporting a loopback curator URL (`http://localhost|127.0.0.1|[::1]:<port>/?session=<token>`).
+- `live_reset`: published when pi exits (after `ui_resolved` for its pending dialogs, before the `exited` `agent_status`) and when a new pi process starts, only if there is in-flight state to drop.
+
 ## Commands — `POST /api/agents/:id/rpc`
 
-Body: a pi `RpcCommand` without `id`. Response: `200 { data: <pi response data> }`.
+Body: a pi `RpcCommand` without `id`. Response: `200 { data: <pi response data> }`, sent after the command's follow-up events (entry sync, `state`, `transcript_reset` + `stats` for session changes) are published.
 
 Allowlist:
 
@@ -184,7 +193,7 @@ Allowlist:
 Rules:
 - `prompt` while `isStreaming` requires `streamingBehavior: "steer" | "followUp"` → else `400 streaming_behavior_required`.
 - `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB.
-- `switch_session` to a session owned by another agent → `409 session_owned`.
+- `switch_session`: `sessionPath` is validated like `POST /api/agents { sessionFile }` (`400 invalid_body | outside_home`, `404 session_not_found`) and its realpath is sent to pi; a session owned by another agent → `409 session_owned`.
 - `bash` returns `202 { data: { id } }` immediately; output streams as `bash_output` events and completion arrives as `bash_done`. Its `bashExecution` entry is committed like any other entry.
 - Commands on an `exited` agent → `409 agent_exited`.
 
@@ -209,7 +218,7 @@ interface NavigateBody {
   customInstructions?: string;     // for the summary
 }
 ```
-→ `200 { cancelled: boolean }`. `409 agent_busy` while streaming. The new transcript arrives as `transcript_reset`; if the target is a user message, its text arrives as a `set_editor_text` UI request.
+→ `200 { cancelled: boolean }` (`cancelled` when the leaf didn't move), after the resulting `transcript_reset` is published; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
 
 ## Git
 
@@ -267,7 +276,7 @@ interface LiveState {
   title?: string;                                  // setTitle
   editorText?: { text: string; nonce: number };    // set_editor_text
   notices: { id: string; message: string; kind: "info" | "warning" | "error"; at: number }[]; // last 20 notify
-  bash: Record<string, { command: string; output: string; done?: BashResult }>;
+  bash: Record<string, { command: string; output: string; done?: BashResult; excludeFromContext?: boolean }>;
 }
 
 type StreamingBlock =
@@ -294,6 +303,7 @@ Semantics (pi's streaming rules from pi's `docs/json.md`):
 - `*_delta` appends to the block at `contentIndex`; `*_end` replaces it with the authoritative content; `message_end(assistant)` clears `streaming`.
 - `entries_appended` clears `pendingUser` and removes tools whose results are now committed.
 - `transcript_reset` clears `streaming`, `pendingUser` and finished tools.
-- `agent_settled` sets `run.active = false`, clears `retry` and `compaction`.
+- `agent_settled` (and `agent_status` exited) sets `run.active = false`, clears `streaming`, `retry` and `compaction`.
+- `live_reset` does the same and also clears `pendingUser`, `tools`, `curator`, `queue`, `dialogs` and `bash`; extension UI (`statuses`, `widgets`, `title`, `editorText`, `notices`) and `run.lastError` stay.
 - `ui_request` with a fire-and-forget method updates `statuses` / `widgets` / `title` / `editorText` / `notices`; dialog methods append to `dialogs`; `ui_resolved` removes one (the server publishes it on answer and on timeout).
 - The reducer is pure and deterministic; server and client run the same code.

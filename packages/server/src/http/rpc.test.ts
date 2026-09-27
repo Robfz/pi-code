@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentInfo, ServerEvent, SessionEntry, Snapshot } from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { fixturePath, loadFixture } from "../../../../test/fake-pi.ts";
@@ -196,14 +198,19 @@ describe("command rules", () => {
     await command.catch(() => {});
   });
 
-  it("rejects switch_session to a session owned by another agent", async () => {
+  it("rejects switch_session outside $HOME and pi's sessions dir before pi sees it", async () => {
     const h = await start();
     const a = await h.open();
-    const b = await h.open();
-    const file = h.manager.require(b.id).info().sessionFile as string;
-    const res = await h.rpc(a.id, { type: "switch_session", sessionPath: file });
-    expect(res.status).toBe(409);
-    expect(res.body.error?.code).toBe("session_owned");
+    const outside = join(h.root, "elsewhere.jsonl");
+    writeFileSync(outside, "{}\n");
+    const res = await h.rpc(a.id, { type: "switch_session", sessionPath: outside });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe("outside_home");
+    const missing = await h.rpc(a.id, {
+      type: "switch_session",
+      sessionPath: join(h.home, "missing.jsonl"),
+    });
+    expect(missing.body.error?.code).toBe("session_not_found");
   });
 
   it("filters pi-code commands out of get_commands", async () => {
@@ -348,6 +355,12 @@ describe("bash", () => {
     expect(done.map((r) => r.event.id)).toEqual(ids);
     expect(done.map((r) => r.event.result.exitCode)).toEqual([0, 0, 3]);
     expect(done[0]?.event.command).toBe(commands[0]?.command);
+    // `!!` commands are flagged on both events; `!` commands carry no flag.
+    expect(done.map((r) => r.event.excludeFromContext)).toEqual([undefined, true, undefined]);
+    const hidden = client.events.filter(ofType("bash_output")).filter((r) => r.event.id === ids[1]);
+    expect(hidden.length).toBeGreaterThan(0);
+    expect(hidden.every((r) => r.event.excludeFromContext === true)).toBe(true);
+    expect(output.every((r) => r.event.excludeFromContext === undefined)).toBe(true);
     // Each bash_done is followed by its bashExecution entry.
     for (const d of done) {
       const next = client.events.find((r) => r.seq === (d.seq as number) + 1)?.event;

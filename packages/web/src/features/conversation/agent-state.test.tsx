@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeAgent } from "@/test/fixtures";
@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("agent lifecycle states", () => {
-  it("trust sheet posts the answer and applies the returned agent", async () => {
+  it("trust sheet posts the answer; the agent_status event moves the agent on", async () => {
     const { calls } = stubFetch((call) =>
       call.url === "/api/agents/a1/trust"
         ? [200, { agent: makeAgent({ status: "starting" }) }]
@@ -22,8 +22,14 @@ describe("agent lifecycle states", () => {
     await renderWithStore(<TrustSheet />, store);
     expect(screen.getByTestId("trust-sheet")).toHaveTextContent("/home/me/untrusted");
     await userEvent.setup().click(screen.getByRole("button", { name: "Trust" }));
-    await waitFor(() => expect(store.getState().agent.status).toBe("starting"));
-    expect(calls.find((c) => c.url === "/api/agents/a1/trust")?.body).toEqual({ trusted: true });
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === "/api/agents/a1/trust")?.body).toEqual({ trusted: true }),
+    );
+    // The response alone doesn't change the store: SSE is authoritative.
+    expect(store.getState().agent.status).toBe("awaiting_trust");
+    act(() =>
+      store.getState().apply({ type: "agent_status", agent: makeAgent({ status: "starting" }) }, 1),
+    );
     await waitFor(() => expect(screen.queryByTestId("trust-sheet")).toBeNull());
   });
 
@@ -62,10 +68,14 @@ describe("agent lifecycle states", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Restart/ }));
-    await waitFor(() => expect(store.getState().agent.status).toBe("starting"));
-    expect(calls.map((c) => [c.method, c.url])).toContainEqual(["POST", "/api/agents/a1/restart"]);
+    await waitFor(() =>
+      expect(calls.map((c) => [c.method, c.url])).toContainEqual([
+        "POST",
+        "/api/agents/a1/restart",
+      ]),
+    );
+    expect(store.getState().agent.status).toBe("exited");
 
-    store.getState().setAgent(makeAgent({ status: "exited" }));
     await user.click(await screen.findByRole("button", { name: /Close/ }));
     await waitFor(() =>
       expect(calls.map((c) => [c.method, c.url])).toContainEqual(["DELETE", "/api/agents/a1"]),

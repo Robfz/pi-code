@@ -4,7 +4,10 @@ import { streamSSE } from "hono/streaming";
 import type { EventLog } from "../agents/event-log.ts";
 
 export interface SseOptions {
-  /** Interval of `: ping` comments. Default 15 s. */
+  /**
+   * Interval of `ping` events (named, no `id:`, not logged), so clients can detect a dead
+   * stream. Default 15 s.
+   */
   pingMs?: number;
   /** Reconnection delay advertised to `EventSource`. Default 2 s. */
   retryMs?: number;
@@ -81,7 +84,7 @@ export function eventStream(c: Context, log: EventLog, opts: SseOptions = {}): R
           break;
         } else if (pingDue) {
           pingDue = false;
-          await stream.write(": ping\n\n");
+          await stream.write("event: ping\ndata: {}\n\n");
         } else {
           await new Promise<void>((resolve) => {
             wake = resolve;

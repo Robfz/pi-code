@@ -4,8 +4,7 @@
  * Handles binary files, patches too large to send, and projects outside a git repository.
  */
 
-import type { GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
-import { isApiError } from "@pi-code/protocol";
+import type { GitFileDiff } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { ChevronLeftIcon, ChevronRightIcon, FileIcon, RefreshCwIcon } from "lucide-react";
@@ -13,31 +12,10 @@ import { type ReactNode, useMemo, useState } from "react";
 import { countPatchLines, DiffViewer } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiRequestError, errorMessage, isApiRequestError } from "@/lib/api";
+import { errorMessage, getGitDiff, isApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export const gitDiffQueryKey = (agentId: string) => ["agent", agentId, "git-diff"] as const;
-
-export async function fetchGitDiff(agentId: string): Promise<GitFileDiff[]> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/git/diff`);
-  if (!res.ok) {
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      body = undefined;
-    }
-    if (isApiError(body)) {
-      throw new ApiRequestError(res.status, body.error.code, body.error.message);
-    }
-    const error = (body as { error?: { code?: unknown; message?: unknown } } | undefined)?.error;
-    if (typeof error?.code === "string") {
-      throw new ApiRequestError(res.status, error.code, String(error.message ?? res.statusText));
-    }
-    throw new ApiRequestError(res.status, `http_${res.status}`, res.statusText || "Request failed");
-  }
-  return ((await res.json()) as GitDiffResponse).files;
-}
 
 const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; className: string }> =
   {
@@ -146,7 +124,7 @@ export function DiffScreen() {
   const { agentId = "" } = useParams({ strict: false }) as { agentId?: string };
   const diff = useQuery({
     queryKey: gitDiffQueryKey(agentId),
-    queryFn: () => fetchGitDiff(agentId),
+    queryFn: () => getGitDiff(agentId),
     enabled: agentId !== "",
     staleTime: 0,
     refetchOnWindowFocus: false,

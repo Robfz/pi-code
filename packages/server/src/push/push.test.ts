@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentInfo, AssistantMessage, ServerEvent } from "@pi-code/protocol";
@@ -117,6 +125,16 @@ describe("SubscriptionStore", () => {
     expect((await new SubscriptionStore(dir).list()).map((s) => s.endpoint)).toEqual([
       subscription(1).endpoint,
     ]);
+  });
+
+  it("tightens an existing file to mode 0600 when loading", async () => {
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, SUBSCRIPTIONS_FILE);
+    const sub = { ...subscription(1), createdAt: new Date(0).toISOString() };
+    writeFileSync(file, JSON.stringify({ [sub.endpoint]: sub }), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    expect(await new SubscriptionStore(dir).list()).toHaveLength(1);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("starts empty on a garbage file", async () => {

@@ -61,6 +61,8 @@ export function parseUiResponse(value: unknown): UiResponseBody {
 export interface CommandContext {
   /** The other agent that has `sessionFile` open, if any. */
   ownerOf(sessionFile: string, except: AgentId): AgentId | undefined;
+  /** A session file's realpath, confined like `POST /api/agents { sessionFile }`. */
+  resolveSessionFile(sessionFile: string): Promise<string>;
 }
 
 export type CommandOutcome = { status: 200; data: unknown } | { status: 202; data: { id: string } };
@@ -81,11 +83,16 @@ export function assertAcceptsInput(agent: Agent): void {
  */
 export async function runCommand(
   agent: Agent,
-  command: RpcCommandBody,
+  body: RpcCommandBody,
   ctx: CommandContext,
 ): Promise<CommandOutcome> {
   assertAcceptsInput(agent);
   const pipeline = agent.pipeline;
+  let command = body;
+  if (command.type === "switch_session") {
+    command = { ...command, sessionPath: await ctx.resolveSessionFile(command.sessionPath) };
+    assertAcceptsInput(agent);
+  }
   switch (command.type) {
     case "prompt":
       if (command.streamingBehavior === undefined && pipeline.isStreaming()) {
@@ -96,6 +103,7 @@ export async function runCommand(
       }
       break;
     case "switch_session": {
+      // `sessionPath` is canonical here, like the session files agents own.
       const owner = ctx.ownerOf(command.sessionPath, agent.id);
       if (owner !== undefined) {
         throw new ApiError("session_owned", `session is open in agent ${owner}`);

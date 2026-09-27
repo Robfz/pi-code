@@ -1,10 +1,7 @@
 /**
- * API client for `docs/design/02-api-contract.md`.
- *
- * Routes already in the server's `AppType` (health, agents list/open/close) go through Hono's
- * typed `hc` client. The rest (snapshot, rpc, ui-responses, trust, restart, ack) use thin typed
- * `fetch` wrappers over the protocol types; each can switch to `hc` once its route is chained
- * into `AppType`, without changing call sites.
+ * API client for `docs/design/02-api-contract.md`: one typed function per route over a single
+ * `fetch` wrapper (`request`), with request and response types from `@pi-code/protocol`. Errors
+ * become `ApiRequestError` carrying the contract error code.
  */
 
 import type {
@@ -15,6 +12,8 @@ import type {
   AllowedRpcCommandType,
   DirSuggestion,
   DirsResponse,
+  GitDiffResponse,
+  GitFileDiff,
   HealthResponse,
   NavigateBody,
   NavigateResponse,
@@ -30,15 +29,10 @@ import type {
   VapidKeyResponse,
 } from "@pi-code/protocol";
 import { isApiError } from "@pi-code/protocol";
-import type { AppType } from "@pi-code/server";
-import { hc } from "hono/client";
 
 function origin(): string {
   return typeof window === "undefined" ? "http://localhost" : window.location.origin;
 }
-
-/** Typed `hc` client; routes come from the server's `AppType`. */
-export const api = hc<AppType>(origin());
 
 /** Non-2xx response. `code` is the contract error code (or `http_<status>` when absent). */
 export class ApiRequestError extends Error {
@@ -85,11 +79,7 @@ async function toError(res: Response): Promise<ApiRequestError> {
   return new ApiRequestError(res.status, `http_${res.status}`, res.statusText || "Request failed");
 }
 
-async function checked(res: Response): Promise<Response> {
-  if (!res.ok) throw await toError(res);
-  return res;
-}
-
+/** JSON request to an API path; every non-GET request carries a JSON content type. */
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, headers: {} };
   if (body !== undefined) {
@@ -99,7 +89,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     // Every non-GET request must carry a JSON content type.
     init.headers = { "Content-Type": "application/json" };
   }
-  const res = await checked(await fetch(new URL(path, origin()), init));
+  const res = await fetch(new URL(path, origin()), init);
+  if (!res.ok) throw await toError(res);
   if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   const text = await res.text();
   return (text === "" ? undefined : JSON.parse(text)) as T;
@@ -108,35 +99,23 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 const agentPath = (id: AgentId, suffix = "") => `/api/agents/${encodeURIComponent(id)}${suffix}`;
 
 // ---------------------------------------------------------------------------
-// Typed through `hc`
+// Health and agents
 
-export async function getHealth(): Promise<HealthResponse> {
-  const res = await checked(await api.api.health.$get());
-  return (await res.json()) as HealthResponse;
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("GET", "/api/health");
 }
 
 export async function listAgents(): Promise<AgentInfo[]> {
-  const res = await checked(await api.api.agents.$get());
-  return ((await res.json()) as AgentsResponse).agents;
+  return (await request<AgentsResponse>("GET", "/api/agents")).agents;
 }
 
 export async function openAgent(body: OpenAgentBody): Promise<AgentInfo> {
-  const res = await checked(await api.api.agents.$post({ json: body }));
-  return ((await res.json()) as AgentResponse).agent;
+  return (await request<AgentResponse>("POST", "/api/agents", body)).agent;
 }
 
-export async function closeAgent(id: AgentId): Promise<void> {
-  // The server's request guard requires a JSON content type on every non-GET request.
-  await checked(
-    await api.api.agents[":id"].$delete(
-      { param: { id } },
-      { headers: { "Content-Type": "application/json" } },
-    ),
-  );
+export function closeAgent(id: AgentId): Promise<void> {
+  return request<void>("DELETE", agentPath(id));
 }
-
-// ---------------------------------------------------------------------------
-// Thin fetch wrappers (routes not in `AppType` yet)
 
 export function getSnapshot(id: AgentId): Promise<Snapshot> {
   return request<Snapshot>("GET", agentPath(id, "/snapshot"));
@@ -169,6 +148,11 @@ export async function restartAgent(id: AgentId): Promise<AgentInfo> {
 
 export function ackAgent(id: AgentId): Promise<void> {
   return request<void>("POST", agentPath(id, "/ack"), {});
+}
+
+/** Working-tree diff of the agent's project (`not_a_git_repo` outside a repository). */
+export async function getGitDiff(id: AgentId): Promise<GitFileDiff[]> {
+  return (await request<GitDiffResponse>("GET", agentPath(id, "/git/diff"))).files;
 }
 
 /** SSE URL; `since` is the snapshot's `seq` on the first connect. */

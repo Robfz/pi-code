@@ -1,8 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentInfo, ServerEvent, SessionSummary, Snapshot } from "@pi-code/protocol";
+import {
+  type AgentInfo,
+  initialLiveState,
+  reduceLive,
+  type ServerEvent,
+  type SessionSummary,
+  type Snapshot,
+} from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ErrorEnvelope } from "../errors.ts";
 import { type Harness, type HarnessOptions, startHarness } from "../testing/http-harness.ts";
@@ -179,6 +186,28 @@ describe("open { sessionFile }", () => {
     expect(owned.body.error?.code).toBe("session_owned");
   });
 
+  it("canonicalizes switch_session paths before the ownership check and forwards the realpath", async () => {
+    const h = await start();
+    const owned = writeSession(h, "owned", h.project, CONVERSATION);
+    const free = writeSession(h, "free", h.project, CONVERSATION);
+    const a = await openReady(h, { sessionFile: owned });
+    const b = await openReady(h, { cwd: h.project });
+    const ownedLink = join(h.home, "owned-link.jsonl");
+    const freeLink = join(h.home, "free-link.jsonl");
+    symlinkSync(owned, ownedLink);
+    symlinkSync(free, freeLink);
+
+    const rejected = await h.rpc(b.id, { type: "switch_session", sessionPath: ownedLink });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.error?.code).toBe("session_owned");
+    expect(h.manager.ownerOf(owned)).toBe(a.id);
+
+    const switched = await h.rpc(b.id, { type: "switch_session", sessionPath: freeLink });
+    expect(switched.status).toBe(200);
+    expect(h.manager.require(b.id).info().sessionFile).toBe(free);
+    expect(h.manager.ownerOf(free)).toBe(b.id);
+  });
+
   it("clears the previous session's extension statuses on a session change", async () => {
     const h = await start();
     const a = await openReady(h, { cwd: h.project });
@@ -241,6 +270,43 @@ describe("restart", () => {
     expect(exitedEvent.agent.stderrTail).toContain("fatal: crashed");
     await prompt(h, a.id, "again");
     expect((await h.snapshot(a.id)).transcript.entries).toHaveLength(4);
+  });
+
+  it("drops the exited process's live state with live_reset, in snapshot and stream alike", async () => {
+    const h = await start();
+    const a = await openReady(h, { cwd: h.project });
+    const client = h.sse(a.id, { since: 0 });
+    await h.rpc(a.id, { type: "prompt", message: "hang" });
+    await client.waitFor((r) => r.event.type === "pi" && r.event.event.type === "queue_update");
+    await h.idle(a.id);
+    const busy = await h.snapshot(a.id);
+    expect(busy.live.tools["hang-tool"]?.status).toBe("running");
+    expect(busy.live.queue.steering).toEqual(["queued"]);
+
+    await h.rpc(a.id, { type: "prompt", message: "crash", streamingBehavior: "steer" });
+    await h.waitForStatus(a.id, "exited");
+    await h.idle(a.id);
+    const snap = await h.snapshot(a.id);
+    expect(snap.live.run.active).toBe(false);
+    expect(snap.live.tools).toEqual({});
+    expect(snap.live.queue).toEqual({ steering: [], followUp: [] });
+    await client.waitForSeq(snap.seq);
+    const types = client.events.map((r) => r.event.type);
+    expect(types).toContain("live_reset");
+    expect(types.lastIndexOf("live_reset")).toBeLessThan(types.lastIndexOf("agent_status"));
+    expect(client.events.map((r) => r.event).reduce(reduceLive, initialLiveState())).toEqual(
+      snap.live,
+    );
+
+    // A restart has nothing left to drop.
+    const before = snap.seq;
+    await h.json("POST", `/api/agents/${a.id}/restart`, {});
+    await h.waitForStatus(a.id, "ready");
+    await h.idle(a.id);
+    await client.waitForSeq(h.manager.require(a.id).pipeline.seq);
+    expect(
+      client.events.filter((r) => (r.seq ?? 0) > before && r.event.type === "live_reset"),
+    ).toEqual([]);
   });
 
   it("opening the session of an exited agent restarts that agent", async () => {
@@ -411,6 +477,26 @@ describe("tree navigation", () => {
 });
 
 describe("git status in the pipeline", () => {
+  it("drops a pending refresh when pi exits", async () => {
+    let calls = 0;
+    const h = await start({
+      pipeline: {
+        gitDebounceMs: 150,
+        gitStatus: async () => {
+          calls++;
+          return { branch: "main", dirty: false };
+        },
+      },
+    });
+    const a = await openReady(h, { cwd: h.project });
+    expect(calls).toBe(1);
+    await prompt(h, a.id, "edit"); // turn_end schedules a refresh
+    await h.rpc(a.id, { type: "prompt", message: "crash" });
+    await h.waitForStatus(a.id, "exited");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calls).toBe(1);
+  });
+
   it("is in the snapshot and refreshed after turn_end", async () => {
     const h = await start({ pipeline: { gitDebounceMs: 30 } });
     const git = (...args: string[]) => execFileSync("git", args, { cwd: h.project });

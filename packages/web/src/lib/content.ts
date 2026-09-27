@@ -46,3 +46,9 @@ export function prettyJson(value: unknown): string {
     return String(value);
   }
 }
+
+/** First line of `text`, cut to `max` characters with an ellipsis. */
+export function truncate(text: string, max = 80): string {
+  const line = text.split("\n")[0] ?? "";
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}

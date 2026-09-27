@@ -766,3 +766,63 @@ describe("transcript_reset", () => {
     expect(reduceLive(active, reset)).toBe(active);
   });
 });
+
+describe("live_reset", () => {
+  it("drops everything the pi process had in flight; keeps extension UI and the last error", () => {
+    const s = reduceAll([
+      ui({ method: "setStatus", statusKey: "k", statusText: "on" }),
+      ui({ method: "notify", message: "hello" }),
+      pi({ type: "agent_start" }),
+      pi({ type: "message_start", message: user }),
+      pi({ type: "message_start", message: assistant() }),
+      pi({ type: "tool_execution_start", toolCallId: "run", toolName: "bash", args: {} }),
+      { type: "curator", toolCallId: "run", url: "u" },
+      pi({ type: "queue_update", steering: ["s"], followUp: ["f"] }),
+      pi({ type: "compaction_start", reason: "threshold" }),
+      pi({
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 10,
+        errorMessage: "e",
+      }),
+      ui({ method: "confirm", title: "t", message: "m" }),
+      { type: "bash_output", id: "b1", delta: "y", command: "sleep 9" },
+    ]);
+    const withError: LiveState = { ...s, run: { ...s.run, lastError: "boom" } };
+    const r = reduceLive(withError, { type: "live_reset" });
+    expect(r).toEqual({
+      ...initialLiveState(),
+      run: { active: false, lastError: "boom" },
+      statuses: { k: "on" },
+      notices: s.notices,
+    });
+  });
+
+  it("returns the same state when nothing is in flight", () => {
+    const s = reduceAll([ui({ method: "setStatus", statusKey: "k", statusText: "on" })]);
+    expect(reduceLive(s, { type: "live_reset" })).toBe(s);
+  });
+});
+
+describe("bash excludeFromContext", () => {
+  it("is recorded from bash_output and kept through bash_done", () => {
+    const s = reduceAll([
+      { type: "bash_output", id: "b1", delta: "x", command: "ls", excludeFromContext: true },
+      { type: "bash_done", id: "b1", result: bashResult },
+    ]);
+    expect(s.bash.b1).toEqual({
+      command: "ls",
+      output: "x",
+      done: bashResult,
+      excludeFromContext: true,
+    });
+    const plain = reduceLive(initialLiveState(), {
+      type: "bash_done",
+      id: "b2",
+      result: bashResult,
+      command: "ls",
+    });
+    expect(plain.bash.b2).not.toHaveProperty("excludeFromContext");
+  });
+});

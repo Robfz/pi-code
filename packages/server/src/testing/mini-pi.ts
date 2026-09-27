@@ -10,7 +10,8 @@
  *   entries), so a restarted process resumes them with `--session`.
  * - `prompt "<text>"`: answers on acceptance, then emits a minimal run (user + assistant
  *   entries, `turn_end`, `agent_end`, `agent_settled`). `prompt "crash"` exits with code 3 after
- *   `fatal: crashed` on stderr; `prompt "hang"` starts a run that never ends.
+ *   `fatal: crashed` on stderr; `prompt "hang"` starts a run that never ends (with a running
+ *   `bash` tool `hang-tool` and a queued steering message).
  * - `prompt "/pi-code-tree {json}"` (unless `MINI_PI_NO_EXT`): moves the leaf like pi's
  *   `navigateTree` (to the parent of a user message, whose text goes to `set_editor_text`), with a
  *   `branch_summary` when `summarize`; with `MINI_PI_TREE_FAIL` it emits `extension_error`
@@ -195,6 +196,8 @@ function prompt(cmd: Command, message: string) {
   if (message === "hang") {
     ok(cmd);
     out({ type: "agent_start" });
+    out({ type: "tool_execution_start", toolCallId: "hang-tool", toolName: "bash", args: {} });
+    out({ type: "queue_update", steering: ["queued"], followUp: [] });
     return;
   }
   const tree = /^\/pi-code-tree (.*)$/s.exec(message);

@@ -341,7 +341,7 @@ function UrlList({ urls }: { urls: string[] }) {
     <ul className="flex flex-col gap-0.5 text-xs">
       {urls.map((url) => (
         <li key={url} className="min-w-0">
-          {/^https?:\/\//.test(url) ? <ExternalLink href={url}>{url}</ExternalLink> : url}
+          <ExternalLink href={url}>{url}</ExternalLink>
         </li>
       ))}
     </ul>

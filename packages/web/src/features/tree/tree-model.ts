@@ -1,12 +1,14 @@
 /**
- * Display model for the session tree screen: `get_tree` nodes reduced to user / assistant
- * messages plus compaction and branch-summary markers. Tool traffic (tool-only assistant
- * turns, tool results) and state entries are hidden; their children attach to the nearest
- * shown ancestor. Linear chains stay at one depth; each branch point indents its children.
+ * Display model for the session tree screen, built from the store's transcript (which holds
+ * every branch) and its labels: entries reduced to user / assistant messages plus compaction
+ * and branch-summary markers. Tool traffic (tool-only assistant turns, tool results) and state
+ * entries are hidden; their children attach to the nearest shown ancestor. Linear chains stay
+ * at one depth; each branch point indents its children.
  */
 
-import type { SessionEntry, SessionTreeNode } from "@pi-code/protocol";
+import type { SessionEntry } from "@pi-code/protocol";
 import { contentText } from "@/lib/content";
+import { formatTokens } from "@/lib/time";
 
 export type TreeRowKind = "user" | "assistant" | "compaction" | "branch_summary";
 
@@ -49,7 +51,7 @@ function describe(entry: SessionEntry): { kind: TreeRowKind; text: string } | nu
     case "compaction":
       return {
         kind: "compaction",
-        text: `Context compacted (${entry.tokensBefore.toLocaleString("en-US")} tokens)`,
+        text: `Context compacted (${formatTokens(entry.tokensBefore)} tokens)`,
       };
     case "branch_summary":
       return { kind: "branch_summary", text: "Branch summary" };
@@ -58,33 +60,53 @@ function describe(entry: SessionEntry): { kind: TreeRowKind; text: string } | nu
   }
 }
 
-export function buildTreeModel(tree: readonly SessionTreeNode[], leafId: string | null): TreeModel {
+/**
+ * `entries` in session order (children keep that order); `labels` by target entry id. Entries
+ * whose parent is missing become roots.
+ */
+export function buildTreeModel(
+  entries: readonly SessionEntry[],
+  leafId: string | null,
+  labels: ReadonlyMap<string, string> = new Map(),
+): TreeModel {
+  const byId = new Map<string, SessionEntry>();
+  const childrenOf = new Map<string | null, SessionEntry[]>();
+  for (const entry of entries) byId.set(entry.id, entry);
+  for (const entry of entries) {
+    const parent = entry.parentId !== null && byId.has(entry.parentId) ? entry.parentId : null;
+    const siblings = childrenOf.get(parent);
+    if (siblings) siblings.push(entry);
+    else childrenOf.set(parent, [entry]);
+  }
+
   const items = new Map<string, TreeItem>();
   const roots: string[] = [];
-  const parentOf = new Map<string, string | null>();
   /** Nearest shown ancestor-or-self per entry. */
   const shownFor = new Map<string, string | null>();
 
   // Iterative DFS (sessions can be thousands of entries deep).
-  const stack: { node: SessionTreeNode; shownParent: string | null; parent: string | null }[] = [];
-  for (let i = tree.length - 1; i >= 0; i--) {
-    const node = tree[i];
-    if (node) stack.push({ node, shownParent: null, parent: null });
-  }
+  const stack: { entry: SessionEntry; shownParent: string | null }[] = [];
+  const pushChildren = (parent: string | null, shownParent: string | null) => {
+    const children = childrenOf.get(parent) ?? [];
+    for (let i = children.length - 1; i >= 0; i--) {
+      const entry = children[i];
+      if (entry) stack.push({ entry, shownParent });
+    }
+  };
+  pushChildren(null, null);
   while (stack.length > 0) {
-    const { node, shownParent, parent } = stack.pop() as (typeof stack)[number];
-    const entry = node.entry;
-    parentOf.set(entry.id, parent);
+    const { entry, shownParent } = stack.pop() as (typeof stack)[number];
     const shown = describe(entry);
     let nextShownParent = shownParent;
     if (shown) {
+      const label = labels.get(entry.id);
       const item: TreeItem = {
         id: entry.id,
         kind: shown.kind,
         text: shown.text,
         timestamp: entry.timestamp,
         children: [],
-        ...(node.label ? { label: node.label } : {}),
+        ...(label ? { label } : {}),
       };
       items.set(entry.id, item);
       if (shownParent === null) roots.push(entry.id);
@@ -92,18 +114,17 @@ export function buildTreeModel(tree: readonly SessionTreeNode[], leafId: string 
       nextShownParent = entry.id;
     }
     shownFor.set(entry.id, nextShownParent);
-    for (let i = node.children.length - 1; i >= 0; i--) {
-      const child = node.children[i];
-      if (child) stack.push({ node: child, shownParent: nextShownParent, parent: entry.id });
-    }
+    pushChildren(entry.id, nextShownParent);
   }
 
   const currentId = leafId === null ? null : (shownFor.get(leafId) ?? null);
   const activePath = new Set<string>();
+  const visited = new Set<string>();
   let cursor: string | null | undefined = leafId;
-  while (cursor !== null && cursor !== undefined) {
+  while (cursor !== null && cursor !== undefined && !visited.has(cursor)) {
+    visited.add(cursor);
     if (items.has(cursor)) activePath.add(cursor);
-    cursor = parentOf.get(cursor);
+    cursor = byId.get(cursor)?.parentId;
   }
   return { items, roots, currentId, activePath };
 }

@@ -3,8 +3,9 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { stripAnsi } from "@/lib/ansi";
 import { baseName } from "@/lib/content";
-import { useConversation } from "@/store/context";
-import { selectNotices, selectStatuses, selectWidgets } from "@/store/selectors";
+import { useConversation, useConversationStore } from "@/store/context";
+import type { ConversationStore } from "@/store/conversation-store";
+import { selectNotices, selectSessionName, selectStatuses, selectWidgets } from "@/store/selectors";
 
 /** `setWidget` blocks for one placement: monospace, ANSI stripped. */
 export function Widgets({ placement }: { placement: "aboveEditor" | "belowEditor" }) {
@@ -42,22 +43,22 @@ export function StatusChips() {
   );
 }
 
-/** Notice ids already toasted, per agent, for the page's lifetime. */
-const seenNotices = new Map<string, Set<string>>();
+/** Notice ids already toasted, per conversation store (outlives remounts). */
+let seenNotices = new WeakMap<ConversationStore, Set<string>>();
 
 /**
- * Toasts each `notify` once. Notices already in the first snapshot of this page session are
- * history and aren't toasted.
+ * Toasts each `notify` once. Notices already in the store's first snapshot are history and
+ * aren't toasted; neither are they when the screen remounts on the same store.
  */
 export function NoticeToaster() {
-  const agentId = useConversation((s) => s.agentId);
+  const store = useConversationStore();
   const hydrated = useConversation((s) => s.hydrated);
   const notices = useConversation(selectNotices);
   useEffect(() => {
     if (!hydrated) return;
-    let seen = seenNotices.get(agentId);
+    let seen = seenNotices.get(store);
     if (seen === undefined) {
-      seenNotices.set(agentId, new Set(notices.map((n) => n.id)));
+      seenNotices.set(store, new Set(notices.map((n) => n.id)));
       return;
     }
     for (const notice of notices) {
@@ -70,21 +71,21 @@ export function NoticeToaster() {
     }
     if (seen.size > 200) {
       seen = new Set(notices.map((n) => n.id));
-      seenNotices.set(agentId, seen);
+      seenNotices.set(store, seen);
     }
-  }, [agentId, hydrated, notices]);
+  }, [store, hydrated, notices]);
   return null;
 }
 
 /** For tests: forget toasted notices. */
 export function resetSeenNotices(): void {
-  seenNotices.clear();
+  seenNotices = new WeakMap();
 }
 
 /** `setTitle` → `document.title`; otherwise session name or folder. Restored on unmount. */
 export function DocumentTitle() {
   const title = useConversation((s) => s.live.title);
-  const name = useConversation((s) => s.agent.sessionName);
+  const name = useConversation(selectSessionName);
   const cwd = useConversation((s) => s.agent.cwd);
   const original = useRef<string | null>(null);
   useEffect(() => {

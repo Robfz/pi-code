@@ -39,8 +39,6 @@ export interface ConversationActions {
   /** Apply one event. Events at or below the current `seq` are ignored (replays). */
   apply(event: ServerEvent, seq: number): void;
   setConnection(connection: ConnectionState): void;
-  /** Agent returned by a command response (trust, restart); SSE `agent_status` follows. */
-  setAgent(agent: AgentInfo): void;
   setLoadError(error: { code: string; message: string } | undefined): void;
 }
 
@@ -109,10 +107,6 @@ export function createConversationStore(
 
     setConnection(connection) {
       if (get().connection !== connection) set({ connection });
-    },
-
-    setAgent(agent) {
-      set({ agent });
     },
 
     setLoadError(loadError) {

@@ -161,7 +161,12 @@ function raw(
 }
 
 function register(): void {
-  registry.register("agent-1", "tool-1", `http://localhost:${curator.port}/?session=${TOKEN}`);
+  registry.register(
+    "agent-1",
+    "tool-1",
+    "web_search",
+    `http://localhost:${curator.port}/?session=${TOKEN}`,
+  );
 }
 
 describe("registry", () => {
@@ -170,7 +175,19 @@ describe("registry", () => {
       port: 5123,
       token: TOKEN,
     });
-    expect(parseCuratorUrl(`http://mac.local:5123/?session=${TOKEN}`)?.port).toBe(5123);
+    expect(parseCuratorUrl(`http://127.0.0.1:5123/?session=${TOKEN}`)?.port).toBe(5123);
+    expect(parseCuratorUrl(`http://[::1]:5123/?session=${TOKEN}`)?.port).toBe(5123);
+    // Only loopback http curators with an explicit port and a token.
+    for (const raw of [
+      `http://mac.local:5123/?session=${TOKEN}`,
+      `http://169.254.169.254:80/?session=${TOKEN}`,
+      `http://localhost.evil.example:5123/?session=${TOKEN}`,
+      `http://user@evil.example:5123/?session=${TOKEN}`,
+      `https://localhost:5123/?session=${TOKEN}`,
+      `http://localhost:5123/?session=`,
+    ]) {
+      expect(parseCuratorUrl(raw), raw).toBeUndefined();
+    }
     expect(parseCuratorUrl("http://localhost/?session=abcdefgh1234")).toBeUndefined();
     expect(parseCuratorUrl("http://localhost:5123/")).toBeUndefined();
     expect(parseCuratorUrl("http://localhost:5123/?session=a%20b")).toBeUndefined();
@@ -183,25 +200,46 @@ describe("registry", () => {
   });
 
   it("maps tokens to public URLs, expires them, and releases them", () => {
-    const url = registry.register("a", "t", `http://localhost:5123/?session=${TOKEN}`);
+    const url = registry.register(
+      "a",
+      "t",
+      "web_search",
+      `http://localhost:5123/?session=${TOKEN}`,
+    );
     expect(url).toBe(`https://${HOSTNAME}:8443/?session=${TOKEN}`);
     expect(registry.lookup(TOKEN)?.port).toBe(5123);
     now += 30 * 60 * 1000;
     expect(registry.lookup(TOKEN)).toBeUndefined();
 
-    registry.register("a", "t", `http://localhost:5123/?session=${TOKEN}`);
+    registry.register("a", "t", "web_search", `http://localhost:5123/?session=${TOKEN}`);
     registry.release("a", "other");
     expect(registry.lookup(TOKEN)).toBeDefined();
     registry.release("a", "t");
     expect(registry.lookup(TOKEN)).toBeUndefined();
-    registry.register("a", "t", `http://localhost:5123/?session=${TOKEN}`);
+    registry.register("a", "t", "web_search", `http://localhost:5123/?session=${TOKEN}`);
     registry.releaseAgent("a");
     expect(registry.size).toBe(0);
 
+    // Only curator tools may register.
+    expect(registry.register("a", "t", "bash", `http://localhost:5123/?session=${TOKEN}`)).toBe(
+      undefined,
+    );
+    expect(registry.size).toBe(0);
+
     const dev = new CuratorRegistry({ hostname: "localhost", proxyPort: 4181 });
-    expect(dev.register("a", "t", `http://localhost:5123/?session=${TOKEN}`)).toBe(
+    expect(dev.register("a", "t", "web_search", `http://localhost:5123/?session=${TOKEN}`)).toBe(
       `http://localhost:4181/?session=${TOKEN}`,
     );
+  });
+
+  it("sweeps expired registrations on register and lookup", () => {
+    registry.register("a", "t1", "web_search", `http://localhost:5123/?session=${TOKEN}`);
+    now += 30 * 60 * 1000;
+    registry.register("a", "t2", "web_search", `http://localhost:5124/?session=other-token-1`);
+    expect(registry.size).toBe(1);
+    now += 30 * 60 * 1000;
+    expect(registry.lookup("unknown-token")).toBeUndefined();
+    expect(registry.size).toBe(0);
   });
 });
 
@@ -419,5 +457,54 @@ describe("pipeline", () => {
     );
     // The curator event follows the update that carried the URL.
     expect(types.indexOf("curator")).toBe(types.indexOf("tool_execution_update") + 1);
+  });
+
+  it("ignores curator URLs reported by tools other than web_search", async () => {
+    h = await startHarness({ curator: true });
+    const state = {
+      thinkingLevel: "low",
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode: "one-at-a-time",
+      followUpMode: "one-at-a-time",
+      sessionId: "s1",
+      sessionFile: "/tmp/pi-code-test/s1.jsonl",
+      autoCompactionEnabled: true,
+      messageCount: 0,
+      pendingMessageCount: 0,
+    };
+    h.fixture = h.writeFixture("curator-other-tool", [
+      { t: 0, dir: "in", line: { id: "q1", type: "get_state" } },
+      {
+        t: 0,
+        dir: "out",
+        line: { id: "q1", type: "response", command: "get_state", success: true, data: state },
+      },
+      { t: 0, dir: "in", line: { id: "p1", type: "prompt", message: "go" } },
+      { t: 0, dir: "out", line: { id: "p1", type: "response", command: "prompt", success: true } },
+      {
+        t: 0,
+        dir: "out",
+        line: {
+          type: "tool_execution_update",
+          toolCallId: "call-1",
+          toolName: "fetch_content",
+          args: {},
+          partialResult: {
+            content: [],
+            details: { curatorUrl: `http://localhost:54321/?session=${TOKEN}` },
+          },
+        },
+      },
+    ]);
+    const agent = await h.open();
+    const client = h.sse(agent.id, { since: 0 });
+    expect((await h.rpc(agent.id, { type: "prompt", message: "go" })).status).toBe(200);
+    await client.waitFor(
+      (r) => r.event.type === "pi" && r.event.event.type === "tool_execution_update",
+    );
+    await h.idle(agent.id);
+    expect(client.events.some((r) => r.event.type === "curator")).toBe(false);
+    expect(h.curators?.size).toBe(0);
   });
 });

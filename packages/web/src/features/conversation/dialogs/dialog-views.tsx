@@ -10,18 +10,19 @@ export type DialogAnswer = { value: string } | { confirmed: boolean } | { cancel
 
 interface ViewProps<M extends DialogRequest["method"]> {
   request: Extract<DialogRequest, { method: M }>;
-  seconds: number | null;
+  /** Server-side expiry (ms since epoch), for the countdown. */
+  expiresAt: number | undefined;
   busy: boolean;
   onAnswer(answer: DialogAnswer): void;
 }
 
 function Header({
   title,
-  seconds,
+  expiresAt,
   children,
 }: {
   title: string;
-  seconds: number | null;
+  expiresAt: number | undefined;
   children?: ReactNode;
 }) {
   return (
@@ -30,17 +31,17 @@ function Header({
         <SheetTitle className="min-w-0">
           <LinkifiedText text={title} />
         </SheetTitle>
-        <CountdownBadge seconds={seconds} />
+        <CountdownBadge expiresAt={expiresAt} />
       </div>
       {children}
     </SheetHeader>
   );
 }
 
-export function SelectDialogView({ request, seconds, busy, onAnswer }: ViewProps<"select">) {
+export function SelectDialogView({ request, expiresAt, busy, onAnswer }: ViewProps<"select">) {
   return (
     <>
-      <Header title={request.title} seconds={seconds}>
+      <Header title={request.title} expiresAt={expiresAt}>
         <SheetDescription className="sr-only">Choose an option</SheetDescription>
       </Header>
       <div className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto px-4" role="listbox">
@@ -67,10 +68,10 @@ export function SelectDialogView({ request, seconds, busy, onAnswer }: ViewProps
   );
 }
 
-export function ConfirmDialogView({ request, seconds, busy, onAnswer }: ViewProps<"confirm">) {
+export function ConfirmDialogView({ request, expiresAt, busy, onAnswer }: ViewProps<"confirm">) {
   return (
     <>
-      <Header title={request.title} seconds={seconds}>
+      <Header title={request.title} expiresAt={expiresAt}>
         <SheetDescription asChild>
           <div className="text-sm text-muted-foreground">
             <LinkifiedText text={request.message} />
@@ -89,7 +90,7 @@ export function ConfirmDialogView({ request, seconds, busy, onAnswer }: ViewProp
   );
 }
 
-export function InputDialogView({ request, seconds, busy, onAnswer }: ViewProps<"input">) {
+export function InputDialogView({ request, expiresAt, busy, onAnswer }: ViewProps<"input">) {
   const [value, setValue] = useState("");
   return (
     <form
@@ -98,7 +99,7 @@ export function InputDialogView({ request, seconds, busy, onAnswer }: ViewProps<
         onAnswer({ value });
       }}
     >
-      <Header title={request.title} seconds={seconds}>
+      <Header title={request.title} expiresAt={expiresAt}>
         <SheetDescription className="sr-only">Enter a value</SheetDescription>
       </Header>
       <div className="px-4">
@@ -128,11 +129,11 @@ export function InputDialogView({ request, seconds, busy, onAnswer }: ViewProps<
   );
 }
 
-export function EditorDialogView({ request, seconds, busy, onAnswer }: ViewProps<"editor">) {
+export function EditorDialogView({ request, expiresAt, busy, onAnswer }: ViewProps<"editor">) {
   const [value, setValue] = useState(request.prefill ?? "");
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header title={request.title} seconds={seconds}>
+      <Header title={request.title} expiresAt={expiresAt}>
         <SheetDescription className="sr-only">Edit the text</SheetDescription>
       </Header>
       <div className="flex min-h-0 flex-1 px-4">

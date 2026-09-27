@@ -7,7 +7,6 @@ import {
   type BashResult,
   isAllowedRpcCommandType,
   isApiError,
-  PROTOCOL_VERSION,
   RPC_COMMAND_ALLOWLIST,
   type RpcCommand,
   type RpcCommandBody,
@@ -18,10 +17,6 @@ import {
 } from "./index.ts";
 
 describe("protocol", () => {
-  it("exposes a protocol version", () => {
-    expect(PROTOCOL_VERSION).toBe(1);
-  });
-
   it("re-exports pi types", () => {
     expectTypeOf<RpcCommand["type"]>().toExtend<string>();
     expectTypeOf<SessionEntry["type"]>().toExtend<string>();
@@ -110,6 +105,7 @@ describe("ServerEvent", () => {
       | "curator"
       | "bash_output"
       | "bash_done"
+      | "live_reset"
       | "agent_status"
       | "resync"
     >();

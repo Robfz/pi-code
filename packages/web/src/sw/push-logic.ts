@@ -104,7 +104,10 @@ export interface NotificationSpec {
   title: string;
   options: {
     body: string;
+    /** One notification per agent: a newer one replaces the older… */
     tag: string;
+    /** …and still alerts (sound / vibration) instead of replacing it silently. */
+    renotify: true;
     data: { url: string };
     icon: string;
     badge: string;
@@ -117,6 +120,7 @@ export function notificationFor(payload: PushPayload): NotificationSpec {
     options: {
       body: payload.body,
       tag: payload.agentId,
+      renotify: true,
       data: { url: payload.url },
       icon: NOTIFICATION_ICON,
       badge: NOTIFICATION_BADGE,

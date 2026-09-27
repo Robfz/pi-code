@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage, rpc } from "@/lib/api";
 import { imageSrc } from "@/lib/content";
+import { prepareImage } from "@/lib/image-resize";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
@@ -53,26 +54,6 @@ let attachmentKey = 0;
 
 /** Last `set_editor_text` nonce applied per conversation store (outlives remounts). */
 const seenEditorNonce = new WeakMap<ConversationStore, number>();
-
-/** Read an image file as base64 `ImageContent`. */
-export function readImageFile(file: File): Promise<Attachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error(`Couldn't read ${file.name}`));
-    reader.onload = () => {
-      const url = String(reader.result);
-      const comma = url.indexOf(",");
-      const header = url.slice(0, comma);
-      const mimeType = /^data:([^;]+)/.exec(header)?.[1] || file.type || "image/png";
-      resolve({
-        key: `img-${++attachmentKey}`,
-        name: file.name,
-        image: { type: "image", data: url.slice(comma + 1), mimeType },
-      });
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 /** Slash-command suggestions above the composer. */
 function SlashMenu({
@@ -147,7 +128,8 @@ function SlashMenu({
  * - Desktop keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter newline.
  * - `/` autocompletes built-in and pi commands; built-ins run in the client.
  * - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
- * - Images (camera or gallery) go into `prompt.images` when the model accepts images.
+ * - Images (camera or gallery) go into `prompt.images` when the model accepts images, downscaled
+ *   to 2048 px / re-encoded as JPEG when large (`prepareImage`).
  * - `set_editor_text` requests and fork drafts replace the text.
  */
 export function Composer() {
@@ -245,13 +227,12 @@ export function Composer() {
   async function runBash(message: string, command: string, excludeFromContext: boolean) {
     setText("");
     try {
-      const data = await rpc(
+      await rpc(
         agentId,
         excludeFromContext
           ? { type: "bash", command, excludeFromContext }
           : { type: "bash", command },
       );
-      if (excludeFromContext && data?.id) useConversationUi.getState().markBashExcluded(data.id);
     } catch (error) {
       setText((current) => (current === "" ? message : current));
       toast.error(errorMessage(error));
@@ -334,13 +315,18 @@ export function Composer() {
 
   async function addFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const images = [...files].filter((f) => f.type === "" || f.type.startsWith("image/"));
-    try {
-      const read = await Promise.all(images.map(readImageFile));
-      setAttachments((current) => [...current, ...read]);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
+    const images = [...files].filter((f) => f.type.startsWith("image/"));
+    const results = await Promise.allSettled(images.map((file) => prepareImage(file)));
+    const added: Attachment[] = [];
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        const name = images[index]?.name ?? "";
+        added.push({ key: `img-${++attachmentKey}`, name, image: result.value });
+      } else {
+        toast.error(errorMessage(result.reason));
+      }
+    });
+    if (added.length > 0) setAttachments((current) => [...current, ...added]);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {

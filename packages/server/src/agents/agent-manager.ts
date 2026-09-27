@@ -424,7 +424,7 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
    * A session file's realpath. Must be an existing `.jsonl` file (else `session_not_found`)
    * inside `$HOME` or pi's sessions dir (else `outside_home`).
    */
-  private async resolveSessionFile(file: string): Promise<string> {
+  async resolveSessionFile(file: string): Promise<string> {
     if (typeof file !== "string" || !isAbsolute(file)) {
       throw new ApiError("invalid_body", "sessionFile must be an absolute path");
     }

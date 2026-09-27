@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { closeAgent, errorMessage, rpc } from "@/lib/api";
+import { closeAgent, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { queryKeys } from "@/lib/query-client";
 import { useConversation } from "@/store/context";
@@ -86,15 +86,19 @@ export function useSessionActions() {
 
       async compact(customInstructions?: string): Promise<boolean> {
         const instructions = customInstructions?.trim();
-        const data = await attempt(() =>
-          rpc(
+        try {
+          await rpc(
             agentId,
             instructions
               ? { type: "compact", customInstructions: instructions }
               : { type: "compact" },
-          ),
-        );
-        if (data === undefined) return false;
+          );
+        } catch (error) {
+          // pi reports its own compaction failures with `compaction_end`, shown inline in the
+          // transcript; only failures that never reached pi get a toast.
+          if (!isApiRequestError(error, "pi_error")) toast.error(errorMessage(error));
+          return false;
+        }
         toast.success("Context compacted");
         return true;
       },

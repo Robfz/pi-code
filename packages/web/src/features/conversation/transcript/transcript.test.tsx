@@ -1,5 +1,6 @@
 import { activeBranch, type SessionEntry } from "@pi-code/protocol";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { fixtureNames, fixtureTranscript, makeAgent } from "@/test/fixtures";
 import { hydratedStore, renderWithStore } from "@/test/render";
@@ -107,9 +108,12 @@ describe("transcript rendering details", () => {
 
   it("renders compaction and branch summary dividers with their summaries", async () => {
     await renderTranscript("compaction");
-    expect(screen.getByTestId("compaction")).toHaveTextContent(
-      /Context compacted \([\d,]+ tokens\)/,
-    );
+    const divider = screen.getByTestId("compaction");
+    expect(divider).toHaveTextContent(/Context compacted \([\d.]+[kM]? tokens\)/);
+    // The summary renders only once expanded.
+    expect(divider.querySelector(".markdown")).toBeNull();
+    await userEvent.setup().click(within(divider).getByText(/Context compacted/));
+    await waitFor(() => expect(divider.querySelector(".markdown")).not.toBeNull());
     await renderTranscript("entry-types");
     expect(screen.getByTestId("branch-summary")).toHaveTextContent("Branch summary");
   });

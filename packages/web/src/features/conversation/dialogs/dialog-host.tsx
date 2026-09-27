@@ -5,7 +5,6 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { errorMessage, isApiRequestError, respondUi } from "@/lib/api";
 import { useConversation } from "@/store/context";
 import { selectDialogs } from "@/store/selectors";
-import { useCountdown } from "./countdown";
 import {
   ConfirmDialogView,
   type DialogAnswer,
@@ -17,7 +16,8 @@ import {
 /**
  * Pending extension dialogs as bottom sheets, one at a time in arrival order. Answers go to
  * `POST /ui-responses`; the dialog hides right away and `ui_resolved` removes it from the store.
- * Expired dialogs (countdown at 0) hide locally, since pi sends nothing on timeout.
+ * A dialog whose countdown reaches 0 stays until the server's `ui_resolved` (the server resolves
+ * timed-out dialogs itself; this device's clock may be skewed).
  */
 export function DialogHost() {
   const agentId = useConversation((s) => s.agentId);
@@ -46,8 +46,6 @@ function DialogSheet({
 }) {
   const { request } = dialog;
   const [busy, setBusy] = useState(false);
-  const expire = useCallback(() => onDismiss(request.id), [onDismiss, request.id]);
-  const seconds = useCountdown(dialog.expiresAt, expire);
 
   async function answer(body: DialogAnswer) {
     setBusy(true);
@@ -65,7 +63,11 @@ function DialogSheet({
     }
   }
 
-  const props = { seconds, busy, onAnswer: (a: DialogAnswer) => void answer(a) };
+  const props = {
+    expiresAt: dialog.expiresAt,
+    busy,
+    onAnswer: (a: DialogAnswer) => void answer(a),
+  };
   const editor = request.method === "editor";
 
   return (

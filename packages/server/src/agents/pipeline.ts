@@ -123,8 +123,11 @@ export class AgentPipeline {
   private queue: Promise<void> = Promise.resolve();
   private sessionLock: Promise<void> = Promise.resolve();
   private readonly dialogTimers = new Map<string, NodeJS.Timeout>();
-  /** Running RPC `bash` commands: command id → command line. */
-  private readonly bashCommands = new Map<string, string>();
+  /** Running RPC `bash` commands by command id. */
+  private readonly bashCommands = new Map<
+    string,
+    { command: string; excludeFromContext: boolean }
+  >();
   /**
    * Messages whose `message_end` is published (or being published) but whose entry isn't in
    * the transcript yet, by `role:timestamp` (a count, since keys can repeat). An entry sync
@@ -265,6 +268,9 @@ export class AgentPipeline {
     this.runAssistant = undefined;
     this.beginUiRefresh();
     this.setStatus("starting");
+    // Late records of the previous process (e.g. a rejected bash's `bash_done`) may have
+    // landed after the exit's reset.
+    void this.enqueue(() => this.resetLive());
     void this.enqueue(() => this.initialize());
   }
 
@@ -288,18 +294,30 @@ export class AgentPipeline {
     }
   }
 
-  /** pi exited (`agent.status` is already `exited`): drop dialogs, publish the status. */
+  /**
+   * pi exited (`agent.status` is already `exited`): resolve its dialogs, drop the rest of its
+   * live state (`live_reset`), stop the git refresh, publish the status.
+   */
   onExit(): void {
     this.opts.curator?.releaseAgent(this.agent.id);
+    clearTimeout(this.gitTimer);
+    this.gitTimer = undefined;
     void this.enqueue(() => {
       for (const dialog of [...this.live.dialogs]) {
         clearTimeout(this.dialogTimers.get(dialog.request.id));
         this.dialogTimers.delete(dialog.request.id);
         this.publish({ type: "ui_resolved", id: dialog.request.id });
       }
+      this.resetLive();
       if (this.agent.attention === "input") this.agent.attention = "none";
       this.publishStatus();
     });
+  }
+
+  /** Publishes `live_reset` unless there is nothing in flight to drop. */
+  private resetLive(): void {
+    const event: ServerEvent = { type: "live_reset" };
+    if (reduceLive(this.live, event) !== this.live) this.publish(event);
   }
 
   /** The agent was removed: stop timers and end event streams. */
@@ -340,7 +358,7 @@ export class AgentPipeline {
         events.push(...(await this.syncEntries({ gated: false })));
         break;
       case "tool_execution_update":
-        events.push(...this.curatorEvents(event.toolCallId, event.partialResult));
+        events.push(...this.curatorEvents(event.toolCallId, event.toolName, event.partialResult));
         break;
       case "tool_execution_end":
         // The tool is done, so is its curator.
@@ -378,11 +396,15 @@ export class AgentPipeline {
   }
 
   /** Registers a running tool's curator and returns the `curator` event (once per URL). */
-  private curatorEvents(toolCallId: string, partialResult: unknown): ServerEvent[] {
+  private curatorEvents(
+    toolCallId: string,
+    toolName: string,
+    partialResult: unknown,
+  ): ServerEvent[] {
     const curator = this.opts.curator;
     const raw = curator && curatorUrlOf(partialResult);
     if (!curator || raw === undefined) return [];
-    const url = curator.register(this.agent.id, toolCallId, raw);
+    const url = curator.register(this.agent.id, toolCallId, toolName, raw);
     if (url === undefined || this.live.curator[toolCallId] === url) return [];
     return [{ type: "curator", toolCallId, url }];
   }
@@ -548,7 +570,7 @@ export class AgentPipeline {
 
   /** Refreshes the git status `gitDebounceMs` after the last call (turn ends, bash commands). */
   scheduleGitStatus(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.agent.status === "exited") return;
     clearTimeout(this.gitTimer);
     this.gitTimer = setTimeout(() => {
       this.gitTimer = undefined;
@@ -568,10 +590,10 @@ export class AgentPipeline {
       do {
         this.gitAgain = false;
         const status = await this.readGitStatus();
-        if (status !== undefined && !this.disposed) {
+        if (status !== undefined && !this.disposed && this.agent.status !== "exited") {
           await this.enqueue(() => this.publishGitStatus(status));
         }
-      } while (this.gitAgain && !this.disposed);
+      } while (this.gitAgain && !this.disposed && this.agent.status !== "exited");
     } finally {
       this.gitRefreshing = false;
     }
@@ -601,9 +623,12 @@ export class AgentPipeline {
    * `bash_done` followed by the entry sync (its `bashExecution` entry has no event). Returns
    * the command id.
    */
-  startBash(command: HostCommand & { command: string }): string {
+  startBash(command: HostCommand & { command: string; excludeFromContext?: boolean }): string {
     const { id, response } = this.agent.host.request<BashResult>(command);
-    this.bashCommands.set(id, command.command);
+    this.bashCommands.set(id, {
+      command: command.command,
+      excludeFromContext: command.excludeFromContext === true,
+    });
     const finish = (result: BashResult, sync: boolean) =>
       this.enqueue(async () => {
         const entries = sync ? await this.syncEntries() : [];
@@ -628,17 +653,20 @@ export class AgentPipeline {
   }
 
   private bashOutput(id: string, delta: string): ServerEvent {
-    const command = this.bashCommands.get(id);
-    return command === undefined
-      ? { type: "bash_output", id, delta }
-      : { type: "bash_output", id, delta, command };
+    return { type: "bash_output", id, delta, ...this.bashFields(id) };
   }
 
   private bashDone(id: string, result: BashResult): ServerEvent {
-    const command = this.bashCommands.get(id);
-    return command === undefined
-      ? { type: "bash_done", id, result }
-      : { type: "bash_done", id, result, command };
+    return { type: "bash_done", id, result, ...this.bashFields(id) };
+  }
+
+  /** `command` (and `excludeFromContext` for `!!`) of a running bash command. */
+  private bashFields(id: string): { command?: string; excludeFromContext?: true } {
+    const bash = this.bashCommands.get(id);
+    if (bash === undefined) return {};
+    return bash.excludeFromContext
+      ? { command: bash.command, excludeFromContext: true }
+      : { command: bash.command };
   }
 
   // -------------------------------------------------------------------------

@@ -65,7 +65,8 @@ export interface Received {
 /** Minimal streaming SSE client over `fetch`. */
 export class SseClient {
   readonly events: Received[] = [];
-  readonly comments: string[] = [];
+  /** Named events (`event: <name>`), which aren't `ServerEvent`s. */
+  readonly named: { name: string; id?: string; data: string }[] = [];
   retry: number | undefined;
   status: number | undefined;
   private readonly controller = new AbortController();
@@ -101,6 +102,7 @@ export class SseClient {
     const decoder = new TextDecoder();
     let buf = "";
     let id: string | undefined;
+    let name: string | undefined;
     let data: string[] = [];
     try {
       for (;;) {
@@ -113,22 +115,26 @@ export class SseClient {
           buf = buf.slice(nl + 1);
           nl = buf.indexOf("\n");
           if (line === "") {
-            if (data.length > 0) {
+            if (name !== undefined) {
+              this.named.push({ name, data: data.join("\n"), ...(id === undefined ? {} : { id }) });
+              for (const w of this.waiters) w();
+            } else if (data.length > 0) {
               const event = JSON.parse(data.join("\n")) as ServerEvent;
               this.events.push(id === undefined ? { event } : { seq: Number(id), event });
               for (const w of this.waiters) w();
             }
             id = undefined;
+            name = undefined;
             data = [];
           } else if (line.startsWith(":")) {
-            this.comments.push(line.slice(1).trim());
-            for (const w of this.waiters) w();
+            // comment
           } else {
             const colon = line.indexOf(":");
             const field = colon < 0 ? line : line.slice(0, colon);
             const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
             if (field === "data") data.push(value);
             else if (field === "id") id = value;
+            else if (field === "event") name = value;
             else if (field === "retry") this.retry = Number(value);
           }
         }

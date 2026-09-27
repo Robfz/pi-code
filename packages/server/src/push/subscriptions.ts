@@ -1,3 +1,4 @@
+import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { ApiError } from "../errors.ts";
 import { readJsonFile, writeJsonFileAtomic } from "../store/json-file.ts";
@@ -60,7 +61,8 @@ function isStored(value: unknown): value is StoredSubscription {
 
 /**
  * Push subscriptions keyed by endpoint, persisted to `<dataDir>/push-subscriptions.json`
- * (atomic writes, serialized). Loaded lazily on first use.
+ * (atomic writes, serialized, mode `0600`: endpoints and keys let anyone push to the devices).
+ * Loaded lazily on first use; loading also tightens an existing file to `0600`.
  */
 export class SubscriptionStore {
   private readonly path: string;
@@ -105,6 +107,7 @@ export class SubscriptionStore {
       } catch (e) {
         console.warn(`[push] ignoring unreadable ${this.path}: ${(e as Error).message}`);
       }
+      await chmod(this.path, 0o600).catch(() => {}); // ENOENT: nothing written yet
       this.subs = subs;
       return subs;
     })();
@@ -113,7 +116,7 @@ export class SubscriptionStore {
 
   private save(): Promise<void> {
     const snapshot = Object.fromEntries(this.subs ?? []);
-    const run = this.writes.then(() => writeJsonFileAtomic(this.path, snapshot));
+    const run = this.writes.then(() => writeJsonFileAtomic(this.path, snapshot, 0o600));
     this.writes = run.catch((e) => {
       console.error(`[push] failed to save ${this.path}:`, e);
     });
