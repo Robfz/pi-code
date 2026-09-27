@@ -247,6 +247,14 @@ describe("run lifecycle", () => {
     expect(aborted.run.lastError).toBeUndefined();
   });
 
+  it("a manual compaction_start clears the previous lastError; automatic ones keep it", () => {
+    const failed: LiveState = { ...initialLiveState(), run: { active: false, lastError: "old" } };
+    const manual = reduceLive(failed, pi({ type: "compaction_start", reason: "manual" }));
+    expect(manual.run).toEqual({ active: false, compaction: { reason: "manual" } });
+    const auto = reduceLive(failed, pi({ type: "compaction_start", reason: "threshold" }));
+    expect(auto.run.lastError).toBe("old");
+  });
+
   it("auto_retry_start / auto_retry_end", () => {
     const retrying = reduceLive(
       initialLiveState(),
@@ -744,5 +752,17 @@ describe("transcript_reset", () => {
     expect(Object.keys(s.tools)).toEqual(["run"]);
     expect(s.curator).toEqual({ run: "u2" });
     expect(Object.keys(s.bash)).toEqual(["b2"]);
+  });
+
+  it("drops a settled run's lastError (e.g. a failed /compact before a fork)", () => {
+    const reset: ServerEvent = {
+      type: "transcript_reset",
+      transcript: { entries: [], leafId: null },
+      state: state0,
+    };
+    const settled: LiveState = { ...initialLiveState(), run: { active: false, lastError: "x" } };
+    expect(reduceLive(settled, reset).run).toEqual({ active: false });
+    const active: LiveState = { ...initialLiveState(), run: { active: true, lastError: "x" } };
+    expect(reduceLive(active, reset)).toBe(active);
   });
 });

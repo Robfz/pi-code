@@ -270,8 +270,13 @@ function reducePi(
         queue: { steering: [...event.steering], followUp: [...event.followUp] },
       };
 
-    case "compaction_start":
-      return { ...state, run: { ...state.run, compaction: { reason: event.reason } } };
+    case "compaction_start": {
+      // A manual /compact is a fresh user action: drop the previous run's error banner (like
+      // agent_start). Automatic compactions keep it, since they follow the run that set it.
+      const { lastError: _, ...rest } = state.run;
+      const run = event.reason === "manual" ? rest : state.run;
+      return { ...state, run: { ...run, compaction: { reason: event.reason } } };
+    }
     case "compaction_end": {
       const { compaction: _, ...run } = state.run;
       const failed =
@@ -497,6 +502,12 @@ function reduceEntriesAppended(state: LiveState, entries: readonly SessionEntry[
 function reduceTranscriptReset(state: LiveState): LiveState {
   const { streaming: _, pendingUser: __, ...rest } = state;
   let next: LiveState = rest;
+  // A settled run's error banner belongs to the transcript being replaced (session switch, fork,
+  // compaction); run errors that matter are in the transcript's own assistant entries.
+  if (!state.run.active && state.run.lastError !== undefined) {
+    const { lastError: ___, ...run } = state.run;
+    next = { ...next, run };
+  }
   const finishedTools = Object.entries(state.tools)
     .filter(([, run]) => run.status !== "running")
     .map(([id]) => id);
@@ -509,6 +520,7 @@ function reduceTranscriptReset(state: LiveState): LiveState {
     .map(([id]) => id);
   if (finishedBash.length > 0) next = { ...next, bash: omitKeys(next.bash, finishedBash) };
   const unchanged =
+    next.run === state.run &&
     next.tools === state.tools &&
     next.curator === state.curator &&
     next.bash === state.bash &&

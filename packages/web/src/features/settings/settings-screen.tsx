@@ -166,6 +166,7 @@ function ThemeSection() {
             key={option}
             size="sm"
             variant={theme === option ? "default" : "outline"}
+            aria-pressed={theme === option}
             onClick={() => setTheme(option)}
           >
             {option[0]?.toUpperCase()}

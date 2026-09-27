@@ -126,7 +126,13 @@ export async function openAgent(body: OpenAgentBody): Promise<AgentInfo> {
 }
 
 export async function closeAgent(id: AgentId): Promise<void> {
-  await checked(await api.api.agents[":id"].$delete({ param: { id } }));
+  // The server's request guard requires a JSON content type on every non-GET request.
+  await checked(
+    await api.api.agents[":id"].$delete(
+      { param: { id } },
+      { headers: { "Content-Type": "application/json" } },
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -156,3 +156,22 @@ describe("Settings · notifications", () => {
     expect(await screen.findByText("0.87.1")).toBeInTheDocument();
   });
 });
+
+describe("Settings · theme", () => {
+  it("marks the active theme as pressed", async () => {
+    stubPushApi();
+    renderSettings();
+    const user = userEvent.setup();
+    const dark = await screen.findByRole("button", { name: "Dark" });
+    await user.click(dark);
+    await waitFor(() => expect(dark).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "System" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "System" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+  });
+});
