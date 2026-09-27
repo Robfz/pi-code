@@ -147,7 +147,7 @@ Built-in commands:
 | `setTitle` | `document.title` |
 | `set_editor_text` | Composer text |
 
-Dialog titles and messages are rendered with URLs linkified and a copy button next to each URL — this is the copy-paste flow for MCP OAuth (open the URL, approve, paste the redirect URL back into the input). Dialogs with `expiresAt` show a countdown. The project-trust prompt from the pi-code extension arrives as a normal `confirm` while the agent is starting.
+Dialog titles and messages are rendered with URLs linkified and a copy button next to each URL — this is the copy-paste flow for MCP OAuth (open the URL, approve, paste the redirect URL back into the input). Dialogs with `expiresAt` show a countdown. An agent with `status: "awaiting_trust"` shows a trust sheet (project path, what trusting loads) answered with `POST /trust`.
 
 ### Status bar
 

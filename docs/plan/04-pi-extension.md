@@ -15,9 +15,9 @@ Register a command whose handler awaits 3 s; send it via `prompt`; observe when 
 ## Phase 3
 
 ### E3 — Project trust handler
-- `hasSavedDecision(cwd)` over `trust.json` (closest canonical parent), the handler from the design, mode guard.
-- Done when: unit tests for `hasSavedDecision` (exact match, parent match, `false` decision, missing file, garbage file); manual test: a new project with `.pi/` prompts once in the web, is remembered, and the TUI doesn't prompt afterwards.
+- The `PI_CODE_TRUST` handler from the design (the pre-spawn check lives in the server, S10).
+- Done when: unit test of the handler for yes / no / unset; manual test: a new project with `.pi/settings.json` prompts once in the web, is remembered, and the TUI doesn't prompt afterwards.
 
 ### E4 — Tree navigation command
-- `/pi-code-tree <json>`: validate args, `navigateTree`, editor text for user-message targets, completion report (per E2).
+- `/pi-code-tree <json>`: validate args, `navigateTree`, editor text for user-message targets.
 - Done when: manual test via the web tree screen moves the leaf in place, with and without a branch summary, and the TUI shows the same tree afterwards.

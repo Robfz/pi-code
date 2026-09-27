@@ -42,7 +42,7 @@
 - Done when: each rule has an integration test against fake pi; the dialog fixture round-trips through the API.
 
 ### S7 — Remaining pipeline side effects
-- `transcript_reset` triggers (compaction, session-changing commands, leaf mismatch, unknown `since`), `stats` after `turn_end`, `pi-code:` private status channel, `get_commands` filtering.
+- `transcript_reset` triggers (compaction, session-changing commands, leaf mismatch, unknown `since`), entry sync after non-query command responses and `agent_settled`, `stats` after `turn_end`, `get_commands` filtering.
 - Done when: the compaction fixture produces a `transcript_reset` whose transcript contains the compaction entry.
 
 ## Phase 3 — sessions & projects
@@ -56,8 +56,8 @@
 - Done when: tests cover `~` expansion, a symlink escaping `$HOME` (rejected), dot-dir visibility.
 
 ### S10 — Full agent lifecycle
-- `open({ sessionFile })` with ownership (existing agent returned), cwd from the header, `--session`; ownership refresh after session-changing commands; `409 session_owned` for `switch_session`; restart of exited agents; `POST /tree/navigate` via the pi-code extension command (per E2's outcome).
-- Done when: integration tests cover double-open, fork updating `owners`, crash → `exited` with stderr tail → restart resumes the same session file.
+- `open({ sessionFile })` with ownership (existing agent returned), cwd from the header, `--session`; ownership refresh after session-changing commands; `409 session_owned` for `switch_session`; restart of exited agents; project-trust pre-check (protected resources + saved decision in `trust.json`) with `awaiting_trust` and `POST /trust`; `POST /tree/navigate` via the pi-code extension command (check `get_commands` first; `cancelled` when the leaf didn't move).
+- Done when: integration tests cover double-open, fork updating `owners`, crash → `exited` with stderr tail → restart resumes the same session file; trust pre-check unit tests (exact/parent/false decisions, missing or garbage file, each protected-resource kind).
 
 ## Phase 4 — rendering support
 

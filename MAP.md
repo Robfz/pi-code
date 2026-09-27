@@ -23,7 +23,7 @@
 
 ## Access & auth
 - [settled] Project trust can't be prompted over RPC: projects already trusted in the TUI (~/.pi/agent/trust.json) load their .pi resources; a never-trusted project opened from the web silently skips them (defaultProjectTrust "ask")
-- [settled] Project trust: the web UI asks the first time (option c) — user's call; realized by a pi-code extension's `project_trust` handler (`ctx.ui.confirm` over RPC, `remember: true` saves to trust.json, shared with the TUI), loaded via `--extension` only in server-spawned processes
+- [settled] Project trust: the web UI asks the first time (option c) — user's call; the server asks before spawning pi (extensions can't show UI during `project_trust` in RPC mode) and passes the answer via `PI_CODE_TRUST`; a pi-code extension returns it with `remember: true`, so pi saves it to trust.json, shared with the TUI
 - [settled] Server binds to 127.0.0.1, exposed only via `tailscale serve` (tailnet-only HTTPS); no app login — simplest secure option, agent recommendation on user's delegation
 
 ## Runtime model

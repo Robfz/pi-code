@@ -42,7 +42,7 @@ Spawns:
 pi --mode rpc --extension <pi-code extension path> [--session <file>]
 ```
 
-with `cwd` = the project directory. Without `--session`, pi starts a new session in that cwd.
+with `cwd` = the project directory and `PI_CODE_TRUST=yes|no` in the environment when the user just made a trust decision (see Project trust). Without `--session`, pi starts a new session in that cwd.
 
 Responsibilities:
 
@@ -50,7 +50,7 @@ Responsibilities:
 - **Correlation.** Every command gets an `id`; a map of pending promises resolves on the matching `response`. `extension_ui_response` is the exception: pi sends no response, so it is written without a pending entry. `parse` errors (no id) are logged.
 - **Routing.** stdout records are `response` → pending map; `extension_ui_request` → pipeline; everything else is a session event → pipeline.
 - **stderr** is diagnostics only: kept in a bounded tail (last 200 lines) exposed on crash.
-- **Lifecycle.** `status: starting | ready | exited`. The agent is registered and its pipeline runs from spawn; it becomes ready after the first successful `get_state`. Startup can block on the project-trust dialog, which reaches clients through the normal pipeline while the agent is `starting`. On unexpected exit, the agent becomes `exited` with `exitCode` and stderr tail; it stays listed so the client can restart it (respawn with `--session <last file>`). Closing: end stdin (pi disposes and exits), SIGTERM after 5 s, SIGKILL after 10 s.
+- **Lifecycle.** `status: awaiting_trust | starting | ready | exited`. The agent is registered before spawn; its pipeline runs from spawn; it becomes ready after the first successful `get_state`. On unexpected exit, the agent becomes `exited` with `exitCode` and stderr tail; it stays listed so the client can restart it (respawn with `--session <last file>`). Closing: end stdin (pi disposes and exits), SIGTERM after 5 s, SIGKILL after 10 s.
 
 The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi loads TypeScript extensions directly).
 
@@ -63,17 +63,25 @@ The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi 
 - After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
 - `cwd` must resolve inside `$HOME` (realpath), else `400`.
 
+### Project trust
+
+RPC mode can't prompt for trust (`docs/spikes/e1-e2.md`), so the server decides whether to ask before spawning:
+
+1. **Protected resources?** Any of `.pi/settings.json`, `.pi/extensions`, `.pi/skills`, `.pi/prompts`, `.pi/themes`, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` in the cwd, or `.agents/skills` in the cwd or an ancestor (excluding `~/.agents/skills`). Mirrors pi's `hasTrustRequiringProjectResources`; re-check on pi upgrades.
+2. **Saved decision?** The closest entry for the cwd's realpath or a parent in `~/.pi/agent/trust.json` (read-only).
+3. Resources and no saved decision → the agent is created with `status: "awaiting_trust"` and attention `input` (push notification). The client answers with `POST /api/agents/:id/trust`; the server then spawns pi with `PI_CODE_TRUST=yes|no`, and the pi-code extension returns it with `remember: true`, so pi saves it to `trust.json`.
+4. Otherwise → spawn immediately without the variable.
+
 ### Event pipeline
 
 All records from one agent flow through a single **sequential** async queue, so side effects (entry syncs) never reorder events. For each record:
 
 1. **Side effects** (may await pi) produce the list of server events to publish:
-   - `message_end`, `entry_appended` → `get_entries { since: lastEntryId }` → emit `entries_appended { entries, leafId }`. If the returned `leafId` is not the last appended entry, or `since` is unknown, fall back to a full `get_entries` and emit `transcript_reset`.
+   - `message_end`, `entry_appended`, `agent_settled`, and every non-query command response (many commands create entries without an event: names, model/thinking changes, labels, `bash`) → `get_entries { since: lastEntryId }` → emit `entries_appended { entries, leafId }` when non-empty. If the returned `leafId` is not the last appended entry, or `since` is unknown, fall back to a full `get_entries` and emit `transcript_reset`.
    - `compaction_end`, and completion of `new_session` / `switch_session` / `fork` / `clone` / tree navigation → full `get_entries` + `get_state` → `transcript_reset`.
    - `tool_execution_update|end` whose `details.curatorUrl` is set → register the curator session with the curator proxy and emit `curator { toolCallId, url }`.
    - `agent_settled`, dialog `extension_ui_request`, run failure → notification triggers (see Push).
    - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`.
-   - `extension_ui_request` `setStatus` with a `pi-code:` key → private channel from the pi-code extension (see `04-pi-extension.md`); consumed, not forwarded.
    - `bash` completion → emit `bash_done`, then sync entries (the `bashExecution` entry has no `message_end`).
 2. **Publish**, synchronously per event: assign the next `seq`, reduce into `LiveState` with the shared reducer (`@pi-code/protocol`), update the cached transcript/state, append to the event log, fan out to SSE subscribers. Nothing awaits inside this step, so state and `seq` always advance together.
 

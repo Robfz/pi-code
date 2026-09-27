@@ -51,7 +51,7 @@ Multiple concurrent sessions as a first-class workflow, MCP Apps and MCP URL eli
 | Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event log, serves the API, SSE, SPA, push, curator proxy. |
 | Protocol | `packages/protocol` | Shared TypeScript: API/SSE types and the **live-state reducer** used by both server (snapshots) and client (live UI). |
 | Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). |
-| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: project-trust prompt, in-place tree navigation command. |
+| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command. |
 
 ## Core concepts
 

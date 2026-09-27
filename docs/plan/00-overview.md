@@ -56,9 +56,9 @@ Tooling choices made while drafting (open to veto): pnpm, Biome, Vitest, tsx, No
 
 Exit criterion per phase: its tasks' "done when" pass, plus the phone checklist for that phase.
 
-## Spikes (phase 0)
+## Spikes (phase 0) — done
 
-Each spike is a throwaway script against the real `pi --mode rpc`; its outcome is written back into the design docs.
+Findings: `docs/spikes/e1-e2.md`, `docs/spikes/s0.md`; the design docs incorporate them. Each spike was a throwaway script against the real `pi --mode rpc`; its outcome is written back into the design docs.
 
 - **E1 — trust over RPC.** Does `project_trust` fire in RPC mode with a working `ctx.ui.confirm` round trip at startup, and does `remember: true` write `trust.json`? If it doesn't work, stop and revisit the trust decision with the user before building E3.
 - **E2 — command completion.** Does the `prompt` response for an extension command arrive after the handler finishes? Decides whether the `pi-code:` status channel is needed.

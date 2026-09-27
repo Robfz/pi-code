@@ -29,7 +29,8 @@ type Attention = "none" | "finished" | "failed" | "input";
 interface AgentInfo {
   id: AgentId;
   cwd: string;
-  status: "starting" | "ready" | "exited";
+  status: "awaiting_trust" | "starting" | "ready" | "exited";
+  trustPrompt?: { cwd: string };  // when awaiting_trust
   exitCode?: number;
   stderrTail?: string[];         // only when exited
   sessionFile?: string;
@@ -108,7 +109,14 @@ type OpenAgentBody = { cwd: string } | { sessionFile: string };
 - `{ cwd }` → new agent with a new session in that directory.
 - `{ sessionFile }` → resume. If the session is already open, returns the existing agent with `200`; otherwise `201`.
 
-→ `201 | 200 { agent: AgentInfo }`, returned as soon as the process is spawned (`status: "starting"`); the client connects to snapshot/SSE right away, which is how a startup trust dialog reaches it. `400 outside_home`, `404 session_not_found`.
+→ `201 | 200 { agent: AgentInfo }`, returned immediately (`status: "awaiting_trust"` or `"starting"`); the client connects to snapshot/SSE right away. `400 outside_home`, `404 session_not_found`.
+
+### `POST /api/agents/:id/trust`
+Answer the project-trust prompt of an `awaiting_trust` agent; the server then spawns pi, which saves the decision to pi's `trust.json`.
+```ts
+type TrustBody = { trusted: boolean };
+```
+→ `200 { agent: AgentInfo }`. `409 agent_busy` if the agent isn't awaiting trust.
 
 ### `DELETE /api/agents/:id`
 Close: stops the pi process and releases the session. → `204`.

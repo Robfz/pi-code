@@ -1,0 +1,30 @@
+{"t":1,"dir":"in","line":{"id":"extension-dialog-1","type":"prompt","message":"/s0-dialog"}}
+{"t":272,"dir":"err","line":"[pi-web-access] Dynamic tool activation requires Pi 0.86.1 or newer; web tools remain eagerly available."}
+{"t":435,"dir":"out","line":{"type":"extension_ui_request","id":"4d2b1dbe-9abc-4249-8db1-c7e18a8060b8","method":"setStatus","statusKey":"mcp","statusText":"\u001b[38;2;138;190;183m🔌 MCP: 2 servers enabled\u001b[39m"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"14229593-06c7-4b5d-a5e6-905f5e390237","method":"notify","message":"s0 notify info","notifyType":"info"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"d6517671-8195-4187-aee4-9f849bf334c2","method":"notify","message":"s0 notify warning","notifyType":"warning"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"882b55df-0dd0-4a66-a53b-6eb45519ee86","method":"setStatus","statusKey":"s0","statusText":"s0 status text"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"bd7ae16a-f428-4bf8-80bd-87978fd74cab","method":"setWidget","widgetKey":"s0","widgetLines":["s0 widget line 1","s0 widget line 2"]}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"8be7143a-8e70-4a63-bb88-3b7c5462c46a","method":"setWidget","widgetKey":"s0-below","widgetLines":["s0 below"],"widgetPlacement":"belowEditor"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"d0cb9b59-324e-47c2-b94d-3e9467dd73cf","method":"setTitle","title":"s0 title"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"bc80822d-2685-45e7-b917-1002d0ffa1bb","method":"set_editor_text","text":"s0 editor text"}}
+{"t":437,"dir":"out","line":{"type":"extension_ui_request","id":"0fa66505-7a57-41aa-947f-324ca5f69638","method":"select","title":"S0 pick a fruit","options":["apple","banana","cherry"]}}
+{"t":738,"dir":"in","line":{"type":"extension_ui_response","id":"0fa66505-7a57-41aa-947f-324ca5f69638","value":"banana"}}
+{"t":738,"dir":"out","line":{"type":"extension_ui_request","id":"3aea79ec-cd26-4cff-b49b-f89b31c6f761","method":"confirm","title":"S0 confirm?","message":"You picked banana"}}
+{"t":1039,"dir":"in","line":{"type":"extension_ui_response","id":"3aea79ec-cd26-4cff-b49b-f89b31c6f761","confirmed":true}}
+{"t":1039,"dir":"out","line":{"type":"extension_ui_request","id":"42a606e5-4a66-426f-a9a2-2ffd0c9e377d","method":"input","title":"S0 input","placeholder":"type here"}}
+{"t":1340,"dir":"in","line":{"type":"extension_ui_response","id":"42a606e5-4a66-426f-a9a2-2ffd0c9e377d","value":"hello from s0"}}
+{"t":1342,"dir":"out","line":{"type":"extension_ui_request","id":"b2958917-bde0-486e-a8fc-60e108a6684e","method":"editor","title":"S0 editor","prefill":"line1\nline2"}}
+{"t":1643,"dir":"in","line":{"type":"extension_ui_response","id":"b2958917-bde0-486e-a8fc-60e108a6684e","cancelled":true}}
+{"t":1644,"dir":"out","line":{"type":"extension_ui_request","id":"c0d4a782-2162-4973-a8c4-b678abd36972","method":"select","title":"S0 timeout select","options":["x","y"],"timeout":1500}}
+{"t":3145,"dir":"out","line":{"type":"extension_ui_request","id":"c0dbf3b6-cc39-4ed8-b5c9-f2c1ed27b961","method":"notify","message":"s0 result {\"choice\":\"banana\",\"ok\":true,\"text\":\"hello from s0\"}","notifyType":"info"}}
+{"t":3145,"dir":"out","line":{"type":"extension_ui_request","id":"08b42b5e-d0d8-43ee-b141-812afc3198ec","method":"setStatus","statusKey":"s0"}}
+{"t":3145,"dir":"out","line":{"type":"extension_ui_request","id":"8462fc1a-b55f-41e8-b98e-4ab2733c2a40","method":"setWidget","widgetKey":"s0"}}
+{"t":3145,"dir":"out","line":{"type":"extension_ui_request","id":"98014977-6144-4b0b-9a8f-a5721b66af51","method":"setWidget","widgetKey":"s0-below"}}
+{"t":3145,"dir":"out","line":{"id":"extension-dialog-1","type":"response","command":"prompt","success":true}}
+{"t":4648,"dir":"in","line":{"id":"extension-dialog-2","type":"get_state"}}
+{"t":4649,"dir":"out","line":{"id":"extension-dialog-2","type":"response","command":"get_state","success":true,"data":{"model":{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5 (latest)","api":"anthropic-messages","provider":"anthropic","baseUrl":"https://api.anthropic.com","reasoning":true,"input":["text","image"],"cost":{"input":1,"output":5,"cacheRead":0.1,"cacheWrite":1.25},"contextWindow":200000,"maxTokens":64000,"compat":{"supportsStrictTools":true},"promptCache":{"short":300,"long":3600},"inputLimits":{"maxRequestBytes":33554432,"images":{"maxPerRequest":100,"resize":{"maxWidth":2000,"maxHeight":2000,"maxBytes":4718592,"jpegQuality":80}}},"type":"chat"},"thinkingLevel":"low","isStreaming":false,"isCompacting":false,"steeringMode":"one-at-a-time","followUpMode":"one-at-a-time","sessionFile":"/tmp/pi-code-s0/sessions/extension-dialog/2026-09-26T23-52-02-038Z_01a0e022-08f6-7476-80f0-94f087b74702.jsonl","sessionId":"01a0e022-08f6-7476-80f0-94f087b74702","autoCompactionEnabled":true,"messageCount":0,"pendingMessageCount":0}}}
+{"t":4649,"dir":"in","line":{"id":"extension-dialog-3","type":"get_entries"}}
+{"t":4649,"dir":"out","line":{"id":"extension-dialog-3","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"model_change","id":"8b474b5f","parentId":null,"timestamp":"2026-09-26T23:52:02.198Z","provider":"anthropic","modelId":"claude-haiku-4-5"},{"type":"thinking_level_change","id":"ad96c5ce","parentId":"8b474b5f","timestamp":"2026-09-26T23:52:02.198Z","thinkingLevel":"low"}],"leafId":"ad96c5ce"}}}
+{"t":4649,"dir":"in","line":{"id":"extension-dialog-4","type":"get_session_stats"}}
+{"t":4650,"dir":"out","line":{"id":"extension-dialog-4","type":"response","command":"get_session_stats","success":true,"data":{"sessionFile":"/tmp/pi-code-s0/sessions/extension-dialog/2026-09-26T23-52-02-038Z_01a0e022-08f6-7476-80f0-94f087b74702.jsonl","sessionId":"01a0e022-08f6-7476-80f0-94f087b74702","userMessages":0,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":0,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0,"contextUsage":{"tokens":0,"contextWindow":200000,"percent":0}}}}
