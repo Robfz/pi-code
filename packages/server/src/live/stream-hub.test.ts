@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { StreamFrame } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/agent-manager.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
@@ -63,5 +66,58 @@ describe("StreamHub baseline", () => {
     const hub = hubAt("2026-01-08T10:30:00.001Z");
     await hub.ready;
     expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["forked"]);
+  });
+});
+
+describe("StreamHub catalog refresh", () => {
+  let agentDir: string;
+  beforeEach(() => {
+    agentDir = mkdtempSync(join(tmpdir(), "pi-code-hub-"));
+    mkdirSync(join(agentDir, "sessions", "--p--"), { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  function writeSession(id: string, updatedAt: string): void {
+    const header = { type: "session", version: 3, id, timestamp: updatedAt, cwd: "/p" };
+    writeFileSync(
+      join(agentDir, "sessions", "--p--", `${id}.jsonl`),
+      `${JSON.stringify(header)}\n`,
+    );
+  }
+
+  it("broadcasts catalog only when the window changes", async () => {
+    vi.setSystemTime("2026-01-10T00:00:00.000Z");
+    writeSession("a", "2026-01-09T00:00:00.000Z");
+    const manager = new AgentManager({
+      home: agentDir,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const hub = new StreamHub({ manager, catalog: new SessionCatalog({ agentDir }) });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["a"]);
+
+    await hub.refreshCatalog();
+    expect(frames).toEqual([]);
+
+    writeSession("b", "2026-01-09T12:00:00.000Z");
+    await hub.refreshCatalog();
+    expect(frames.map((f) => f.type === "catalog" && f.sessions.map((s) => s.id))).toEqual([
+      ["b", "a"],
+    ]);
+    // Outside the window: no change.
+    writeSession("old", "2025-12-01T00:00:00.000Z");
+    await hub.refreshCatalog();
+    expect(frames).toHaveLength(1);
+
+    // Time alone moves a session out of the window.
+    vi.setSystemTime("2026-01-16T06:00:00.000Z");
+    await hub.refreshCatalog();
+    expect(frames.at(-1)).toEqual({ type: "catalog", sessions: [hub.baseline().sessions[0]] });
+    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["b"]);
+    hub.close();
   });
 });

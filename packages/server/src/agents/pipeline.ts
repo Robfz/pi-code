@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
   type AgentInfo,
   type AgentMessage,
@@ -27,6 +29,7 @@ import {
 import { type CuratorHook, curatorUrlOf } from "../curator/registry.ts";
 import { ApiError, isApiError } from "../errors.ts";
 import { gitStatus } from "../git/git.ts";
+import { canonicalize } from "../paths.ts";
 import type { AgentHost, HostCommand } from "./agent-host.ts";
 import { EventLog } from "./event-log.ts";
 
@@ -162,6 +165,8 @@ export class AgentPipeline {
   private gitRefreshing = false;
   private gitAgain = false;
   private disposed = false;
+  /** The last session file canonicalized by `getState`, if it existed: pi's path → canonical. */
+  private sessionPath: { raw: string; canonical: string } | undefined;
 
   constructor(agent: PipelineAgent, opts: PipelineOptions = {}) {
     this.agent = agent;
@@ -303,7 +308,7 @@ export class AgentPipeline {
   private async initialize(): Promise<void> {
     const host = this.agent.host;
     try {
-      const state = await host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(host);
       const transcript = await host.send<Transcript>({ type: "get_entries" });
       const stats = await host
         .send<SessionStats>({ type: "get_session_stats" })
@@ -754,7 +759,7 @@ export class AgentPipeline {
   private async resetTranscript(): Promise<ServerEvent[]> {
     try {
       const transcript = await this.agent.host.send<Transcript>({ type: "get_entries" });
-      const state = await this.agent.host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(this.agent.host);
       return [{ type: "transcript_reset", transcript, state }];
     } catch (e) {
       this.warnUnlessExited("transcript reset", e);
@@ -783,12 +788,32 @@ export class AgentPipeline {
 
   private async fetchState(): Promise<ServerEvent[]> {
     try {
-      const state = await this.agent.host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(this.agent.host);
       return [{ type: "state", state }];
     } catch (e) {
       this.warnUnlessExited("state refresh", e);
       return [];
     }
+  }
+
+  /**
+   * `get_state` with `sessionFile` canonicalized, matching the catalog's paths (pi reports a new
+   * session's path as it built it, e.g. through a symlinked agent dir). A file that doesn't exist
+   * yet (pi writes new sessions lazily) is canonicalized through its directory.
+   */
+  private async getState(host: AgentHost): Promise<RpcSessionState> {
+    const state = await host.send<RpcSessionState>({ type: "get_state" });
+    const raw = state.sessionFile;
+    if (raw === undefined) return state;
+    if (this.sessionPath?.raw === raw) return { ...state, sessionFile: this.sessionPath.canonical };
+    let sessionFile: string;
+    if (existsSync(raw)) {
+      sessionFile = await canonicalize(raw);
+      this.sessionPath = { raw, canonical: sessionFile };
+    } else {
+      sessionFile = join(await canonicalize(dirname(raw)), basename(raw));
+    }
+    return { ...state, sessionFile };
   }
 
   private warnUnlessExited(what: string, e: unknown): void {

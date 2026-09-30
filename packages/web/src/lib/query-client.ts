@@ -9,7 +9,6 @@ export function createQueryClient(): QueryClient {
 }
 
 export const queryKeys = {
-  agents: ["agents"] as const,
   health: ["health"] as const,
   projects: ["projects"] as const,
   sessions: (cwd?: string) => ["sessions", cwd ?? null] as const,

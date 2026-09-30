@@ -24,6 +24,7 @@ import type { AgentHostOptions } from "../agents/agent-host.ts";
 import { AgentManager, type AgentManagerDeps } from "../agents/agent-manager.ts";
 import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
+import { type SessionWatcher, watchSessions } from "../catalog/watcher.ts";
 import { CuratorRegistry } from "../curator/registry.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import type { SseOptions } from "../http/stream.ts";
@@ -54,6 +55,8 @@ export interface HarnessOptions {
   push?: boolean | { failWith?: (endpoint: string) => number | undefined };
   /** Curator registry wired into the pipelines (`harness.curators`). */
   curator?: boolean;
+  /** Watches `<agentDir>/sessions` and feeds rescans to the hub, as the server does. */
+  watchSessions?: boolean;
 }
 
 /** A push message the harness's fake sender received. */
@@ -325,6 +328,7 @@ export class Harness {
   /** Fixture name or path used for agents opened from now on. */
   fixture: string;
   private server: ServerType | undefined;
+  private readonly sessionsWatcher: SessionWatcher | undefined;
   private readonly clients: SseReader[] = [];
   port = 0;
 
@@ -365,6 +369,9 @@ export class Harness {
       ownerOf: (file) => this.manager.ownerOf(file),
     });
     this.hub = new StreamHub({ manager: this.manager, catalog: this.catalog });
+    this.sessionsWatcher = opts.watchSessions
+      ? watchSessions(join(this.agentDir, "sessions"), () => void this.hub.refreshCatalog())
+      : undefined;
   }
 
   async listen(opts: HarnessOptions): Promise<void> {
@@ -514,7 +521,9 @@ export class Harness {
 
   async close(): Promise<void> {
     await Promise.all(this.clients.map((c) => c.close()));
+    this.sessionsWatcher?.close();
     await this.manager.closeAll();
+    this.hub.close();
     await this.push?.idle();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();

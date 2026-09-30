@@ -80,23 +80,7 @@ export function AgentStatePanel() {
   const navigate = useNavigate();
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
-  const loadError = useConversation((s) => s.loadError);
   const [busy, setBusy] = useState(false);
-
-  if (loadError) {
-    return (
-      <div role="alert" className="flex flex-col items-center gap-3 py-12 text-center text-sm">
-        <p className="text-muted-foreground">
-          {loadError.code === "agent_not_found"
-            ? "This conversation is closed."
-            : loadError.message}
-        </p>
-        <Button variant="outline" onClick={() => void navigate({ to: "/" })}>
-          Back to home
-        </Button>
-      </div>
-    );
-  }
 
   if (!hydrated || agent.status === "starting") {
     return (

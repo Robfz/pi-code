@@ -86,7 +86,8 @@ export function piCommand(piBin: string, extensionPath: string): (req: SpawnRequ
 export class Agent {
   readonly id: AgentId;
   readonly cwd: string;
-  readonly startedAt: string;
+  /** Creation time, reset by `restart`: where the idle sweep's clock starts. */
+  startedAt: string;
   status: AgentStatus = "starting";
   attention: Attention = "none";
   /** Cached `get_state` data (kept current by the pipeline). */
@@ -293,6 +294,7 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
     const awaitTrust = await this.needsTrust(agent.cwd);
     if (agent.status !== "exited" || this.agents.get(id) !== agent) return agent;
     if (file !== undefined) agent.requestedSessionFile = file;
+    agent.startedAt = new Date().toISOString();
     if (awaitTrust) {
       agent.pipeline.setStatus("awaiting_trust");
       this.requestTrust(agent);

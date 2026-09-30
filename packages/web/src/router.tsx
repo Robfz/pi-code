@@ -1,8 +1,8 @@
 /**
  * Code-based route tree (`docs/design/03-web-client.md`, "Routes").
  *
- * `/agents/$agentId` is a layout owning the agent's store and connection; the conversation,
- * tree and diff screens are its children, so switching between them keeps the live state.
+ * `/agents/$agentId` is a layout providing the agent's store from the live registry; the
+ * conversation, tree and diff screens are its children.
  */
 
 import {

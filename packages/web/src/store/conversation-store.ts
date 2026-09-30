@@ -2,7 +2,7 @@
  * Live conversation store (`docs/design/03-web-client.md`, "Live conversation store").
  *
  * One vanilla Zustand store per open agent. `hydrate` replaces everything with a snapshot;
- * `apply` runs each SSE event through the shared reducers (`reduceLive` for the live half,
+ * `apply` runs each streamed event through the shared reducers (`reduceLive` for the live half,
  * `applyServerEventToCaches` for the committed half), exactly like the server does, so a
  * snapshot at `seq` plus the events after it equals the server's state.
  */
@@ -25,13 +25,13 @@ export type ConnectionState = "connecting" | "live" | "reconnecting" | "offline"
 export interface ConversationData extends SessionCaches {
   agentId: AgentId;
   live: LiveState;
-  /** Last applied event (`id:` of the SSE message, or the snapshot's `seq`). */
+  /** Last applied event (the `event` frame's `seq`, or the snapshot's). */
   seq: number;
   /** A snapshot has been applied at least once. */
   hydrated: boolean;
   connection: ConnectionState;
-  /** Fatal load error (e.g. `agent_not_found`); the connection stops retrying. */
-  loadError?: { code: string; message: string };
+  /** The agent is gone (closed, or unknown to the server); the registry no longer feeds it. */
+  closed: boolean;
 }
 
 export interface ConversationActions {
@@ -39,7 +39,7 @@ export interface ConversationActions {
   /** Apply one event. Events at or below the current `seq` are ignored (replays). */
   apply(event: ServerEvent, seq: number): void;
   setConnection(connection: ConnectionState): void;
-  setLoadError(error: { code: string; message: string } | undefined): void;
+  markClosed(): void;
 }
 
 export type ConversationState = ConversationData & ConversationActions;
@@ -72,6 +72,7 @@ export function createConversationStore(
     seq: 0,
     hydrated: false,
     connection: "connecting",
+    closed: false,
     ...initial,
 
     hydrate(snapshot) {
@@ -84,7 +85,6 @@ export function createConversationStore(
         live: snapshot.live,
         seq: snapshot.seq,
         hydrated: true,
-        loadError: undefined,
       });
     },
 
@@ -109,8 +109,8 @@ export function createConversationStore(
       if (get().connection !== connection) set({ connection });
     },
 
-    setLoadError(loadError) {
-      set({ loadError });
+    markClosed() {
+      set({ closed: true });
     },
   }));
 }

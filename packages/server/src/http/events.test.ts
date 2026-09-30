@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AgentInfo,
@@ -535,6 +537,79 @@ group("live stream", () => {
     await client.until(() => client.named.find((e) => e.name === "ping"));
     expect(client.named[0]).toEqual({ name: "ping", data: "{}" });
     expect(client.frames.map((f) => f.frame.type)).toEqual(["baseline"]);
+  });
+});
+
+group("live stream feeds", () => {
+  it("sends catalog when the session watcher sees a new session", async () => {
+    const h = await start({ watchSessions: true });
+    const client = h.stream();
+    await client.waitFor(isFrame("baseline"));
+    const dir = join(h.agentDir, "sessions", "--project--");
+    mkdirSync(dir);
+    const header = { type: "session", version: 3, id: "s1", timestamp: new Date().toISOString() };
+    const write = () =>
+      writeFileSync(join(dir, "s1.jsonl"), `${JSON.stringify({ ...header, cwd: h.project })}\n`);
+    write();
+    // Rewritten until seen: the watch may miss changes made while it is still starting.
+    const rewrite = setInterval(write, 200);
+    const sessions = [
+      {
+        file: join(dir, "s1.jsonl"),
+        id: "s1",
+        cwd: h.project,
+        createdAt: header.timestamp,
+        updatedAt: header.timestamp,
+      },
+    ];
+    try {
+      expect(await client.waitFor(isFrame("catalog"))).toEqual({ type: "catalog", sessions });
+    } finally {
+      clearInterval(rewrite);
+    }
+    expect(await h.stream().waitFor(isFrame("baseline"))).toMatchObject({ sessions });
+  });
+
+  it("tracks the branch of folders with a live agent, until none is left", async () => {
+    const h = await start({ pipeline: { gitStatus: async () => null } });
+    mkdirSync(join(h.project, ".git"));
+    writeFileSync(join(h.project, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const client = h.stream();
+    expect(await client.waitFor(isFrame("baseline"))).toMatchObject({ branches: {} });
+
+    const a = await h.open();
+    const b = await h.open();
+    expect(await client.waitFor(isFrame("branch"))).toEqual({
+      type: "branch",
+      cwd: h.project,
+      branch: "main",
+    });
+    const later = h.stream();
+    expect(await later.waitFor(isFrame("baseline"))).toMatchObject({
+      branches: { [h.project]: "main" },
+    });
+
+    // Rewritten until seen: the watch may miss changes made while it is still starting.
+    const checkout = () =>
+      writeFileSync(join(h.project, ".git", "HEAD"), "ref: refs/heads/feature\n");
+    checkout();
+    const rewrite = setInterval(checkout, 200);
+    try {
+      await client.waitFor((f) => f.type === "branch" && f.branch === "feature");
+    } finally {
+      clearInterval(rewrite);
+    }
+
+    // An exited agent isn't live: the folder is dropped once the other one is closed too.
+    process.kill(h.manager.require(a.id).host.pid as number, "SIGKILL");
+    await h.waitForStatus(a.id, "exited");
+    expect((await h.api("DELETE", `/api/agents/${b.id}`, {})).status).toBe(204);
+    await client.waitFor(isFrame("agent_closed"));
+    const branchFrames = client.frames.flatMap(({ frame }) =>
+      frame.type === "branch" ? [frame.branch] : [],
+    );
+    expect(branchFrames).toEqual(["main", "feature", null]);
+    expect(h.hub.baseline().branches).toEqual({});
   });
 });
 

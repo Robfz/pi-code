@@ -1,9 +1,7 @@
 import type { AgentInfo } from "@pi-code/protocol";
-import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { listAgents } from "@/lib/api";
-import { queryKeys } from "@/lib/query-client";
+import { useLive } from "@/store/context";
 
 interface BadgeNavigator {
   setAppBadge?(count?: number): Promise<void>;
@@ -23,8 +21,8 @@ export function agentIdFromPath(pathname: string): string | undefined {
 }
 
 /**
- * Agents needing attention, minus the one on screen (its attention is being cleared by the
- * snapshot / `POST /ack`, which the agents list may not reflect yet).
+ * Agents needing attention, minus the one on screen (its attention is being cleared by
+ * `POST /ack`, which the agents may not reflect yet).
  */
 export function attentionCount(agents: readonly AgentInfo[], visibleAgentId?: string): number {
   return agents.filter((a) => a.attention !== "none" && a.id !== visibleAgentId).length;
@@ -43,20 +41,17 @@ export async function applyBadge(count: number): Promise<void> {
 }
 
 /**
- * While the app is visible, keep the icon badge equal to the agents needing attention — in
- * particular, clear it once nothing is left. Push messages set it while the app is closed.
+ * While the app is visible and the live stream is up, keep the icon badge equal to the agents
+ * needing attention — in particular, clear it once nothing is left. Push messages set it while
+ * the app is closed.
  */
 export function useBadgeSync(): void {
-  const supported = badgeNavigator() !== null;
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const agents = useQuery({
-    queryKey: queryKeys.agents,
-    queryFn: listAgents,
-    enabled: supported,
-    refetchInterval: 30_000,
-  });
   const visibleAgentId = agentIdFromPath(pathname);
-  const count = agents.data ? attentionCount(agents.data, visibleAgentId) : undefined;
+  // A primitive (`live` implies a baseline): agent frames that keep the count don't re-render.
+  const count = useLive((s) =>
+    s.connection === "live" ? attentionCount(Object.values(s.agents), visibleAgentId) : undefined,
+  );
   useEffect(() => {
     if (count === undefined) return;
     if (document.visibilityState === "visible") void applyBadge(count);

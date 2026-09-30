@@ -1,27 +1,39 @@
+import { PlusIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { type ConnectionDeps, ConversationConnection } from "@/store/connection";
-import { ConversationStoreProvider } from "@/store/context";
-import { createConversationStore } from "@/store/conversation-store";
+import { useStore } from "zustand";
+import { Button } from "@/components/ui/button";
+import { ProjectPicker } from "@/features/catalog/project-picker";
+import { PlaceholderScreen } from "@/routes/placeholder";
+import { ConversationStoreProvider, useLiveRegistry } from "@/store/context";
+
+function ConversationClosed() {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  return (
+    <PlaceholderScreen title="Conversation closed">
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <p>This conversation is closed.</p>
+        <Button onClick={() => setPickerOpen(true)}>
+          <PlusIcon /> New conversation
+        </Button>
+        <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} />
+      </div>
+    </PlaceholderScreen>
+  );
+}
 
 /**
- * Owns one agent's store and connection for as long as the `/agents/$agentId` subtree is
- * mounted (conversation, tree and diff share it). Key it by `agentId`.
+ * The `/agents/$agentId` subtree (conversation, tree and diff) around the agent's store from
+ * the live registry, marked as the conversation on screen while mounted. Key it by `agentId`.
+ * Once the agent is closed, the subtree gives way to "Conversation closed".
  */
-export function ConversationRoot({
-  agentId,
-  connectionDeps,
-  children,
-}: {
-  agentId: string;
-  connectionDeps?: Partial<ConnectionDeps>;
-  children: ReactNode;
-}) {
-  const [store] = useState(() => createConversationStore(agentId));
-  const [deps] = useState(() => connectionDeps);
-  useEffect(() => {
-    const connection = new ConversationConnection(store, deps);
-    connection.start();
-    return () => connection.stop();
-  }, [store, deps]);
-  return <ConversationStoreProvider store={store}>{children}</ConversationStoreProvider>;
+export function ConversationRoot({ agentId, children }: { agentId: string; children: ReactNode }) {
+  const registry = useLiveRegistry();
+  const [store] = useState(() => registry.open(agentId));
+  useEffect(() => registry.show(agentId), [registry, agentId]);
+  const closed = useStore(store, (s) => s.closed);
+  return (
+    <ConversationStoreProvider store={store}>
+      {closed ? <ConversationClosed /> : children}
+    </ConversationStoreProvider>
+  );
 }

@@ -1,19 +1,16 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { queryKeys } from "@/lib/query-client";
 import { isSwMessage, SW_MESSAGE, safeAppPath } from "@/sw/push-logic";
 
 /**
  * Messages from the service worker:
  * - `navigate` (notification click on this window) → route there without reloading.
- * - `push` → refresh the agents list; while visible (no system notification was shown), also
- *   toast unless the conversation is already on screen.
+ * - `push` → while visible (no system notification was shown), toast unless the conversation is
+ *   already on screen.
  */
 export function useServiceWorkerMessages(): void {
   const router = useRouter();
-  const queryClient = useQueryClient();
   useEffect(() => {
     const container = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
     if (!container) return;
@@ -24,7 +21,6 @@ export function useServiceWorkerMessages(): void {
         router.history.push(safeAppPath(message.url));
         return;
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
       const { payload } = message;
       const path = safeAppPath(payload.url, payload.agentId);
       // Hidden windows got a system notification instead.
@@ -39,5 +35,5 @@ export function useServiceWorkerMessages(): void {
     };
     container.addEventListener("message", onMessage);
     return () => container.removeEventListener("message", onMessage);
-  }, [router, queryClient]);
+  }, [router]);
 }

@@ -5,7 +5,6 @@ import { useMemo } from "react";
 import { toast } from "sonner";
 import { closeAgent, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { queryKeys } from "@/lib/query-client";
 import { useConversation } from "@/store/context";
 import { useConversationUi } from "./conversation-ui";
 
@@ -30,7 +29,6 @@ export function useSessionActions() {
 
   return useMemo(() => {
     const invalidateCatalog = () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     };
     return {

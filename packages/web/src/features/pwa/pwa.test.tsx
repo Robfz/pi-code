@@ -3,9 +3,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
-import { createQueryClient, queryKeys } from "@/lib/query-client";
+import { createQueryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/router";
 import { SW_MESSAGE } from "@/sw/push-logic";
+import { sendBaseline, sendFrame } from "@/test/fake-event-source";
 import { makeAgent } from "@/test/fixtures";
 import { installServiceWorkerContainer, uninstallPushEnv } from "@/test/push-env";
 import { stubFetch } from "@/test/render";
@@ -36,7 +37,6 @@ describe("offline banner", () => {
       if (call.url === "/api/health") {
         return reachable ? [200, { ok: true, piVersion: "1" }] : [502, { error: "bad gateway" }];
       }
-      if (call.url === "/api/agents") return [200, { agents: [] }];
       return [200, { sessions: [] }];
     });
     renderAt();
@@ -50,8 +50,9 @@ describe("offline banner", () => {
   });
 
   it("follows the browser's offline / online events", async () => {
-    stubFetch((call) => (call.url === "/api/agents" ? [200, { agents: [] }] : undefined));
+    stubFetch();
     renderAt();
+    sendBaseline([]);
     expect(await screen.findByText("No open conversations.")).toBeInTheDocument();
     expect(screen.queryByTestId("offline-banner")).toBeNull();
     act(() => setOnline(false));
@@ -74,30 +75,35 @@ describe("app badge", () => {
     expect(agentIdFromPath("/sessions")).toBeUndefined();
   });
 
-  it("syncs the badge from the agents list and clears it when nothing needs attention", async () => {
+  it("syncs the badge from the live agents and clears it when nothing needs attention", async () => {
     const setAppBadge = vi.fn(async () => {});
     const clearAppBadge = vi.fn(async () => {});
     Object.defineProperty(navigator, "setAppBadge", { configurable: true, value: setAppBadge });
     Object.defineProperty(navigator, "clearAppBadge", { configurable: true, value: clearAppBadge });
-    let agents = [
+    const { calls } = stubFetch();
+    renderAt("/");
+    // Nothing is applied before the stream is up.
+    expect(setAppBadge).not.toHaveBeenCalled();
+    expect(clearAppBadge).not.toHaveBeenCalled();
+
+    sendBaseline([
       makeAgent({ id: "a1", cwd: "/home/me/alpha", attention: "finished" }),
       makeAgent({ id: "a2", cwd: "/home/me/beta", attention: "failed" }),
-    ];
-    stubFetch((call) => (call.url === "/api/agents" ? [200, { agents }] : undefined));
-    const queryClient = createQueryClient();
-    renderAt("/", queryClient);
+    ]);
     await waitFor(() => expect(setAppBadge).toHaveBeenCalledWith(2));
 
-    agents = agents.map((a) => ({ ...a, attention: "none" as const }));
-    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.agents }));
+    sendFrame({ type: "agent", agent: makeAgent({ id: "a1", attention: "none" }) });
+    await waitFor(() => expect(setAppBadge).toHaveBeenCalledWith(1));
+    sendFrame({ type: "agent_closed", agentId: "a2" });
     await waitFor(() => expect(clearAppBadge).toHaveBeenCalled());
+    expect(calls.some((c) => c.url === "/api/agents")).toBe(false);
   });
 });
 
 describe("service worker messages", () => {
   it("routes to the URL of a clicked notification", async () => {
     const container = installServiceWorkerContainer();
-    stubFetch((call) => (call.url === "/api/agents" ? [200, { agents: [] }] : undefined));
+    stubFetch();
     const router = renderAt("/settings");
     await screen.findByRole("heading", { name: "Settings" });
     act(() => container.emit({ type: SW_MESSAGE.navigate, url: "/sessions" }));
@@ -109,7 +115,7 @@ describe("service worker messages", () => {
 
   it("toasts a push received while focused, with an Open action", async () => {
     const container = installServiceWorkerContainer();
-    stubFetch((call) => (call.url === "/api/agents" ? [200, { agents: [] }] : undefined));
+    stubFetch();
     const router = renderAt("/settings");
     await screen.findByRole("heading", { name: "Settings" });
     act(() =>

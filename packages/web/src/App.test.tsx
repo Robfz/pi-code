@@ -1,22 +1,14 @@
 import { createMemoryHistory } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createQueryClient } from "./lib/query-client.ts";
 import { createAppRouter } from "./router.tsx";
+import { FakeEventSource, sendBaseline } from "./test/fake-event-source.ts";
 import { makeAgent, makeSnapshot } from "./test/fixtures.ts";
 import { stubFetch } from "./test/render.tsx";
-
-class NoopEventSource {
-  readyState = 0;
-  onopen = null;
-  onmessage = null;
-  onerror = null;
-  constructor(readonly url: string) {}
-  addEventListener() {}
-  close() {}
-}
 
 function renderApp(path = "/") {
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
@@ -29,38 +21,37 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("home lists open agents", async () => {
-    stubFetch((call) =>
-      call.url === "/api/agents"
-        ? [
-            200,
-            {
-              agents: [
-                makeAgent({ id: "a1", cwd: "/home/me/alpha", attention: "finished" }),
-                makeAgent({
-                  id: "a2",
-                  cwd: "/home/me/beta",
-                  sessionName: "Refactor",
-                  isStreaming: true,
-                }),
-              ],
-            },
-          ]
-        : undefined,
-    );
+  it("home lists open agents from the live stream", async () => {
+    const { calls } = stubFetch();
     renderApp();
     expect(await screen.findByRole("heading", { name: "pi-code" })).toBeInTheDocument();
+    sendBaseline([
+      makeAgent({ id: "a1", cwd: "/home/me/alpha", attention: "finished" }),
+      makeAgent({ id: "a2", cwd: "/home/me/beta", sessionName: "Refactor", isStreaming: true }),
+    ]);
     expect(await screen.findByText("alpha")).toBeInTheDocument();
     expect(screen.getByText("Refactor")).toBeInTheDocument();
     expect(screen.getByText("Finished")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /alpha/ })).toHaveAttribute("href", "/agents/a1");
+    expect(calls.some((c) => c.url === "/api/agents")).toBe(false);
+    expect(calls.some((c) => c.url === "/api/sessions")).toBe(true);
+  });
+
+  it("doesn't show an empty home before the first baseline", async () => {
+    stubFetch();
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "pi-code" })).toBeInTheDocument();
+    expect(screen.queryByText("No open conversations.")).toBeNull();
+    act(() => FakeEventSource.latest().drop());
+    expect(screen.getByText("Reconnecting…")).toBeInTheDocument();
+    expect(screen.queryByText("No open conversations.")).toBeNull();
+    sendBaseline([]);
+    expect(await screen.findByText("No open conversations.")).toBeInTheDocument();
   });
 
   it("starts a new conversation from a folder path and opens it", async () => {
-    vi.stubGlobal("EventSource", NoopEventSource);
     const { calls } = stubFetch((call) => {
-      if (call.url === "/api/agents" && call.method === "GET") return [200, { agents: [] }];
       if (call.url === "/api/agents" && call.method === "POST") {
         return [
           201,
@@ -74,6 +65,7 @@ describe("App", () => {
     });
     const router = renderApp();
     const user = userEvent.setup();
+    sendBaseline([]);
     expect(await screen.findByText("No open conversations.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New conversation" }));
     await user.type(await screen.findByLabelText("Folder path"), "/home/me/gamma");
@@ -88,7 +80,7 @@ describe("App", () => {
     stubFetch((call) =>
       call.method === "POST"
         ? [400, { error: { code: "outside_home", message: "path is outside $HOME" } }]
-        : [200, { agents: [] }],
+        : undefined,
     );
     renderApp();
     const user = userEvent.setup();
@@ -98,6 +90,26 @@ describe("App", () => {
     expect(
       await within(screen.getByTestId("project-picker")).findByText("path is outside $HOME"),
     ).toBeInTheDocument();
+  });
+
+  it("opens one stream and fetches each snapshot once under StrictMode", async () => {
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/snapshot"
+        ? [200, makeSnapshot({ agent: makeAgent({ id: "a1", cwd: "/home/me/alpha" }) })]
+        : undefined,
+    );
+    const router = createAppRouter({
+      history: createMemoryHistory({ initialEntries: ["/agents/a1"] }),
+    });
+    render(
+      <StrictMode>
+        <App router={router} queryClient={createQueryClient()} />
+      </StrictMode>,
+    );
+    expect(await screen.findByRole("heading", { name: "alpha" })).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.latest().cursors).toBe("a1:0"));
+    expect(FakeEventSource.instances.filter((es) => !es.closed)).toHaveLength(1);
+    expect(calls.filter((c) => c.url === "/api/agents/a1/snapshot")).toHaveLength(1);
   });
 
   it("renders placeholder routes", async () => {

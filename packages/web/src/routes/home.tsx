@@ -7,10 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { SessionList } from "@/features/catalog/session-list";
-import { errorMessage, listAgents, listSessions } from "@/lib/api";
+import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
-import { cn } from "@/lib/utils";
+import { useLive, useLiveAgents } from "@/store/context";
 
 const ATTENTION: Record<Exclude<Attention, "none">, { label: string; className: string }> = {
   finished: {
@@ -99,11 +99,8 @@ function RecentSessions() {
 
 export function HomeScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const agents = useQuery({
-    queryKey: queryKeys.agents,
-    queryFn: listAgents,
-    refetchInterval: 10_000,
-  });
+  const agents = useLiveAgents();
+  const connecting = useLive((s) => s.connection === "connecting");
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
       <header className="flex items-center justify-between">
@@ -129,28 +126,21 @@ export function HomeScreen() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-muted-foreground">Open conversations</h2>
-        {agents.isPending && (
+        {agents === undefined && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderIcon className="size-4 animate-spin" /> Loading…
+            <LoaderIcon className="size-4 animate-spin" />{" "}
+            {connecting ? "Loading…" : "Reconnecting…"}
           </p>
         )}
-        {agents.isError && (
-          <div role="alert" className="flex items-center gap-2 text-sm text-destructive">
-            {errorMessage(agents.error)}
-            <Button variant="outline" size="sm" onClick={() => void agents.refetch()}>
-              Retry
-            </Button>
-          </div>
-        )}
-        {agents.data && agents.data.length === 0 && (
+        {agents?.length === 0 && (
           <div className="flex flex-col gap-0.5 rounded-xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
             <p>No open conversations.</p>
             <p className="text-xs">Start a new one, or tap a session below to resume it.</p>
           </div>
         )}
-        {agents.data && agents.data.length > 0 && (
-          <ul className={cn("flex flex-col gap-2")} aria-label="Open conversations">
-            {agents.data.map((agent) => (
+        {agents !== undefined && agents.length > 0 && (
+          <ul className="flex flex-col gap-2" aria-label="Open conversations">
+            {agents.map((agent) => (
               <AgentRow key={agent.id} agent={agent} />
             ))}
           </ul>
