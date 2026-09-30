@@ -221,7 +221,7 @@ export type StreamFrame =
   | { type: "agent_closed"; agentId: AgentId }
   /** The 7-day session window; replaces the previous one. */
   | { type: "catalog"; sessions: SessionSummary[] }
-  /** `null`: not tracked or not a repo. */
+  /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
   | { type: "branch"; cwd: string; branch: string | null };
 
 // ---------------------------------------------------------------------------

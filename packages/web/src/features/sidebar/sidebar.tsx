@@ -1,11 +1,11 @@
 import type { AgentInfo } from "@pi-code/protocol";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { GitBranchIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
-import { AttentionBadge } from "@/components/attention-badge";
+import { AttentionIcon } from "@/components/attention-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
-import { closeAgent, errorMessage, searchSessions } from "@/lib/api";
+import { closeAgent, errorMessage, restartAgent, searchSessions } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -65,16 +65,20 @@ const rowClass =
 
 function Row({
   row,
+  folder,
   now,
   current,
   pending,
   disabled,
   closing,
   onOpen,
+  onRestart,
   onClose,
   onSelect,
 }: {
   row: SidebarRow;
+  /** The group's label, to tell apart same-titled rows in the close button's label. */
+  folder: string;
   now: number;
   current: boolean;
   pending: boolean;
@@ -82,6 +86,7 @@ function Row({
   /** Its agent's DELETE is in flight. */
   closing: boolean;
   onOpen(sessionFile: string): void;
+  onRestart(agent: AgentInfo): void;
   onClose(agent: AgentInfo): void;
   onSelect(): void;
 }) {
@@ -92,7 +97,7 @@ function Row({
       <span data-testid="sidebar-row-title" className="min-w-0 flex-1 truncate">
         {row.title}
       </span>
-      {agent && <AttentionBadge attention={agent.attention} />}
+      {agent && <AttentionIcon attention={agent.attention} />}
       <time
         dateTime={new Date(row.activity).toISOString()}
         className="shrink-0 text-xs text-muted-foreground"
@@ -101,8 +106,8 @@ function Row({
       </time>
     </>
   );
-  // Live agents are navigated to; sessions and exited agents are resumed (restarting the agent).
-  const navigates = agent !== undefined && (isLive(agent) || row.sessionFile === undefined);
+  // Live agents are navigated to; exited agents are restarted and sessions resumed, then shown.
+  const live = agent !== undefined && isLive(agent);
   return (
     <li
       data-testid="sidebar-row"
@@ -111,7 +116,7 @@ function Row({
         current && "bg-muted font-medium",
       )}
     >
-      {navigates ? (
+      {live ? (
         <Link
           to="/agents/$agentId"
           params={{ agentId: agent.id }}
@@ -128,24 +133,28 @@ function Row({
           aria-current={current ? "page" : undefined}
           className={rowClass}
           onClick={() => {
-            if (row.sessionFile !== undefined) onOpen(row.sessionFile);
+            if (agent) onRestart(agent);
+            else if (row.sessionFile !== undefined) onOpen(row.sessionFile);
             onSelect();
           }}
         >
           {content}
         </button>
       )}
-      {agent && isLive(agent) && (
+      {live ? (
         <Button
           variant="ghost"
           size="icon-xs"
           className="mr-1 text-muted-foreground"
-          aria-label={`Close ${row.title}`}
+          aria-label={`Close ${row.title} (${folder})`}
           disabled={closing}
           onClick={() => onClose(agent)}
         >
           <XIcon />
         </Button>
+      ) : (
+        // Keeps the times aligned with the rows that have ×.
+        <span aria-hidden className="mr-1 size-6 shrink-0" />
       )}
     </li>
   );
@@ -169,19 +178,25 @@ function Group({
     // biome-ignore lint/a11y/useSemanticElements: a folder of links, not a form <fieldset>
     <div role="group" aria-labelledby={headingId} className="flex flex-col gap-0.5">
       <div className="flex min-w-0 items-center gap-2 pt-3 pr-1 pb-0.5 pl-2 text-xs text-muted-foreground">
-        <h2 id={headingId} className="truncate font-medium text-foreground/80" title={group.cwd}>
-          {group.label}
-        </h2>
-        {group.branch !== undefined && (
-          <span className="flex min-w-0 items-center gap-0.5" title="Branch">
-            <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-            <span className="truncate font-mono">{group.branch}</span>
-          </span>
-        )}
+        {/* The label keeps its width (truncating only past the whole line); the branch gets the rest. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h2
+            id={headingId}
+            className="max-w-full shrink-0 truncate font-medium text-foreground/80"
+            title={group.cwd}
+          >
+            {group.label}
+          </h2>
+          {group.branch !== undefined && (
+            <span className="flex min-w-0 items-center gap-0.5 overflow-hidden" title="Branch">
+              <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+              <span className="truncate font-mono">{group.branch}</span>
+            </span>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon-xs"
-          className="ml-auto"
           disabled={disabled}
           aria-label={`New conversation in ${group.label}`}
           onClick={onNew}
@@ -225,8 +240,24 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
   });
   const now = useNow(RELATIVE_TIME_TICK_MS);
   const [closing, setClosing] = useState<ReadonlySet<string>>(new Set());
-  const [confirming, setConfirming] = useState<{ agentId: string; title: string } | null>(null);
+  // The target outlives `confirmOpen` so the title holds while the dialog fades out.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<{ agentId: string; title: string } | null>(
+    null,
+  );
+  const searchRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const open = useOpenAgent();
+  const restart = useMutation({
+    mutationFn: (agentId: string) => restartAgent(agentId),
+    onSuccess: (agent) => {
+      void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } });
+    },
+    onError: (error) => {
+      toast.error(errorMessage(error));
+    },
+  });
+  const busy = open.isPending || restart.isPending;
   const pending = open.isPending ? open.variables : undefined;
   const select = () => onSelect?.();
 
@@ -274,6 +305,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <Input
+            ref={searchRef}
             type="search"
             aria-label="Search conversations"
             placeholder="Search…"
@@ -282,8 +314,22 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            className="pl-8"
+            className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
           />
+          {text !== "" && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
+              aria-label="Clear search"
+              onClick={() => {
+                setText("");
+                searchRef.current?.focus();
+              }}
+            >
+              <XIcon />
+            </Button>
+          )}
         </div>
       </div>
       <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} onOpened={select} />
@@ -313,7 +359,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
           <Group
             key={group.cwd}
             group={group}
-            disabled={open.isPending}
+            disabled={busy}
             pending={pending !== undefined && "cwd" in pending && pending.cwd === group.cwd}
             onNew={() => {
               open.mutate({ cwd: group.cwd });
@@ -324,20 +370,25 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
               <Row
                 key={row.key}
                 row={row}
+                folder={group.label}
                 now={now}
                 current={row.agent !== undefined && row.agent.id === currentId}
                 pending={
-                  pending !== undefined &&
-                  "sessionFile" in pending &&
-                  pending.sessionFile === row.sessionFile
+                  row.agent !== undefined
+                    ? restart.isPending && restart.variables === row.agent.id
+                    : pending !== undefined &&
+                      "sessionFile" in pending &&
+                      pending.sessionFile === row.sessionFile
                 }
-                disabled={open.isPending}
+                disabled={busy}
                 closing={row.agent !== undefined && closing.has(row.agent.id)}
                 onOpen={(sessionFile) => open.mutate({ sessionFile })}
+                onRestart={(agent) => restart.mutate(agent.id)}
                 onClose={(agent) => {
-                  if (closeNeedsConfirm(agent))
-                    setConfirming({ agentId: agent.id, title: row.title });
-                  else void close(agent.id);
+                  if (closeNeedsConfirm(agent)) {
+                    setConfirmTarget({ agentId: agent.id, title: row.title });
+                    setConfirmOpen(true);
+                  } else void close(agent.id);
                 }}
                 onSelect={select}
               />
@@ -346,23 +397,23 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
         ))}
       </div>
 
-      <Dialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Close {confirming?.title}?</DialogTitle>
+            <DialogTitle>Close {confirmTarget?.title}?</DialogTitle>
             <DialogDescription>
               pi is still working or waiting for your input; closing stops it.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirming(null)}>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={() => {
-                if (confirming) void close(confirming.agentId);
-                setConfirming(null);
+                if (confirmTarget) void close(confirmTarget.agentId);
+                setConfirmOpen(false);
               }}
             >
               Close

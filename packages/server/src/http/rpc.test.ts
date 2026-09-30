@@ -472,6 +472,36 @@ describe("dialogs", () => {
     expect(final.live.notices.length).toBeGreaterThan(0);
   });
 
+  it("keeps input attention through an ack while a dialog is pending", async () => {
+    const h = await start({ fixture: "extension-dialog" });
+    const agent = await h.open();
+    const client = h.stream({ open: [[agent.id, 0]] });
+    // The prompt stays open on the remaining dialogs; teardown ends it.
+    h.rpc(agent.id, { type: "prompt", message: "/s0-dialog" }).catch(() => {});
+    const req = await client.waitForEvent(
+      agent.id,
+      (r) => r.event.type === "ui_request" && r.event.request.method === "select",
+    );
+    const id = (req.event as Of<"ui_request">).request.id;
+    await h.idle(agent.id);
+
+    expect((await h.api("POST", `/api/agents/${agent.id}/ack`, {})).status).toBe(204);
+    expect(h.manager.require(agent.id).info().attention).toBe("input");
+
+    await h.api("POST", `/api/agents/${agent.id}/ui-responses`, { id, value: "banana" });
+    const resolved = await client.waitForEvent(
+      agent.id,
+      (r) => r.event.type === "ui_resolved" && r.event.id === id,
+    );
+    await client.waitForEvent(
+      agent.id,
+      (r) =>
+        r.seq > resolved.seq &&
+        r.event.type === "agent_status" &&
+        r.event.agent.attention === "none",
+    );
+  });
+
   it("validates dialog answers", async () => {
     const h = await start();
     const agent = await h.open();

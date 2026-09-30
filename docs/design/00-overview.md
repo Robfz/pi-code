@@ -8,7 +8,7 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 |---|---|
 | `00-overview.md` | Goals, topology, components, cross-cutting flows, security |
 | `01-server.md` | The Node server: pi process management, event pipeline, catalog, git, push, curator proxy |
-| `02-api-contract.md` | HTTP + SSE contract between web client and server, shared protocol package |
+| `02-api-contract.md` | HTTP + SSE contract between web client and server (including the live stream), shared protocol package |
 | `03-web-client.md` | The React PWA |
 | `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) |
 | `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout |
@@ -19,10 +19,11 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 - Agent runs keep going with no browser attached; reconnecting shows the exact live state, including in-flight streaming, running tools and pending dialogs.
 - All installed extensions keep working; where RPC drops their TUI rendering, pi-code renders natively.
 - Push notifications when a run finishes, fails, or waits for input.
+- Comfortable desktop use from a laptop browser, with several conversations running at once (`05-desktop.md`).
 
 ## Non-goals (deferred in the map)
 
-Multiple concurrent sessions as a first-class workflow, MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call approval, inline before/after for `write` overwrites, list virtualization, launchd service, editing pi settings / providers / packages from the web.
+MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call approval, inline before/after for `write` overwrites, list virtualization, launchd service, editing pi settings / providers / packages from the web.
 
 ## Constraints
 
@@ -34,7 +35,7 @@ Multiple concurrent sessions as a first-class workflow, MCP Apps and MCP URL eli
 ## Topology
 
 ```
- Android phone (PWA)                               Mac
+ Phone (PWA) / laptop browser                      Mac
 ┌──────────────────┐   tailnet HTTPS    ┌─────────────────────────────────────────────┐
 │ React SPA        │ ── :443 ────────▶ │ tailscale serve ──▶ 127.0.0.1:4180  server  │
 │ Service worker   │ ── :8443 ───────▶ │ tailscale serve ──▶ 127.0.0.1:4181  curator │
@@ -49,28 +50,29 @@ Multiple concurrent sessions as a first-class workflow, MCP Apps and MCP URL eli
 
 | Component | Package | Responsibility |
 |---|---|---|
-| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event log, serves the API, SSE, SPA, push, curator proxy. |
+| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; closes agents idle for 7 days (idle sweep). |
 | Protocol | `packages/protocol` | Shared TypeScript: API/SSE types and the **live-state reducer** used by both server (snapshots) and client (live UI). |
-| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). |
+| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px. |
 | pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command. |
 
 ## Core concepts
 
-- **Agent** — one `pi --mode rpc` child process, owned by the server, bound to one session file at a time. Identified by a server-generated `agentId`. Lives until the user closes it (or the server stops).
+- **Agent** — one `pi --mode rpc` child process, owned by the server, bound to one session file at a time. Identified by a server-generated `agentId`. Lives until the user closes it, it has been idle for 7 days, or the server stops.
 - **Session** — a pi session file (`~/.pi/agent/sessions/--<cwd>--/*.jsonl`). An agent can move between sessions (new / fork / clone), as in the TUI.
 - **Committed transcript** — session entries fetched from pi with `get_entries` (stable entry ids, tree via `parentId`). Source of truth for history.
 - **Live state** — what is in flight and not yet committed: the streaming assistant message, running tools, pending dialogs, extension status/widgets, queue, compaction/retry status. Produced by one reducer over pi events.
-- **Event log** — per-agent sequence-numbered log of server events (`seq`), kept in a bounded ring buffer so SSE clients resume with `Last-Event-ID`.
+- **Event log** — per-agent sequence-numbered log of server events (`seq`), kept in a bounded ring buffer so stream clients resume from a per-agent cursor.
+- **Live stream** — `GET /api/stream`, one SSE connection per browser tab: every agent's info, the recent-session catalog and folder branches for everyone, plus the events of each conversation the tab has opened.
 
 ## Key flows
 
-**Prompt.** Client POSTs a `prompt` command → server forwards to pi (with `streamingBehavior` when a run is active) → pi streams events → server reduces them into live state, appends them to the event log, fans them out over SSE → on each `message_end` the server fetches new entries (`get_entries {since}`) and emits `entries_appended` → client moves the message from live to committed.
+**Prompt.** Client POSTs a `prompt` command → server forwards to pi (with `streamingBehavior` when a run is active) → pi streams events → server reduces them into live state, appends them to the event log, fans them out on the live stream → on each `message_end` the server fetches new entries (`get_entries {since}`) and emits `entries_appended` → client moves the message from live to committed.
 
-**Reconnect.** Client fetches `GET /api/agents/:id/snapshot` (committed entries + live state + `seq`), then opens SSE with `Last-Event-ID: seq`. If the log no longer holds that `seq`, the server sends `resync` and the client refetches the snapshot.
+**Reconnect.** To open a conversation, the client fetches `GET /api/agents/:id/snapshot` (committed entries + live state + `seq`), then reconnects the tab's stream with `open=<agentId>:<seq>` for every opened conversation. EventSource reconnects resume with `Last-Event-ID`, which carries the same per-agent cursors. If an agent's log no longer holds its `seq`, the server sends a `resync` frame for that agent and the client refetches its snapshot; the other conversations replay normally.
 
 **Extension dialog.** pi emits `extension_ui_request` (select/confirm/input/editor) → server records it in live state (so it survives reconnects), pushes a notification, fans it out → client answers via `POST /ui-responses` → server writes `extension_ui_response` to pi and clears it.
 
-**Notification.** On run finished / run failed / dialog waiting, the server sends a Web Push to every subscription. The service worker skips showing it when a pi-code window is focused, and sets the app badge to the payload's attention count.
+**Notification.** On run finished / run failed / dialog waiting, the server sends a Web Push to every subscription. The service worker skips showing it when a pi-code window is focused, and sets the app badge to the payload's attention count. Attention is cleared by the client acknowledging the conversation on screen (`POST /ack`) or by resolving what needed input; fetching a snapshot doesn't clear it.
 
 **TUI handoff.** Web-side ownership only: the server tracks which session files its agents hold and never opens one twice. Closing an agent in the web UI stops its pi process, which hands the session back to the TUI. The TUI is not prevented from opening a web-owned session (accepted).
 

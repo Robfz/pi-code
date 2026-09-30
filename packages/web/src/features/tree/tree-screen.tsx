@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSessionActions } from "@/features/conversation/session-actions";
 import { errorMessage, navigateTree } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ScreenHeader } from "@/routes/placeholder";
 import { useConversation } from "@/store/context";
 import { selectIsRunning, selectLabels } from "@/store/selectors";
 import { buildTreeModel, flattenTree, type TreeItem, type TreeRow } from "./tree-model";
@@ -260,15 +261,15 @@ export function TreeScreen() {
   const disabled = running || !ready || forking;
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 pt-[env(safe-area-inset-top)]">
+    <div className="flex h-dvh w-full flex-col">
+      <ScreenHeader>
         <Button variant="ghost" size="icon" asChild>
           <Link to="/agents/$agentId" params={{ agentId }} aria-label="Back to conversation">
             <ChevronLeftIcon />
           </Link>
         </Button>
         <h1 className="flex-1 text-sm font-medium">Session tree</h1>
-      </header>
+      </ScreenHeader>
       {running && (
         <p
           data-testid="tree-running"
@@ -277,44 +278,46 @@ export function TreeScreen() {
           A run is in progress — tree actions are disabled until it finishes.
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 py-3">
-        {!hydrated && (
-          <p className="flex items-center gap-2 px-2 text-sm text-muted-foreground">
-            <LoaderIcon className="size-4 animate-spin" /> Loading…
-          </p>
-        )}
-        {model && rows.length === 0 && (
-          <p className="px-2 text-sm text-muted-foreground">No messages yet.</p>
-        )}
-        {rows.length > 0 && (
-          <ul aria-label="Session tree" className="flex flex-col gap-0.5">
-            {rows.map((row) => (
-              <Row
-                key={row.item.id}
-                row={row}
-                current={row.item.id === model?.currentId}
-                onPath={model?.activePath.has(row.item.id) === true}
-                selected={selected === row.item.id}
-                disabled={disabled}
-                onSelect={() => setSelected((s) => (s === row.item.id ? null : row.item.id))}
-                onToggle={() =>
-                  setCollapsed((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(row.item.id)) next.delete(row.item.id);
-                    else next.add(row.item.id);
-                    return next;
-                  })
-                }
-                onGoHere={() => setNavigateTarget(row.item)}
-                onFork={async () => {
-                  setForking(true);
-                  await actions.fork(row.item.id);
-                  setForking(false);
-                }}
-              />
-            ))}
-          </ul>
-        )}
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-2 py-3">
+          {!hydrated && (
+            <p className="flex items-center gap-2 px-2 text-sm text-muted-foreground">
+              <LoaderIcon className="size-4 animate-spin" /> Loading…
+            </p>
+          )}
+          {model && rows.length === 0 && (
+            <p className="px-2 text-sm text-muted-foreground">No messages yet.</p>
+          )}
+          {rows.length > 0 && (
+            <ul aria-label="Session tree" className="flex flex-col gap-0.5">
+              {rows.map((row) => (
+                <Row
+                  key={row.item.id}
+                  row={row}
+                  current={row.item.id === model?.currentId}
+                  onPath={model?.activePath.has(row.item.id) === true}
+                  selected={selected === row.item.id}
+                  disabled={disabled}
+                  onSelect={() => setSelected((s) => (s === row.item.id ? null : row.item.id))}
+                  onToggle={() =>
+                    setCollapsed((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(row.item.id)) next.delete(row.item.id);
+                      else next.add(row.item.id);
+                      return next;
+                    })
+                  }
+                  onGoHere={() => setNavigateTarget(row.item)}
+                  onFork={async () => {
+                    setForking(true);
+                    await actions.fork(row.item.id);
+                    setForking(false);
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
       {navigateTarget && (
         <NavigateSheet item={navigateTarget} onClose={() => setNavigateTarget(null)} />

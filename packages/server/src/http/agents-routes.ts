@@ -92,7 +92,7 @@ export function agentsRoutes(manager: AgentManager) {
       c.json(manager.require(c.req.param("id")).pipeline.snapshot(), 200),
     )
     .post("/:id/ack", (c) => {
-      manager.require(c.req.param("id")).pipeline.setAttention("none");
+      manager.require(c.req.param("id")).pipeline.ack();
       return c.body(null, 204);
     })
     .post(

@@ -4,7 +4,7 @@ Comfortable desktop use with several conversations running at once: a sidebar of
 
 Desktop clients are the Mac and other laptops, in a browser tab over the tailnet URL (HTTP/2). One tab holds every conversation; phones use the same stream and keep their screens.
 
-A **live** agent is one whose pi process is running (`starting`, `awaiting_trust`, `ready`). The server's registry (`manager.list()`) also keeps **exited** agents, whose pi died unexpectedly, until they are reopened (which restarts pi) or swept idle; they are not live.
+A **live** agent is one whose pi process is running (`starting`, `awaiting_trust`, `ready`). The server's registry (`manager.list()`) also keeps **exited** agents, whose pi died unexpectedly, until they are reopened (which restarts pi), closed or swept idle; they are not live.
 
 ## Live stream — `GET /api/stream`
 
@@ -16,7 +16,7 @@ One `text/event-stream` per tab. It carries agent status and the session catalog
 GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
 ```
 
-- `open` lists the tab's opened conversations, each with the last `seq` the client holds. Absent or empty: status and catalog only (phone Home). Agent ids are base64url, so `:` and `,` never occur in them. Unknown agent ids and unparseable pairs are ignored; the client sees the agent's absence in the baseline.
+- `open` lists the tab's opened conversations, each with the last `seq` the client holds. Absent or empty: status and catalog only (phone Home). Agent ids are base64url, so `:` and `,` never occur in them. Pairs without `:` or without an id, and unknown agent ids, are ignored; the client sees the agent's absence in the baseline. A pair whose seq isn't a non-negative integer resyncs (below).
 - `Last-Event-ID` carries the same `agentId:seq,…` format. The query decides which agents are streamed; for each, a cursor from `Last-Event-ID` wins over the query's. EventSource reconnects reuse the URL, so the header holds the fresher cursors; a client-initiated reconnect opens a new EventSource with no header and fresh query cursors.
 - Per agent, with `oldest` the oldest `seq` in its ring buffer, the cursor replays when `oldest − 1 ≤ seq ≤` the log's `seq`; a caught-up cursor replays nothing. Otherwise (dropped, ahead of the log, not a non-negative integer) that agent gets `resync` and streams live from the log's current `seq`. The other agents are unaffected.
 
@@ -35,7 +35,7 @@ type StreamFrame =
   | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
   | { type: "agent_closed"; agentId: AgentId }
   | { type: "catalog"; sessions: SessionSummary[] }       // the 7-day window, replaces the previous one
-  | { type: "branch"; cwd: string; branch: string | null }; // null: not tracked or not a repo
+  | { type: "branch"; cwd: string; branch: string | null }; // null: the folder is no longer tracked
 ```
 
 - `ServerEvent` is the union from `02-api-contract.md` without `resync`, which exists only as a frame. `AgentInfo` is unchanged.
@@ -48,7 +48,7 @@ type StreamFrame =
 2. In one synchronous block (publishing is synchronous, so nothing falls between replay and subscription): build the baseline from `manager.list()`, the catalog window and the branch map; for each opened agent, replay from its cursor or mark it for `resync`; subscribe to every opened agent's `EventLog`, to the manager's `agent` / `closed` events, and to catalog and branch changes.
 3. Write `retry`, `baseline`, then per opened agent either its replayed `event` frames or its `resync`, then live frames as they come.
 
-A connection whose queue exceeds 20,000 live frames is ended: like the per-agent limit in `http/sse.ts`, it bounds memory for a stalled socket (replay isn't counted). EventSource reconnects with `Last-Event-ID` and replays or resyncs per agent. When an opened agent's log closes, its events stop; `agent_closed` tells the client.
+A connection with 20,000 live frames queued is ended, which bounds memory for a stalled socket (replay isn't counted). EventSource reconnects with `Last-Event-ID` and replays or resyncs per agent. When an opened agent's log closes, its events stop; `agent_closed` tells the client.
 
 ## Server
 
@@ -81,7 +81,7 @@ An agent's **activity** is the later of its `startedAt` and its session's `updat
 1. **Resolve the git dir once**, when the cwd gains its first live agent: walk up to the first `.git`. A directory is the git dir; a file (worktrees, submodules) holds `gitdir: <path>`, relative to the file's directory. No `.git` → no branch, no watch.
 2. **Read `<gitDir>/HEAD`:** `ref: <ref>` → `<ref>` without `refs/heads/`; a bare commit id (detached HEAD) → its first 7 characters.
 3. **Watch** `<gitDir>` non-recursively, since a directory watch survives git replacing `HEAD` by rename. Every event re-reads `HEAD`; a changed value → `branch` frame.
-4. When the cwd has no live agent left, the watch stops and `branch { branch: null }` goes out.
+4. When the cwd has no live agent left, the watch stops and, if a branch had been reported, `branch { branch: null }` goes out.
 
 Per-conversation `git_status` (branch + dirty, status bar) comes from `git` as described in `01-server.md`.
 
@@ -89,7 +89,7 @@ Per-conversation `git_status` (branch + dirty, status bar) comes from `git` as d
 
 `GET /api/sessions?cwd=&q=` — `q` (optional) is a case-insensitive substring match against the session's `cwd` path and `name`. It covers all sessions regardless of age; sessions older than the 7-day window are reached through it.
 
-`GET /api/agents/:id/snapshot` has no side effects; attention is cleared only by `POST /ack` and dialog answers (see Live registry).
+`GET /api/agents/:id/snapshot` has no side effects. `POST /ack` (see Live registry) clears `finished` and `failed`, and `input` only when no dialog or trust prompt is pending; `input` also clears when the last pending dialog is answered or times out, the trust prompt is answered, or pi exits.
 
 ## Web client
 
@@ -99,6 +99,7 @@ A long-lived `LiveRegistry` (`src/store/live-registry.ts`), created once in `App
 
 ```ts
 interface LiveOverview {                     // Zustand, read by sidebar, Home, badge, share
+  loaded: boolean;                           // false until the first baseline
   agents: Record<AgentId, AgentInfo>;
   sessions: SessionSummary[];                // 7-day window
   branches: Record<string, string>;
@@ -107,16 +108,19 @@ interface LiveOverview {                     // Zustand, read by sidebar, Home, 
 
 interface LiveRegistry {
   live: StoreApi<LiveOverview>;
+  start(): void;                             // App mount: listeners on, stream opened
+  stop(): void;                              // App unmount: stream closed, opened stores kept
   open(agentId: AgentId): ConversationStore; // idempotent; the route calls it on mount
+  show(agentId: AgentId): () => void;        // the route's conversation is on screen; acks it
   drop(agentId: AgentId): void;              // on agent_closed, or after DELETE
 }
 ```
 
 - **Opening.** `open` creates the `ConversationStore`, fetches `GET /snapshot`, hydrates, then reconnects the stream: a new EventSource whose `open` lists every hydrated store at its `seq` (the snapshot's, then each applied event's). The registry holds one EventSource at a time: a reconnect closes the current one, detaching its handlers, before opening the next, so frames never interleave across sources. Switching between opened conversations costs nothing. Stores stay opened, and keep streaming, until dropped or the tab reloads.
 - **Refetch.** `resync`, and an `agent_status` that turns an opened agent `ready`, run opening again for that store. Until it is hydrated again it ignores its frames and is left out of reconnect URLs, so a reconnect meanwhile doesn't resync it twice; what it missed replays after the reconnect that follows the hydrate.
-- **Frames.** `event` → that store's `apply(event, seq)`; `agent` / `agent_closed` / `catalog` / `branch` / `baseline` → `live`. `agent_closed` also drops the store; if it was on screen, the route shows it as closed (see Sidebar). On `baseline`, an opened store whose agent is missing from `baseline.agents` (closed while disconnected, server restart) is handled as `agent_closed`. Every `catalog` frame invalidates the `sessions` and `projects` queries, keeping phone Home, `/sessions` and the project picker fresh.
-- **Attention.** Background stores re-snapshot too, so snapshots must not clear attention. The registry acks (`POST /ack`) only the conversation on screen: when the route mounts, on `visibilitychange` to visible, on window `focus` (switching desktop windows fires no `visibilitychange`), and when an `agent` frame raises its attention while the page is visible and `document.hasFocus()`.
-- **Liveness.** EventSource reconnects on its own with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no frame, no ping) for 35 s is reopened. Each store's `connection` mirrors the stream's state, or `connecting` while its own snapshot is in flight.
+- **Frames.** `event` → that store's `apply(event, seq)`; `agent` / `agent_closed` / `catalog` / `branch` / `baseline` → `live`. `agent_closed` also drops the store; if it was on screen, the route shows it as closed (see Sidebar). On `baseline`, a hydrated store whose agent is missing from `baseline.agents` (closed while disconnected, server restart) is handled as `agent_closed`, and so is a snapshot fetch answering `agent_not_found`; a store still fetching its snapshot is left to that snapshot. Every `catalog` frame invalidates the `sessions` and `projects` queries, keeping phone Home, `/sessions` and the project picker fresh.
+- **Attention.** Background stores re-snapshot too, so snapshots must not clear attention. The registry acks (`POST /ack`) only the conversation on screen (the one passed to `show`): when the route mounts, on `visibilitychange` to visible, on window `focus` (switching desktop windows fires no `visibilitychange`), and when an `agent` frame raises its attention while the page is visible and `document.hasFocus()`.
+- **Liveness.** EventSource reconnects on its own with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no frame, no ping) for 35 s is reopened. Each store's `connection` mirrors the stream's state, or `connecting` while its own snapshot is in flight (`reconnecting` / `offline` while it is retried).
 
 ### Shell and routes
 
@@ -124,12 +128,12 @@ interface LiveRegistry {
 
 | | Desktop (≥1024px) | Phone (<1024px) |
 |---|---|---|
-| Sidebar | Docked left (280px), shown on load; toggled from a button in the shell chrome, on every route; not persisted | Left sheet (shadcn `Sheet side="left"`) opened from a button in the conversation header; closes on selection |
+| Sidebar | Docked left (280px), shown on load, on every route. A single "Toggle sidebar" button sits at the top of the sidebar while it is shown and alone in a collapsed rail while it is hidden; not persisted | Left sheet (shadcn `Sheet side="left"`) opened from a button in the conversation header; closes on selection |
 | `/` | Empty content: "Pick a conversation or start a new one" with a New conversation button | Home: agents from `live`, recent sessions from `GET /api/sessions` |
-| Conversation header | No back chevron | Back chevron to Home |
-| Settings | Icon in the sidebar footer | Home header |
+| Back chevron to Home | Hidden on the conversation header, settings, `/sessions`, "Conversation closed" and other placeholder screens | Shown |
+| Settings | Icon in the sidebar footer | Home header, sheet footer |
 
-Tree, diff, share, settings and `/sessions` are routes rendered in the content area on desktop; desktop reaches older sessions through sidebar search.
+Tree, diff, share, settings and `/sessions` are routes rendered in the content area on desktop (tree and diff keep their back-to-conversation chevron); desktop reaches older sessions through sidebar search.
 
 ### Sidebar
 
@@ -146,15 +150,15 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 
 - **Rows** = every agent in `live.agents` (the registry, exited included) plus window sessions no agent holds (matched by `agent.sessionFile`). Title: agent `sessionName` / session `name`, else `firstMessage`, else "New conversation". Activity = the session's `updatedAt`; for an agent, the later of that and its `startedAt` (as in Idle sweep).
 - **Groups** by cwd, ordered by their most recent row; rows by activity. Label = folder basename, with the parent's basename prepended (`Kepi/phoenix`) when two displayed groups share a basename. The header shows `branches[cwd]` when the folder has a live row.
-- **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`; exited agents show no mark. Attention badge beside it: finished, failed, needs input (same colors as Home). The row of the route's agent is highlighted.
-- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on live rows → `DELETE /api/agents/:id`. Selecting a live row navigates to it; selecting a session row or an exited agent's row resumes it (`useOpenAgent`, which restarts an exited agent).
-- **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on the same fields (cwd path, name).
+- **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`, or while the row's resume is in flight; exited agents show no mark. Attention badge beside it: finished, failed, needs input (same colors as Home). Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
+- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on live rows → `DELETE /api/agents/:id`, then `drop`; it asks for confirmation when the agent is streaming or awaiting input (`attention: "input"`), and is disabled while the request is in flight. Selecting a live row navigates to it; selecting a session row or an exited agent's row resumes it (`useOpenAgent`, which restarts an exited agent).
+- **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on their row title and cwd path. The previous results stay on screen while the next query loads; clearing the field shows the window at once.
 - A conversation closed while on screen shows "Conversation closed" in the content area with the New conversation button.
 
 ### Layout
 
 - **Transcript width.** At ≥1024px the conversation column (transcript and composer area) uses the full content width with the standard padding; below 1024px it is capped at `max-w-3xl`.
-- **Diff split.** `DiffViewer` measures its own width (`useElementWidth`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
+- **Diff split.** `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
 
 ## Stream consumers
 

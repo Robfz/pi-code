@@ -274,6 +274,16 @@ export class AgentPipeline {
     this.publishStatus();
   }
 
+  /**
+   * `POST /ack`: clears `finished` / `failed`. `input` stays while a dialog or the trust
+   * prompt is pending; it clears when those are answered.
+   */
+  ack(): void {
+    const pending = this.live.dialogs.length > 0 || this.agent.status === "awaiting_trust";
+    if (this.agent.attention === "input" && pending) return;
+    this.setAttention("none");
+  }
+
   // -------------------------------------------------------------------------
   // Lifecycle
 

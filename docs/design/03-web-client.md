@@ -1,16 +1,16 @@
 # Web client design
 
-React SPA, mobile-first, installable PWA. Source: `packages/web`.
+React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md); this document summarizes them.
 
 | Concern | Choice |
 |---|---|
 | Build | Vite, TypeScript |
 | Routing | TanStack Router (code-based route tree) |
-| Server data | TanStack Query (catalog, agents, models, commands, git diff) |
-| Live conversation | Zustand store fed by SSE through the shared reducer |
+| Server data | TanStack Query (catalog, session search, models, commands, git diff, health) |
+| Live state | `LiveRegistry`: one `GET /api/stream` EventSource per tab feeding a Zustand overview and one Zustand store per opened conversation, through the shared reducer |
 | UI | Tailwind v4 + shadcn/ui |
 | Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand; grammars and themes are lazy chunks outside the precache) |
-| Diffs | `@git-diff-view/react` (unified on phones, split on wide screens) |
+| Diffs | `@git-diff-view/react` (split when the viewer is ≥1024px wide, unified otherwise) |
 | PWA | `vite-plugin-pwa`, `injectManifest` strategy (custom service worker) |
 | API client | Typed `fetch` wrapper per route (`src/lib/api.ts`, types from `@pi-code/protocol`) + `EventSource` |
 
@@ -18,7 +18,7 @@ React SPA, mobile-first, installable PWA. Source: `packages/web`.
 
 | Path | Screen |
 |---|---|
-| `/` | Home: open agents (with attention badges), recent sessions, "New conversation" |
+| `/` | Phone: Home (open agents with attention badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
 | `/sessions` | All sessions, filterable by project (`?cwd=`) |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree |
@@ -28,34 +28,83 @@ React SPA, mobile-first, installable PWA. Source: `packages/web`.
 
 "New conversation" opens the **project picker**: recent projects (`GET /api/projects`) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
 
-## Live conversation store
+## Shell and sidebar
 
-One Zustand store per open agent, created when the conversation route mounts:
+`AppShell` wraps every route (offline banner, badge sync, service-worker messages) and switches on `(min-width: 1024px)` (`useIsDesktop`):
+
+| | Desktop (≥1024px) | Phone (<1024px) |
+|---|---|---|
+| Sidebar | Docked left (280px), shown on load. One "Toggle sidebar" button, at the top of the sidebar while it is shown and alone in a collapsed rail while hidden; not persisted | Left sheet, opened from the "Conversations" button in the conversation header; closes when something is picked |
+| `/` | "Pick a conversation or start a new one" | Home: agents from `live`, recent sessions from `GET /api/sessions` |
+| Back chevron to Home | Hidden (conversation header, settings, sessions, "Conversation closed" and other placeholder screens) | Shown |
+| Settings | Sidebar footer | Home header, sidebar sheet footer |
+| Conversation column | Full content width | Capped at `max-w-3xl` |
+
+Tree and diff keep their "Back to conversation" chevron on both. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
+
+- **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), grouped by cwd; groups and rows most recent first. Group label: folder basename, with the parent's prepended when two groups share it; the branch from `live.branches` while the folder has a live agent.
+- **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; attention badge; relative activity time, refreshed every 60 s. The route's agent is highlighted.
+- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }`; `×` on live rows → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; a session row or an exited agent's row resumes it (`useOpenAgent`).
+- **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once.
+
+## Live registry
+
+`LiveRegistry` (`src/store/live-registry.ts`) is created once in `App`, started and stopped with it, and provided by context (`useLiveRegistry`, `useLive`). It owns the tab's only EventSource on `GET /api/stream` and every opened conversation store; routes own no connection. See [`05-desktop.md`](05-desktop.md), "Live registry".
 
 ```ts
-interface ConversationStore {
-  agent: AgentInfo;
-  state: RpcSessionState;
-  transcript: Transcript;
-  live: LiveState;
-  stats: SessionStats;
-  gitStatus: GitStatus | null;
-  seq: number;
+interface LiveOverview {                     // Zustand; read by the sidebar, Home, badge and share
+  loaded: boolean;                           // false until the first baseline
+  agents: Record<AgentId, AgentInfo>;        // every agent the server holds, exited included
+  sessions: SessionSummary[];                // the 7-day window
+  branches: Record<string, string>;          // cwd → branch
   connection: "connecting" | "live" | "reconnecting" | "offline";
-  apply(event: ServerEvent, seq: number): void;   // reduceLive + transcript/state updates
-  hydrate(snapshot: Snapshot): void;
+}
+
+class LiveRegistry {
+  live: StoreApi<LiveOverview>;
+  start(): void;                             // listeners on, stream opened
+  stop(): void;                              // stream closed; opened stores stay
+  open(agentId: AgentId): ConversationStore; // idempotent: created and loaded on first call
+  show(agentId: AgentId): () => void;        // marks the conversation on screen and acks it
+  drop(agentId: AgentId): void;              // forgets the store and marks it closed
 }
 ```
 
-Connection lifecycle:
+- **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming until dropped or the tab reloads, so switching back costs nothing.
+- **Refetch.** A `resync` frame, and an `agent_status` event turning the agent `ready`, refetch that store the same way. While its snapshot is in flight it ignores its frames and is left out of reconnect URLs.
+- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. `catalog` also invalidates the `sessions` and `projects` queries.
+- **Attention.** Snapshots don't clear attention. The registry acks (`POST /ack`) only the conversation on screen: on `show`, on `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its attention while the page is visible and focused. The ack leaves `input` while a dialog or the trust prompt is pending, so the badge stays until it is answered.
+- **Liveness.** EventSource reconnects by itself with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no message, no `ping`) for 35 s is reopened. `offline` marks the connection offline.
 
-1. `GET /snapshot` → `hydrate`.
-2. `new EventSource('/api/agents/:id/events?since=' + seq)`; each message → `apply`.
-3. `resync` → close, go back to 1.
-4. `visibilitychange` → visible: if the EventSource is closed, or nothing (message or `ping` event, sent every 15 s) arrived for 35 s, go back to 1; `POST /ack`.
-5. Unmount → close the EventSource.
+## Conversation store
 
-Components subscribe with selectors (`useStore(s => s.live.streaming)`), so token deltas only re-render the streaming message.
+One vanilla Zustand store per opened agent, created by the registry:
+
+```ts
+type ConnectionState = "connecting" | "live" | "reconnecting" | "offline";
+
+interface ConversationState {
+  agentId: AgentId;
+  agent: AgentInfo;
+  state: RpcSessionState | null;
+  transcript: Transcript;
+  stats: SessionStats | null;
+  gitStatus: GitStatus | null;
+  live: LiveState;
+  seq: number;                                     // last applied event, or the snapshot's
+  hydrated: boolean;                               // a snapshot has been applied
+  connection: ConnectionState;
+  closed: boolean;                                 // the agent is gone
+  hydrate(snapshot: Snapshot): void;
+  apply(event: ServerEvent, seq: number): void;    // reduceLive + committed caches; seq ≤ current ignored
+  setConnection(connection: ConnectionState): void;
+  markClosed(): void;
+}
+```
+
+`connection` mirrors the stream's state, or `connecting` / `reconnecting` / `offline` while the store's own snapshot is loading or being retried. A closed store makes the route show "Conversation closed" with a New conversation button.
+
+Components subscribe with selectors (`useConversation(s => s.live.streaming)`), so token deltas only re-render the streaming message.
 
 The **active branch** is derived from `transcript`: walk `parentId` from `leafId` to the root, reverse. Memoized on `(entries.length, leafId)`.
 
@@ -168,6 +217,8 @@ Disabled while a run is active.
 
 `GET /git/diff` on open and on refresh. File list with status and `+/−` counts; tapping a file shows its patch in the diff viewer. Handles `binary`, `tooLarge`, and `not_a_git_repo`.
 
+`DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and renders split at ≥1024px, unified below, whatever the viewport.
+
 ## PWA
 
 **Manifest:** name "pi-code", standalone display, icons, theme colors, and
@@ -182,8 +233,10 @@ Disabled while a run is active.
 - `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, renotify: true, data: { url } })`.
 - `notificationclick`: focus an existing window and navigate it to `url`, else `openWindow(url)`.
 
+While the app is visible and the stream is live, `useBadgeSync` keeps the badge equal to the agents in `live` needing attention, minus the one on screen.
+
 **Notifications setup:** `/settings` has an "Enable notifications" button (permission must come from a user gesture) → `pushManager.subscribe` with the VAPID key → `POST /api/push/subscriptions`. The same flow works in desktop Chrome, which covers desktop notifications.
 
-**Share target:** `/share` shows "Send to…" with open agents, recent sessions and "New conversation in…". Choosing one navigates to the conversation with the composer prefilled with `title`, `text` and `url`.
+**Share target:** `/share` shows "Send to…" with open agents (from `live`), recent sessions and "New conversation in…". Choosing one navigates to the conversation with the composer prefilled with `title`, `text` and `url`.
 
 **Offline:** app shell only; a banner shows when the server is unreachable.

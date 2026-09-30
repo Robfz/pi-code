@@ -33,7 +33,7 @@ tailscale serve --bg --https=443  http://127.0.0.1:4180   # the app and API
 tailscale serve --bg --https=8443 http://127.0.0.1:4181   # the web-search curator proxy
 ```
 
-Then open `https://<mac>.<tailnet>.ts.net` on the phone.
+Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder, with search), and one tab follows all of them at once.
 
 Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
 
@@ -81,10 +81,11 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 - When the search curator or MCP OAuth is triggered, pi also tries to open a browser on the Mac (shared config; left unchanged so the TUI keeps auto-opening).
 - MCP Apps and MCP URL elicitation don't work from the web (deferred).
 - Opening a web-owned session in the TUI at the same time corrupts the branch structure (pi has no session locking).
+- A conversation with no new session entry for 7 days is closed automatically, pending dialogs included; its session file stays and can be resumed.
 
 ## Documentation
 
 - [`maps/`](maps/) — decision maps and their rationale
-- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md)
+- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md)
 - [`docs/plan/`](docs/plan/) — implementation plan
 - [`docs/spikes/`](docs/spikes/) — protocol spike findings

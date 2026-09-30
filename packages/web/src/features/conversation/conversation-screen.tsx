@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
@@ -20,11 +20,14 @@ export function ConversationScreen() {
   const contentRef = useRef<HTMLDivElement>(null);
   useStickToBottom(scrollRef, contentRef);
   const exited = useConversation((s) => s.agent.status === "exited");
+  const desktop = useIsDesktop();
+  // Where desktop scopes the dialog sheets, clear of the sidebar.
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
   // Full content width on desktop; capped below.
-  const column = cn("flex w-full flex-col", !useIsDesktop() && "mx-auto max-w-3xl");
+  const column = cn("flex w-full flex-col", !desktop && "mx-auto max-w-3xl");
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div ref={setRoot} className="relative flex h-dvh flex-col">
       <ConversationHeader />
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div
@@ -47,7 +50,7 @@ export function ConversationScreen() {
         <Widgets placement="belowEditor" />
         <StatusBar />
       </div>
-      <DialogHost />
+      <DialogHost container={desktop ? root : undefined} />
       <TrustSheet />
       <ActionSheets />
       <NoticeToaster />

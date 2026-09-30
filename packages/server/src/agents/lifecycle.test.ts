@@ -349,6 +349,8 @@ describe("project trust", () => {
     expect(busy.body.error?.code).toBe("agent_busy");
     const snap: Snapshot = await h.snapshot(id);
     expect(snap.agent.status).toBe("awaiting_trust");
+    await h.api("POST", `/api/agents/${id}/ack`, {});
+    expect(h.manager.require(id).info().attention).toBe("input");
 
     const bad = await h.json("POST", `/api/agents/${id}/trust`, { trusted: "yes" });
     expect(bad.status).toBe(400);

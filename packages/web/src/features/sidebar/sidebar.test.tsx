@@ -1,4 +1,4 @@
-import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
+import { type AgentInfo, initialLiveState, type SessionSummary } from "@pi-code/protocol";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -159,18 +159,21 @@ describe("Sidebar", () => {
       within(row(name))
         .queryAllByRole("img")
         .map((img) => img.getAttribute("aria-label"));
-    expect(mark("Ready one")).toEqual(["Live"]);
+    // The status mark, then the attention icon.
+    expect(mark("Ready one")).toEqual(["Live", "Finished"]);
     expect(mark("Trust one")).toEqual(["Live"]);
-    expect(mark("Streaming one")).toEqual(["Working"]);
+    expect(mark("Streaming one")).toEqual(["Working", "Needs input"]);
     expect(mark("Starting one")).toEqual(["Working"]);
-    expect(mark("Exited one")).toEqual([]);
+    expect(mark("Exited one")).toEqual(["Failed"]);
     expect(mark("Disk one")).toEqual([]);
-    expect(within(row("Ready one")).getByText("Finished")).toBeInTheDocument();
-    expect(within(row("Streaming one")).getByText("Needs input")).toBeInTheDocument();
-    expect(within(row("Exited one")).getByText("Failed")).toBeInTheDocument();
+    expect(within(row("Ready one")).getByRole("img", { name: "Finished" })).toHaveAttribute(
+      "title",
+      "Finished",
+    );
+    expect(within(row("Ready one")).queryByText("Finished")).toBeNull();
     // Close only on live rows.
     expect(
-      within(row("Ready one")).getByRole("button", { name: "Close Ready one" }),
+      within(row("Ready one")).getByRole("button", { name: "Close Ready one (project)" }),
     ).toBeInTheDocument();
     expect(within(row("Starting one")).getByRole("button", { name: /Close/ })).toBeInTheDocument();
     expect(within(row("Exited one")).queryByRole("button", { name: /Close/ })).toBeNull();
@@ -188,31 +191,107 @@ describe("Sidebar", () => {
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/agents")).toBe(false);
   });
 
-  it("resumes a session row and an exited agent's row through POST /api/agents", async () => {
+  it("resumes a session row through POST /api/agents", async () => {
     const { router, calls } = await renderSidebar("/", (call) =>
       call.url === "/api/agents" && call.method === "POST"
+        ? [200, { agent: makeAgent({ id: "new" }) }]
+        : undefined,
+    );
+    baseline([], [session({ file: "free", name: "Disk one" })]);
+    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Disk one/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/new"));
+    expect(
+      calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body),
+    ).toEqual([{ sessionFile: "free" }]);
+  });
+
+  it("restarts an exited agent's row and navigates to it", async () => {
+    const { router, calls } = await renderSidebar("/", (call) =>
+      call.url === "/api/agents/exited/restart"
+        ? [200, { agent: makeAgent({ id: "exited", status: "starting" }) }]
+        : undefined,
+    );
+    baseline([
+      makeAgent({ id: "exited", sessionName: "Exited one", status: "exited", sessionFile: "fx" }),
+    ]);
+    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Exited one/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/exited"));
+    const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
+    expect(posts).toContain("/api/agents/exited/restart");
+    expect(posts).not.toContain("/api/agents");
+  });
+
+  it("toasts a failed restart and stays put", async () => {
+    const { router } = await renderSidebar("/", (call) =>
+      call.url === "/api/agents/exited/restart"
+        ? [500, { error: { code: "internal", message: "Restart broke" } }]
+        : undefined,
+    );
+    baseline([makeAgent({ id: "exited", sessionName: "Exited one", status: "exited" })]);
+    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Exited one/ }));
+    expect(await screen.findByText("Restart broke")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("keeps times aligned: rows without × reserve its slot", async () => {
+    await renderSidebar();
+    baseline(
+      [makeAgent({ id: "a1", sessionName: "Live one" })],
+      [session({ file: "free", name: "Disk one" })],
+    );
+    await within(nav()).findByText("Disk one");
+    const lastChild = (name: string) => row(name).lastElementChild as HTMLElement;
+    expect(lastChild("Live one").tagName).toBe("BUTTON");
+    expect(lastChild("Disk one")).toHaveAttribute("aria-hidden", "true");
+    expect(lastChild("Disk one")).toHaveClass("size-6");
+  });
+
+  it("clears the search from its clear button", async () => {
+    await renderSidebar();
+    baseline([]);
+    const user = userEvent.setup();
+    const box = within(nav()).getByRole("searchbox");
+    expect(within(nav()).queryByRole("button", { name: "Clear search" })).toBeNull();
+    await user.type(box, "abc");
+    await user.click(within(nav()).getByRole("button", { name: "Clear search" }));
+    expect(box).toHaveValue("");
+    expect(box).toHaveFocus();
+  });
+
+  it("stays usable while a dialog is pending; the dialog shows again on return", async () => {
+    const dialog = {
+      request: {
+        type: "extension_ui_request" as const,
+        id: "d1",
+        method: "confirm" as const,
+        title: "Proceed?",
+        message: "Sure?",
+      },
+      receivedAt: Date.now(),
+    };
+    const { router, calls } = await renderSidebar("/agents/a1", (call) =>
+      call.url === "/api/agents/a1/snapshot"
         ? [
             200,
-            {
-              agent: makeAgent({
-                id: (call.body as { sessionFile: string }).sessionFile === "fx" ? "exited" : "new",
-              }),
-            },
+            makeSnapshot({
+              agent: makeAgent({ id: "a1", sessionName: "Asking one" }),
+              live: { ...initialLiveState(), dialogs: [dialog] },
+            }),
           ]
         : undefined,
     );
-    baseline(
-      [makeAgent({ id: "exited", sessionName: "Exited one", status: "exited", sessionFile: "fx" })],
-      [session({ file: "free", name: "Disk one" })],
-    );
+    baseline([
+      makeAgent({ id: "a1", sessionName: "Asking one" }),
+      makeAgent({ id: "a2", sessionName: "Other one" }),
+    ]);
+    expect(await screen.findByTestId("dialog-confirm")).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(await within(nav()).findByRole("button", { name: /Disk one/ }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/new"));
-    await user.click(within(nav()).getByRole("button", { name: /Exited one/ }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/exited"));
-    expect(
-      calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body),
-    ).toEqual([{ sessionFile: "free" }, { sessionFile: "fx" }]);
+    await user.click(within(nav()).getByRole("link", { name: /Other one/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
+    expect(screen.queryByTestId("dialog-confirm")).toBeNull();
+    await user.click(within(nav()).getByRole("link", { name: /Asking one/ }));
+    expect(await screen.findByTestId("dialog-confirm")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith("/ui-responses"))).toBe(false);
   });
 
   it("starts a conversation in a folder from its +", async () => {
@@ -236,7 +315,7 @@ describe("Sidebar", () => {
     baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
     await userEvent
       .setup()
-      .click(await within(nav()).findByRole("button", { name: "Close Live one" }));
+      .click(await within(nav()).findByRole("button", { name: "Close Live one (project)" }));
     expect(await screen.findByRole("heading", { name: "Conversation closed" })).toBeInTheDocument();
     // The sidebar is there; no back-to-Home chevron.
     expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
@@ -249,7 +328,7 @@ describe("Sidebar", () => {
     );
     const held = holdFetch((_input, init) => init?.method === "DELETE");
     baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
-    const button = await within(nav()).findByRole("button", { name: "Close Live one" });
+    const button = await within(nav()).findByRole("button", { name: "Close Live one (project)" });
     const user = userEvent.setup();
     await user.click(button);
     expect(button).toBeDisabled();
@@ -270,13 +349,15 @@ describe("Sidebar", () => {
     const deletes = () => calls.filter((c) => c.method === "DELETE").map((c) => c.url);
     const user = userEvent.setup();
 
-    await user.click(await within(nav()).findByRole("button", { name: "Close Streaming one" }));
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Close Streaming one (project)" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: "Close Streaming one?" });
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deletes()).toEqual([]);
 
-    await user.click(within(nav()).getByRole("button", { name: "Close Asking one" }));
+    await user.click(within(nav()).getByRole("button", { name: "Close Asking one (project)" }));
     const confirm = await screen.findByRole("dialog", { name: "Close Asking one?" });
     await user.click(within(confirm).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(deletes()).toEqual(["/api/agents/a2"]));
