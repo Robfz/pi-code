@@ -43,13 +43,33 @@ function SheetContent({
   side = "right",
   showCloseButton = true,
   container,
+  loopFocus = true,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
   showCloseButton?: boolean;
   /** Portal target (defaults to `document.body`). */
   container?: HTMLElement | null;
+  /**
+   * Tab from the last focusable element wraps to the first (Radix always loops, even when
+   * non-modal). `false`, for a non-modal sheet, lets Tab carry on to the rest of the page; Tab
+   * keydowns from inside then don't reach this component's `onKeyDown`.
+   */
+  loopFocus?: boolean;
 }) {
+  const body = (
+    <>
+      {children}
+      {showCloseButton && (
+        <SheetPrimitive.Close data-slot="sheet-close" asChild>
+          <Button variant="ghost" className="absolute top-3 right-3" size="icon-sm">
+            <XIcon />
+            <span className="sr-only">Close</span>
+          </Button>
+        </SheetPrimitive.Close>
+      )}
+    </>
+  );
   return (
     <SheetPortal container={container}>
       <SheetOverlay />
@@ -62,14 +82,20 @@ function SheetContent({
         )}
         {...props}
       >
-        {children}
-        {showCloseButton && (
-          <SheetPrimitive.Close data-slot="sheet-close" asChild>
-            <Button variant="ghost" className="absolute top-3 right-3" size="icon-sm">
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </Button>
-          </SheetPrimitive.Close>
+        {loopFocus ? (
+          body
+        ) : (
+          // Tab keydowns stop here, before the content's focus scope would wrap them around;
+          // the browser then moves focus as usual. `contents` keeps the sheet's own layout.
+          // biome-ignore lint/a11y/noStaticElementInteractions: only intercepts bubbling Tab keys
+          <div
+            className="contents"
+            onKeyDown={(event) => {
+              if (event.key === "Tab") event.stopPropagation();
+            }}
+          >
+            {body}
+          </div>
         )}
       </SheetPrimitive.Content>
     </SheetPortal>

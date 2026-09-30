@@ -1,9 +1,9 @@
 import type { SequencedEvent, ServerEvent } from "@pi-code/protocol";
 
-export type EventListener = (event: SequencedEvent) => void;
+type EventListener = (event: SequencedEvent) => void;
 
 /** Default number of events kept per agent. */
-export const EVENT_LOG_CAPACITY = 10_000;
+const EVENT_LOG_CAPACITY = 10_000;
 
 /**
  * Per-agent event log: assigns the monotonic `seq`, keeps the last `capacity` events for

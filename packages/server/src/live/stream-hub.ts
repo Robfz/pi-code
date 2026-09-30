@@ -9,8 +9,8 @@ import type { AgentManager } from "../agents/agent-manager.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { FolderBranches } from "../git/branches.ts";
 
-/** Sessions updated within this long are in the catalog window. */
-const CATALOG_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Sessions updated within this long are in the catalog window; idle agents close after it. */
+export const CATALOG_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Statuses of an agent whose pi process is running. */
 const LIVE: ReadonlySet<AgentStatus> = new Set(["starting", "awaiting_trust", "ready"]);
@@ -18,12 +18,9 @@ const LIVE: ReadonlySet<AgentStatus> = new Set(["starting", "awaiting_trust", "r
 type BaselineFrame = Extract<StreamFrame, { type: "baseline" }>;
 
 /** Frames every connection receives, whatever it opened. */
-export type HubFrame = Extract<
-  StreamFrame,
-  { type: "agent" | "agent_closed" | "catalog" | "branch" }
->;
+type HubFrame = Extract<StreamFrame, { type: "agent" | "agent_closed" | "catalog" | "branch" }>;
 
-export interface StreamHubDeps {
+interface StreamHubDeps {
   manager: AgentManager;
   catalog: SessionCatalog;
 }

@@ -28,7 +28,7 @@ const HOP_BY_HOP = new Set([
   "upgrade",
 ]);
 
-export interface CuratorProxyOptions {
+interface CuratorProxyOptions {
   /** Tailnet hostname (lowercase, no port). */
   hostname: string;
   registry: CuratorRegistry;

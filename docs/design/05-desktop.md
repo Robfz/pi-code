@@ -46,7 +46,7 @@ type StreamFrame =
 
 1. The server awaits the current catalog window (ready after the startup scan; see Session watcher).
 2. In one synchronous block (publishing is synchronous, so nothing falls between replay and subscription): build the baseline from `manager.list()`, the catalog window and the branch map; for each opened agent, replay from its cursor or mark it for `resync`; subscribe to every opened agent's `EventLog`, to the manager's `agent` / `closed` events, and to catalog and branch changes.
-3. Write `retry`, `baseline`, then per opened agent either its replayed `event` frames or its `resync`, then live frames as they come.
+3. Write `retry`, the `baseline`, then per opened agent (in `open` order) either its replayed `event` frames or its `resync`, each as its own write, then live frames from the connection's queue as they come.
 
 A connection with 20,000 live frames queued is ended, which bounds memory for a stalled socket (replay isn't counted). EventSource reconnects with `Last-Event-ID` and replays or resyncs per agent. When an opened agent's log closes, its events stop; `agent_closed` tells the client.
 
@@ -68,7 +68,7 @@ Every `AgentInfo` change reaches the manager's `agent` event: `publishStatus` re
 
 ### Idle sweep
 
-An agent's **activity** is the later of its `startedAt` and its session's `updatedAt` (the last entry's timestamp, written on human and agent turns alike), read from `SessionCatalog`'s cached summaries. `startedAt` is set whenever pi is spawned, restarts included, so reopening an exited agent starts a fresh 7-day clock. An hourly tick closes, through `AgentManager.close` (the `DELETE /api/agents/:id` path), every agent whose activity is at least 7 days old and that isn't streaming, exited agents included; close errors (e.g. `agent_not_found` after a concurrent `DELETE`) are ignored. The same tick recomputes the catalog window, so sessions past 7 days drop out.
+An agent's **activity** is the later of its `startedAt` and its session's `updatedAt` (the last entry's timestamp, written on human and agent turns alike), read from `SessionCatalog`'s cached summaries. `startedAt` is set whenever pi is spawned, restarts included, so reopening an exited agent starts a fresh 7-day clock. An hourly tick closes, through `AgentManager.close` (the `DELETE /api/agents/:id` path), every agent whose activity is at least 7 days old and that isn't streaming, exited agents included; close errors (e.g. `agent_not_found` after a concurrent `DELETE`) are ignored. The same tick recomputes the catalog window, so sessions past 7 days drop out. Both use one constant, `CATALOG_WINDOW_MS` in `live/stream-hub.ts`.
 
 ### Session watcher
 
@@ -95,7 +95,7 @@ Per-conversation `git_status` (branch + dirty, status bar) comes from `git` as d
 
 ### Live registry
 
-A long-lived `LiveRegistry` (`src/store/live-registry.ts`), created once in `App` and provided by context, owns the tab's single stream and every opened conversation store. Routes own no connection.
+A long-lived `LiveRegistry` (`src/store/live-registry.ts`), created once in `App` and provided by context, owns the tab's single stream and every opened conversation store. Routes own no connection. Its injectable dependencies are `fetchSnapshot`, `ack`, `document` and `window`; it constructs streams with the global `EventSource`, which tests replace with a fake.
 
 ```ts
 interface LiveOverview {                     // Zustand, read by sidebar, Home, badge, share
@@ -118,7 +118,7 @@ interface LiveRegistry {
 
 - **Opening.** `open` creates the `ConversationStore`, fetches `GET /snapshot`, hydrates, then reconnects the stream: a new EventSource whose `open` lists every hydrated store at its `seq` (the snapshot's, then each applied event's). The registry holds one EventSource at a time: a reconnect closes the current one, detaching its handlers, before opening the next, so frames never interleave across sources. Switching between opened conversations costs nothing. Stores stay opened, and keep streaming, until dropped or the tab reloads.
 - **Refetch.** `resync`, and an `agent_status` that turns an opened agent `ready`, run opening again for that store. Until it is hydrated again it ignores its frames and is left out of reconnect URLs, so a reconnect meanwhile doesn't resync it twice; what it missed replays after the reconnect that follows the hydrate.
-- **Frames.** `event` → that store's `apply(event, seq)`; `agent` / `agent_closed` / `catalog` / `branch` / `baseline` → `live`. `agent_closed` also drops the store; if it was on screen, the route shows it as closed (see Sidebar). On `baseline`, a hydrated store whose agent is missing from `baseline.agents` (closed while disconnected, server restart) is handled as `agent_closed`, and so is a snapshot fetch answering `agent_not_found`; a store still fetching its snapshot is left to that snapshot. Every `catalog` frame invalidates the `sessions` and `projects` queries, keeping phone Home, `/sessions` and the project picker fresh.
+- **Frames.** `event` → that store's `apply(event, seq)`; `agent` / `agent_closed` / `catalog` / `branch` / `baseline` → `live`. `agent_closed` also drops the store; if it was on screen, the route shows it as closed (see Sidebar). On `baseline`, a hydrated store whose agent is missing from `baseline.agents` (closed while disconnected, server restart) is handled as `agent_closed`, and so is a snapshot fetch answering `agent_not_found`; a store still fetching its snapshot is left to that snapshot. A `catalog` frame that changes the listing (a session added or removed, or any field other than `updatedAt` changed) invalidates the `sessions` and `projects` queries, keeping phone Home, `/sessions` and the project picker fresh; a recency-only change doesn't refetch them.
 - **Attention.** Background stores re-snapshot too, so snapshots must not clear attention. The registry acks (`POST /ack`) only the conversation on screen (the one passed to `show`): when the route mounts, on `visibilitychange` to visible, on window `focus` (switching desktop windows fires no `visibilitychange`), and when an `agent` frame raises its attention while the page is visible and `document.hasFocus()`.
 - **Liveness.** EventSource reconnects on its own with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no frame, no ping) for 35 s is reopened. Each store's `connection` mirrors the stream's state, or `connecting` while its own snapshot is in flight (`reconnecting` / `offline` while it is retried).
 
@@ -150,15 +150,16 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 
 - **Rows** = every agent in `live.agents` (the registry, exited included) plus window sessions no agent holds (matched by `agent.sessionFile`). Title: agent `sessionName` / session `name`, else `firstMessage`, else "New conversation". Activity = the session's `updatedAt`; for an agent, the later of that and its `startedAt` (as in Idle sweep).
 - **Groups** by cwd, ordered by their most recent row; rows by activity. Label = folder basename, with the parent's basename prepended (`Kepi/phoenix`) when two displayed groups share a basename. The header shows `branches[cwd]` when the folder has a live row.
-- **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`, or while the row's resume is in flight; exited agents show no mark. Attention badge beside it: finished, failed, needs input (same colors as Home). Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
-- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on live rows → `DELETE /api/agents/:id`, then `drop`; it asks for confirmation when the agent is streaming or awaiting input (`attention: "input"`), and is disabled while the request is in flight. Selecting a live row navigates to it; selecting a session row or an exited agent's row resumes it (`useOpenAgent`, which restarts an exited agent).
-- **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on their row title and cwd path. The previous results stay on screen while the next query loads; clearing the field shows the window at once.
+- **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`, or while the row's resume is in flight; exited agents show no mark. A compact attention icon follows the title: finished, failed, needs input (Home's colors; Home keeps its text badges), labelled for assistive tech and in its tooltip. Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
+- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id`, then `drop`; it asks for confirmation when the agent is streaming or awaiting input (`attention: "input"`), and is disabled while the request is in flight. Selecting a live row navigates to it; selecting an exited agent's row restarts it (`POST /api/agents/:id/restart`) and then navigates to it; selecting a session row resumes it (`useOpenAgent`). A failed restart or resume shows a toast.
+- **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on their row title and cwd path. The previous results stay on screen while the next query loads; clearing the field shows the window at once. While the field has text, a themed × button clears it and refocuses the field (the browser's native cancel button is hidden).
 - A conversation closed while on screen shows "Conversation closed" in the content area with the New conversation button.
 
 ### Layout
 
 - **Transcript width.** At ≥1024px the conversation column (transcript and composer area) uses the full content width with the standard padding; below 1024px it is capped at `max-w-3xl`.
 - **Diff split.** `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
+- **Conversation sheets.** On desktop, extension dialogs (`DialogHost`) and the trust prompt (`TrustSheet`) are non-modal bottom sheets portalled into the conversation column (their `container` prop) with a `ScopedOverlay` dimming only that column, so the sidebar and the rest of the page stay usable. Clicks outside the sheet don't answer it, and neither does Escape pressed outside it; Tab can leave the sheet (`SheetContent loopFocus={false}`), skipping the covered column, which is `inert` while it's open. Inside a dialog, Escape, Cancel and × answer `cancelled`; the trust prompt answers only through its buttons. User-initiated action sheets (rename, model, thinking, stats) stay page-modal. On phone, dialogs and the trust prompt are modal bottom sheets, and outside taps don't cancel them.
 
 ## Stream consumers
 
@@ -170,10 +171,11 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 ## Limitations
 
 - The branch shows only for folders with a live conversation; pi records no branch (F8), so folders with only on-disk sessions show none.
-- Search matches folder path and session name only; unnamed sessions are found through their folder, and transcripts aren't searched.
+- Sidebar search filters agent rows on their displayed title (the first message for unnamed sessions) and cwd, while the server's `q` matches session name and cwd only; unnamed on-disk sessions aren't found by their first message, only through their folder, and transcripts aren't searched.
 - Opening or refetching a conversation reconnects the whole stream; the baseline is resent and every opened conversation replays from its cursor.
 - `catalog` frames resend the whole 7-day window on each change.
 - The opened set lives in the tab: after a reload only the conversation in the URL is opened; others are snapshotted when selected.
-- A conversation with no new session entry for 7 days (counted from its start at the latest) is closed, pending dialogs included; answering a dialog or trusting a folder writes no entry by itself. Committed entries stay in the session file.
+- Opened conversation stores stay in memory, and in the stream, for the tab's lifetime unless their agent is closed; navigating away doesn't release them, a reload does.
+- The idle sweep closes a conversation with no new session entry for 7 days or more (counted from its start at the latest), even with a pending dialog; answering a dialog or trusting a folder writes no entry by itself. Committed entries stay in the session file.
 - Without `<agentDir>/sessions` at startup there is no watcher until a restart; the agent dir is read-only to pi-code, so it isn't created.
 - The Mac uses the tailnet URL like other laptops. `localhost:4180` works too (one stream per tab, F11) but is HTTP/1.1.

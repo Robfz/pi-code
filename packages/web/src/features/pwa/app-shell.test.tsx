@@ -1,3 +1,4 @@
+import type { AgentInfo } from "@pi-code/protocol";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,11 +15,15 @@ import { stubFetch } from "@/test/render";
 const alpha = makeAgent({ id: "a1", cwd: "/home/me/alpha", sessionName: "Alpha work" });
 const beta = makeAgent({ id: "a2", cwd: "/home/me/beta", sessionName: "Beta work" });
 
-function renderApp(path: string, { desktop }: { desktop: boolean }) {
+function renderApp(
+  path: string,
+  { desktop, agents = [alpha, beta] }: { desktop: boolean; agents?: AgentInfo[] },
+) {
   stubMatchMedia((query) => desktop && query === DESKTOP_QUERY);
   stubFetch((call) => {
     const match = /^\/api\/agents\/(a\d)\/snapshot$/.exec(call.url);
-    if (match) return [200, makeSnapshot({ agent: match[1] === "a2" ? beta : alpha })];
+    const agent = agents.find((a) => a.id === match?.[1]);
+    if (agent) return [200, makeSnapshot({ agent })];
     return undefined;
   });
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
@@ -112,6 +117,29 @@ describe("desktop shell (≥1024px)", () => {
     await user.click(within(nav).getByRole("link", { name: "Settings" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings"));
     expect(sidebar()).toBe(nav);
+  });
+
+  it("keeps the sidebar usable, and lets Tab leave, while a trust prompt is pending", async () => {
+    const untrusted = makeAgent({ ...alpha, status: "awaiting_trust" });
+    const router = renderApp("/agents/a1", { desktop: true, agents: [untrusted, beta] });
+    sendBaseline([untrusted, beta]);
+    const prompt = await screen.findByTestId("trust-sheet");
+    // Scoped to the conversation column, not the page.
+    const column = screen
+      .getByRole("heading", { name: "Alpha work" })
+      .closest("header")?.parentElement;
+    expect(column).toContainElement(prompt);
+
+    const user = userEvent.setup();
+    within(prompt).getByRole("button", { name: "Trust" }).focus();
+    await user.tab();
+    expect(prompt).not.toContainElement(document.activeElement as HTMLElement);
+
+    const nav = await screen.findByRole("navigation", { name: "Conversations" });
+    await user.click(await within(nav).findByRole("link", { name: /Beta work/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
+    expect(await screen.findByRole("heading", { name: "Beta work" })).toBeInTheDocument();
+    expect(screen.queryByTestId("trust-sheet")).toBeNull();
   });
 });
 

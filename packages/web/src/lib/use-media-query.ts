@@ -4,7 +4,7 @@ const hasMatchMedia = () =>
   typeof window !== "undefined" && typeof window.matchMedia === "function";
 
 /** Whether a CSS media query matches, kept in sync with viewport changes. */
-export function useMediaQuery(query: string): boolean {
+function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (!hasMatchMedia()) return () => {};

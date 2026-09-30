@@ -99,11 +99,11 @@ A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` 
 
 ## Live stream
 
-`GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, and drains a per-connection frame queue to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the 7-day catalog window and the folder branch map, kept in memory so a baseline needs no I/O.
+`GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, writes `retry:`, the baseline, then each opened agent's replay (or `resync`) as separate writes, and drains a per-connection frame queue of live frames to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the 7-day catalog window and the folder branch map, kept in memory so a baseline needs no I/O.
 
 - **Session watcher** (`catalog/watcher.ts`): `fs.watch` on pi's sessions dir, recursive, TUI sessions included. Changes trigger a rescan (trailing throttle, 500 ms); the hub broadcasts `catalog` when the window differs.
 - **Folder branches** (`git/branches.ts`): for each cwd with a live agent, the git dir is resolved once (worktree `.git` files included), watched non-recursively, and `HEAD` re-read on every event; changes go out as `branch` frames.
-- **Idle sweep** (`agents/idle-sweep.ts`): hourly, recomputes the catalog window and closes every non-streaming agent, exited included, whose activity (the later of `startedAt` and its session's last entry) is at least 7 days old.
+- **Idle sweep** (`agents/idle-sweep.ts`): hourly, recomputes the catalog window and closes every non-streaming agent, exited included, whose activity (the later of `startedAt` and its session's last entry) is at least 7 days old, pending dialogs included. The 7 days are `CATALOG_WINDOW_MS` (`live/stream-hub.ts`), the constant the catalog window uses too.
 
 ### Commands
 

@@ -1,12 +1,12 @@
 import type { PendingDialog } from "@pi-code/protocol";
-import { useCallback, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { errorMessage, isApiRequestError, respondUi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { selectDialogs } from "@/store/selectors";
+import { ScopedOverlay } from "../scoped-overlay";
 import {
   ConfirmDialogView,
   type DialogAnswer,
@@ -24,8 +24,8 @@ import {
  * Cancel, the sheet's × and Escape answer `cancelled`; tapping outside does nothing, and a
  * dialog left unanswered stays pending (it's in the store, so it shows again on return).
  * With `container` (the conversation column on desktop) the sheet is non-modal and scoped to
- * it, overlay included, so the rest of the page (the sidebar) stays usable; `null` (the container
- * isn't mounted yet) shows nothing.
+ * it, overlay included, so the rest of the page (the sidebar) stays usable and Tab can leave it
+ * (the covered column is inert meanwhile); `null` (the container isn't mounted yet) shows nothing.
  */
 export function DialogHost({ container }: { container?: HTMLElement | null }) {
   const agentId = useConversation((s) => s.agentId);
@@ -62,6 +62,7 @@ function DialogSheet({
 }) {
   const { request } = dialog;
   const [busy, setBusy] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   async function answer(body: DialogAnswer) {
     setBusy(true);
@@ -94,27 +95,22 @@ function DialogSheet({
         if (!open && !busy) void answer({ cancelled: true });
       }}
     >
-      {container &&
-        createPortal(
-          <div
-            data-slot="sheet-overlay"
-            className="absolute inset-0 z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs"
-          />,
-          container,
-        )}
+      <ScopedOverlay container={container} />
       <SheetContent
         side="bottom"
+        ref={contentRef}
         container={container}
+        loopFocus={container === undefined}
         data-testid={`dialog-${request.method}`}
         onInteractOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
-          // Scoped: Escape typed elsewhere on the page (e.g. the sidebar search) isn't for it.
+          // Scoped: Escape typed outside the sheet (e.g. in the sidebar search) isn't for it.
           const target = event.target;
           if (
             container &&
             target instanceof Node &&
             target !== document.body &&
-            !container.contains(target)
+            !contentRef.current?.contains(target)
           )
             event.preventDefault();
         }}

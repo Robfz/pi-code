@@ -130,6 +130,22 @@ describe("DialogHost", () => {
     await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "x1", cancelled: true }]));
   });
 
+  it("page-modal: Tab wraps around inside the sheet", async () => {
+    stubFetch(() => [204, null]);
+    await renderWithStore(
+      <DialogHost />,
+      withDialogs({
+        request: { ...base, id: "t1", method: "confirm", title: "T", message: "m" },
+        receivedAt: Date.now(),
+      }),
+    );
+    const sheet = screen.getByTestId("dialog-confirm");
+    const buttons = within(sheet).getAllByRole("button");
+    buttons.at(-1)?.focus();
+    await userEvent.setup().tab();
+    expect(buttons[0]).toHaveFocus();
+  });
+
   it("tapping outside doesn't answer; the sheet's × cancels", async () => {
     const { calls } = stubFetch(() => [204, null]);
     await renderWithStore(
@@ -173,6 +189,10 @@ describe("DialogHost", () => {
       await user.keyboard("{Escape}");
       expect(screen.getByTestId("dialog-confirm")).toBeInTheDocument();
       expect(uiBodies(calls)).toEqual([]);
+      // Tab leaves it rather than wrapping around.
+      within(sheet).getByRole("button", { name: "Close" }).focus();
+      await user.tab();
+      expect(outside).toHaveFocus();
       await user.click(within(sheet).getByRole("button", { name: "No" }));
       await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "s1", confirmed: false }]));
     } finally {

@@ -5,6 +5,7 @@ import { ArrowRightIcon, FolderIcon, LoaderIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { SessionList } from "@/features/catalog/session-list";
 import { useConversationUi } from "@/features/conversation/conversation-ui";
@@ -12,15 +13,15 @@ import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { PlaceholderScreen } from "@/routes/placeholder";
-import { useLive, useLiveAgents } from "@/store/context";
+import { useLiveAgents } from "@/store/context";
 import { composeShareText, parseShareParams } from "./share-text";
 
 const RECENT_SESSIONS = 8;
 
-function Loading({ label = "Loading…" }: { label?: string }) {
+function Loading() {
   return (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
-      <LoaderIcon className="size-4 animate-spin" /> {label}
+      <LoaderIcon className="size-4 animate-spin" /> Loading…
     </p>
   );
 }
@@ -39,7 +40,6 @@ export function ShareScreen() {
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const openAgents = useLiveAgents();
-  const connecting = useLive((s) => s.connection === "connecting");
   const sessions = useQuery({ queryKey: queryKeys.sessions(), queryFn: () => listSessions() });
 
   const handOff = (agent: Pick<AgentInfo, "id">) => {
@@ -75,9 +75,7 @@ export function ShareScreen() {
 
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">Open conversations</h2>
-          {openAgents === undefined && (
-            <Loading label={connecting ? "Loading…" : "Reconnecting…"} />
-          )}
+          {openAgents === undefined && <AgentsLoading />}
           {openAgents?.length === 0 && (
             <p className="text-sm text-muted-foreground">No open conversations.</p>
           )}

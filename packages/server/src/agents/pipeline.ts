@@ -34,7 +34,7 @@ import type { AgentHost, HostCommand } from "./agent-host.ts";
 import { EventLog } from "./event-log.ts";
 
 /** What the pipeline needs from its agent (implemented by `Agent`). */
-export interface PipelineAgent {
+interface PipelineAgent {
   readonly id: string;
   readonly cwd: string;
   /** The current pi process (throws while there is none, see `hasHost`). */
@@ -83,7 +83,7 @@ export const SESSION_CHANGING_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Commands after which `get_state` is refreshed and published as `state`. */
-export const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
+const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
   "set_model",
   "cycle_model",
   "set_thinking_level",
@@ -96,7 +96,7 @@ export const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Query commands: no side effects, so no entry sync after them. */
-export function isQueryCommand(type: string): boolean {
+function isQueryCommand(type: string): boolean {
   return type.startsWith("get_");
 }
 
@@ -165,8 +165,6 @@ export class AgentPipeline {
   private gitRefreshing = false;
   private gitAgain = false;
   private disposed = false;
-  /** The last session file canonicalized by `getState`, if it existed: pi's path → canonical. */
-  private sessionPath: { raw: string; canonical: string } | undefined;
 
   constructor(agent: PipelineAgent, opts: PipelineOptions = {}) {
     this.agent = agent;
@@ -815,14 +813,9 @@ export class AgentPipeline {
     const state = await host.send<RpcSessionState>({ type: "get_state" });
     const raw = state.sessionFile;
     if (raw === undefined) return state;
-    if (this.sessionPath?.raw === raw) return { ...state, sessionFile: this.sessionPath.canonical };
-    let sessionFile: string;
-    if (existsSync(raw)) {
-      sessionFile = await canonicalize(raw);
-      this.sessionPath = { raw, canonical: sessionFile };
-    } else {
-      sessionFile = join(await canonicalize(dirname(raw)), basename(raw));
-    }
+    const sessionFile = existsSync(raw)
+      ? await canonicalize(raw)
+      : join(await canonicalize(dirname(raw)), basename(raw));
     return { ...state, sessionFile };
   }
 

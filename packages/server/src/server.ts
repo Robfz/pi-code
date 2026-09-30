@@ -18,12 +18,12 @@ import { loadVapidDetails } from "./push/vapid.ts";
 
 export const LISTEN_HOST = "127.0.0.1";
 
-export interface StartOptions {
+interface StartOptions {
   /** Replaces `web-push` (tests). */
   pushSender?: PushSender;
 }
 
-export interface RunningServer {
+interface RunningServer {
   port: number;
   curatorPort: number;
   manager: AgentManager;
@@ -97,14 +97,16 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   });
 
   const server = serve({ fetch: app.fetch, port: config.port, hostname: LISTEN_HOST }) as Server;
-  const port = await listening(server);
-
   const proxy = new CuratorProxy({ hostname: config.hostname, registry: curators });
+  let port: number;
   let curatorPort: number;
   try {
+    port = await listening(server);
     curatorPort = await proxy.listen(config.curatorPort, LISTEN_HOST);
   } catch (e) {
     server.close();
+    sessionsWatcher?.close();
+    hub.close();
     throw e;
   }
 

@@ -7,7 +7,7 @@ import { existsSync, watch } from "node:fs";
 /** Longest delay between a change in the sessions dir and the rescan it schedules. */
 const MAX_WAIT_MS = 500;
 
-export interface Throttled {
+interface Throttled {
   /** Runs the function `ms` after the first call since its last run. */
   schedule(): void;
   cancel(): void;

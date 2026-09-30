@@ -58,14 +58,14 @@ export function parseUiResponse(value: unknown): UiResponseBody {
   );
 }
 
-export interface CommandContext {
+interface CommandContext {
   /** The other agent that has `sessionFile` open, if any. */
   ownerOf(sessionFile: string, except: AgentId): AgentId | undefined;
   /** A session file's realpath, confined like `POST /api/agents { sessionFile }`. */
   resolveSessionFile(sessionFile: string): Promise<string>;
 }
 
-export type CommandOutcome = { status: 200; data: unknown } | { status: 202; data: { id: string } };
+type CommandOutcome = { status: 200; data: unknown } | { status: 202; data: { id: string } };
 
 /** Rejects requests for agents that can't take them. */
 export function assertAcceptsInput(agent: Agent): void {
@@ -130,7 +130,7 @@ export async function runCommand(
 }
 
 /** The pi-code extension's tree-navigation command (see packages/pi-extension). */
-export const TREE_COMMAND = "pi-code-tree";
+const TREE_COMMAND = "pi-code-tree";
 
 /** Validates a `POST /tree/navigate` body. */
 export function parseNavigateBody(value: unknown): NavigateBody {

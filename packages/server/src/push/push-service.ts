@@ -6,9 +6,9 @@ import type { StoredSubscription, SubscriptionStore } from "./subscriptions.ts";
 import type { VapidDetails } from "./vapid.ts";
 
 /** Push message lifetime at the push service: 1 h. */
-export const PUSH_TTL_SECONDS = 3600;
+const PUSH_TTL_SECONDS = 3600;
 /** Maximum length of a notification body. */
-export const BODY_MAX_CHARS = 140;
+const BODY_MAX_CHARS = 140;
 
 export interface PushSendOptions {
   TTL: number;
@@ -24,7 +24,7 @@ export type PushSender = (
 ) => Promise<unknown>;
 
 /** `web-push`'s `sendNotification`. */
-export const webPushSender: PushSender = (subscription, payload, options) =>
+const webPushSender: PushSender = (subscription, payload, options) =>
   webpush.sendNotification(
     {
       endpoint: subscription.endpoint,
@@ -46,12 +46,12 @@ export const webPushSender: PushSender = (subscription, payload, options) =>
   );
 
 /** Where the push service looks up agents (the `AgentManager`). */
-export interface PushAgents {
+interface PushAgents {
   get(id: string): { info(): AgentInfo } | undefined;
   list(): AgentInfo[];
 }
 
-export interface PushServiceDeps {
+interface PushServiceDeps {
   vapid: VapidDetails;
   store: SubscriptionStore;
   agents: PushAgents;

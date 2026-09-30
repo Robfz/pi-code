@@ -43,9 +43,9 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 Tree and diff keep their "Back to conversation" chevron on both. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
 - **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), grouped by cwd; groups and rows most recent first. Group label: folder basename, with the parent's prepended when two groups share it; the branch from `live.branches` while the folder has a live agent.
-- **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; attention badge; relative activity time, refreshed every 60 s. The route's agent is highlighted.
-- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }`; `×` on live rows → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; a session row or an exited agent's row resumes it (`useOpenAgent`).
-- **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once.
+- **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; a compact attention icon (Home keeps text badges); relative activity time, refreshed every 60 s. The route's agent is highlighted.
+- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }`; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
+- **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once. A themed × button clears the field.
 
 ## Live registry
 
@@ -72,7 +72,7 @@ class LiveRegistry {
 
 - **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming until dropped or the tab reloads, so switching back costs nothing.
 - **Refetch.** A `resync` frame, and an `agent_status` event turning the agent `ready`, refetch that store the same way. While its snapshot is in flight it ignores its frames and is left out of reconnect URLs.
-- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. `catalog` also invalidates the `sessions` and `projects` queries.
+- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. A `catalog` frame invalidates the `sessions` and `projects` queries only when the listing changes (a session added or removed, or any field other than `updatedAt` changed).
 - **Attention.** Snapshots don't clear attention. The registry acks (`POST /ack`) only the conversation on screen: on `show`, on `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its attention while the page is visible and focused. The ack leaves `input` while a dialog or the trust prompt is pending, so the badge stays until it is answered.
 - **Liveness.** EventSource reconnects by itself with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no message, no `ping`) for 35 s is reopened. `offline` marks the connection offline.
 
@@ -120,7 +120,7 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 └ status bar ─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Dialogs render as bottom sheets over this screen.
+Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI).
 
 ### Transcript rendering
 
@@ -191,7 +191,7 @@ Built-in commands:
 | `select` | Bottom sheet, option list |
 | `confirm` | Bottom sheet, message + Yes/No |
 | `input` | Bottom sheet, text field |
-| `editor` | Full-screen textarea, prefilled |
+| `editor` | Full-screen textarea (full column height on desktop), prefilled |
 | `notify` | Toast (info / warning / error) |
 | `setStatus` | Chip in the status bar |
 | `setWidget` | Monospace block above/below the composer |
@@ -199,6 +199,8 @@ Built-in commands:
 | `set_editor_text` | Composer text |
 
 Dialog titles and messages are rendered with URLs linkified and a copy button next to each URL — this is the copy-paste flow for MCP OAuth (open the URL, approve, paste the redirect URL back into the input). Dialogs with `expiresAt` show a countdown; at 0 the dialog stays until the server's `ui_resolved` (the device clock may be skewed). An agent with `status: "awaiting_trust"` shows a trust sheet (project path, what trusting loads) answered with `POST /trust`.
+
+On phone, dialogs and the trust sheet are modal bottom sheets; outside taps don't cancel them. On desktop they are non-modal sheets portalled into the conversation column (`container` prop) with a `ScopedOverlay` dimming only that column, so the sidebar stays usable: outside clicks and Escape pressed outside the sheet don't answer, and Tab can leave the sheet (`SheetContent loopFocus={false}`), skipping the covered column, which is `inert` while it's open. A dialog's Escape (inside it), Cancel and × answer `cancelled`; the trust sheet answers only through its buttons. User-initiated action sheets (rename, model, thinking, stats) stay page-modal. See [`05-desktop.md`](05-desktop.md), "Layout".
 
 ### Status bar
 

@@ -13,7 +13,7 @@ import { type SseOptions, streamRoutes } from "./http/stream.ts";
 import type { StreamHub } from "./live/stream-hub.ts";
 import type { PushService } from "./push/push-service.ts";
 
-export interface AppDeps {
+interface AppDeps {
   /** Tailnet hostname (Host allowlist, origin checks). */
   hostname: string;
   /** Main listener port (local Host/Origin entries). */

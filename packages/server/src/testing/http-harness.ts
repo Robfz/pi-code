@@ -60,14 +60,14 @@ export interface HarnessOptions {
 }
 
 /** A push message the harness's fake sender received. */
-export interface SentPush {
+interface SentPush {
   endpoint: string;
   payload: PushPayload;
   options: PushSendOptions;
 }
 
 /** One dispatched SSE message. */
-export interface SseMessage {
+interface SseMessage {
   /** `event:` field, for named events. */
   name?: string;
   /** `id:` field, when present. */
@@ -76,7 +76,7 @@ export interface SseMessage {
 }
 
 /** A `GET /api/stream` frame with its SSE `id:` (the cursor list). */
-export interface ReceivedFrame {
+interface ReceivedFrame {
   id?: CursorList;
   frame: StreamFrame;
 }

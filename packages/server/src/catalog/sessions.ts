@@ -15,7 +15,7 @@ const LIST_TTL_MS = 1_000;
 const PARSE_CONCURRENCY = 16;
 
 /** What the file itself says (everything but `ownedBy`). */
-export type ParsedSession = Omit<SessionSummary, "ownedBy">;
+type ParsedSession = Omit<SessionSummary, "ownedBy">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -167,7 +167,7 @@ interface CacheEntry {
   summary: ParsedSession | undefined;
 }
 
-export interface SessionCatalogDeps {
+interface SessionCatalogDeps {
   /** pi's agent dir; sessions live in `<agentDir>/sessions`. */
   agentDir: string;
   /** The agent that has a session file open, if any. */

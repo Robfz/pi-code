@@ -6,12 +6,13 @@ import { useState } from "react";
 import { AttentionBadge } from "@/components/attention-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { SessionList } from "@/features/catalog/session-list";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
-import { useLive, useLiveAgents } from "@/store/context";
+import { useLiveAgents } from "@/store/context";
 
 function statusLabel(agent: AgentInfo): string | null {
   switch (agent.status) {
@@ -91,7 +92,6 @@ function RecentSessions() {
 export function HomeScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const agents = useLiveAgents();
-  const connecting = useLive((s) => s.connection === "connecting");
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
       <header className="flex items-center justify-between">
@@ -117,12 +117,7 @@ export function HomeScreen() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-muted-foreground">Open conversations</h2>
-        {agents === undefined && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderIcon className="size-4 animate-spin" />{" "}
-            {connecting ? "Loading…" : "Reconnecting…"}
-          </p>
-        )}
+        {agents === undefined && <AgentsLoading />}
         {agents?.length === 0 && (
           <div className="flex flex-col gap-0.5 rounded-xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
             <p>No open conversations.</p>

@@ -17,7 +17,7 @@ export const LARGE_DIFF_LINES = 1500;
 const LARGE_DIFF_CHARS = 400_000;
 
 /** Viewer width (px) from which the diff is split. */
-export const SPLIT_MIN_WIDTH = 1024;
+const SPLIT_MIN_WIDTH = 1024;
 
 const DiffViewImpl = lazy(() => import("./diff-view-impl"));
 

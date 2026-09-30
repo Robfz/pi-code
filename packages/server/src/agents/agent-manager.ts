@@ -19,10 +19,10 @@ import { AgentPipeline, type AttentionTrigger, type PipelineOptions } from "./pi
 import { needsTrustDecision } from "./trust.ts";
 
 /** Environment variable carrying the user's trust decision to the pi-code extension. */
-export const TRUST_ENV = "PI_CODE_TRUST";
+const TRUST_ENV = "PI_CODE_TRUST";
 
 /** What to spawn for an agent. */
-export interface SpawnSpec {
+interface SpawnSpec {
   bin: string;
   args: string[];
   env?: NodeJS.ProcessEnv;
@@ -44,7 +44,7 @@ export type AgentRecord =
   | { kind: "ui_request"; request: RpcExtensionUIRequest }
   | { kind: "status"; agent: AgentInfo };
 
-export type AgentRecordHandler = (agent: Agent, record: AgentRecord) => void;
+type AgentRecordHandler = (agent: Agent, record: AgentRecord) => void;
 
 export interface AgentManagerDeps {
   /** `$HOME`: agents' cwds must resolve inside it. */
@@ -158,7 +158,7 @@ export class Agent {
   }
 }
 
-export interface AgentManagerEvents {
+interface AgentManagerEvents {
   /**
    * An agent's info changed: status or attention, or `isStreaming`, `sessionName`,
    * `sessionFile` or `sessionId`.

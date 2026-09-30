@@ -232,12 +232,8 @@ beforeEach(() => {
   deps = {
     fetchSnapshot: vi.fn(async (id: AgentId) => server.snapshot(id)),
     ack: vi.fn(async () => {}),
-    createEventSource: (url) => new FakeEventSource(url),
-    streamUrl: (cursors) => (cursors === "" ? "/api/stream" : `/api/stream?open=${cursors}`),
-    retryDelays: [1_000, 2_000, 5_000, 10_000],
     document: fakeDocument as unknown as RegistryDeps["document"],
     window: fakeWindow as unknown as RegistryDeps["window"],
-    now: () => Date.now(),
   };
 });
 
@@ -249,7 +245,8 @@ afterEach(() => {
 describe("LiveRegistry", () => {
   it("streams agents, sessions and branches with nothing opened", () => {
     start();
-    expect(latest().url).toBe("/api/stream");
+    expect(new URL(latest().url).pathname).toBe("/api/stream");
+    expect(new URL(latest().url).search).toBe("");
     expect(registry.live.getState()).toMatchObject({ loaded: false, connection: "connecting" });
     latest().open();
     latest().send(agentFrame({ id: "a1" }));
@@ -276,15 +273,48 @@ describe("LiveRegistry", () => {
     expect(registry.live.getState().branches).toEqual({ "/home/me/other": "feat" });
   });
 
-  it("invalidates the sessions and projects queries on every catalog frame", () => {
+  it("invalidates the session and project lists only when what they show or their order changes", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidated = () => invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey);
     start();
-    latest().send({ type: "catalog", sessions: [session("s2")] });
-    latest().send({ type: "catalog", sessions: [session("s3")] });
-    expect(registry.live.getState().sessions).toEqual([session("s3")]);
-    expect(invalidateQueries).toHaveBeenCalledTimes(4);
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["sessions"] });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects"] });
+    latest().open();
+    latest().send({ type: "baseline", agents: [], sessions: [session("s1")], branches: {} });
+
+    // A session write only moves updatedAt: nothing to refetch.
+    const touched = { ...session("s1"), updatedAt: "2026-01-03T00:00:00.000Z" };
+    latest().send({ type: "catalog", sessions: [touched] });
+    expect(registry.live.getState().sessions).toEqual([touched]);
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    // A new session in a known folder.
+    latest().send({ type: "catalog", sessions: [session("s2"), touched] });
+    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
+
+    // A rename.
+    invalidateQueries.mockClear();
+    latest().send({ type: "catalog", sessions: [{ ...session("s2"), name: "Named" }, touched] });
+    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
+
+    // A write to the second session moves it to the top.
+    invalidateQueries.mockClear();
+    const top = { ...touched, updatedAt: "2026-01-04T00:00:00.000Z" };
+    latest().send({ type: "catalog", sessions: [top, { ...session("s2"), name: "Named" }] });
+    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
+
+    // Another write to it keeps the order.
+    invalidateQueries.mockClear();
+    const retouched = { ...touched, updatedAt: "2026-01-05T00:00:00.000Z" };
+    latest().send({ type: "catalog", sessions: [retouched, { ...session("s2"), name: "Named" }] });
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    // A new folder.
+    invalidateQueries.mockClear();
+    const elsewhere = { ...session("s3"), cwd: "/home/me/other" };
+    latest().send({
+      type: "catalog",
+      sessions: [elsewhere, retouched, { ...session("s2"), name: "Named" }],
+    });
+    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
   });
 
   it("reconnects on each hydrate with every hydrated store at its seq", async () => {

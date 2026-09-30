@@ -540,6 +540,53 @@ group("live stream resume", () => {
     expect(client.events(c.id)).toEqual([]);
   });
 
+  it("writes the baseline and each replay before live frames queued during setup", async () => {
+    const h = await start({ fixture: "plain-answer" });
+    const a = await h.open();
+    const b = await h.open();
+    await promptAndSettle(h, a.id);
+    await promptAndSettle(h, b.id);
+    const seqA = seqOf(h, a.id);
+    const seqB = seqOf(h, b.id);
+
+    // Publishes a live event of `a` (and its agent frame) as the connection subscribes to the
+    // hub, i.e. before anything is written.
+    const subscribe = h.hub.subscribe.bind(h.hub);
+    h.hub.subscribe = (listener) => {
+      h.hub.subscribe = subscribe;
+      const unsubscribe = subscribe(listener);
+      h.manager.require(a.id).pipeline.setAttention("none");
+      return unsubscribe;
+    };
+    const client = h.stream({
+      open: [
+        [a.id, seqA - 2],
+        [b.id, seqB - 1],
+      ],
+    });
+    await client.waitForSeq(a.id, seqA + 1);
+    await client.until(() => agentFrames(client, a.id)[0]);
+    const live = `${a.id}:${seqA + 1},${b.id}:${seqB}`;
+    expect(client.frames.map(({ id, frame }) => [id, frame.type])).toEqual([
+      [`${a.id}:${seqA - 2},${b.id}:${seqB - 1}`, "baseline"],
+      [`${a.id}:${seqA - 1},${b.id}:${seqB - 1}`, "event"],
+      [`${a.id}:${seqA},${b.id}:${seqB - 1}`, "event"],
+      [`${a.id}:${seqA},${b.id}:${seqB}`, "event"],
+      [live, "event"],
+      [live, "agent"],
+    ]);
+    expect(
+      client.frames.flatMap(({ frame }) =>
+        frame.type === "event" ? [[frame.agentId, frame.seq]] : [],
+      ),
+    ).toEqual([
+      [a.id, seqA - 1],
+      [a.id, seqA],
+      [b.id, seqB],
+      [a.id, seqA + 1],
+    ]);
+  });
+
   it("resyncs one agent while another replays; a caught-up cursor replays nothing", async () => {
     const h = await start({ fixture: "plain-answer", eventLogCapacity: 5 });
     const a = await h.open();

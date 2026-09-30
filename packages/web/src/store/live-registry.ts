@@ -28,7 +28,7 @@ import {
   createConversationStore,
 } from "./conversation-store";
 
-/** The subset of `EventSource` the registry uses (so tests can inject a fake). */
+/** The subset of `EventSource` the registry uses. */
 export interface EventSourceLike {
   readonly readyState: number;
   onopen: ((this: never, ev: Event) => unknown) | null;
@@ -60,10 +60,6 @@ export interface LiveOverview {
 export interface RegistryDeps {
   fetchSnapshot(agentId: AgentId): Promise<Snapshot>;
   ack(agentId: AgentId): Promise<void>;
-  createEventSource(url: string): EventSourceLike;
-  streamUrl(cursors: string): string;
-  /** Backoff between failed attempts, in ms; the last value repeats. */
-  retryDelays: readonly number[];
   document: Pick<
     Document,
     "visibilityState" | "hasFocus" | "addEventListener" | "removeEventListener"
@@ -71,19 +67,17 @@ export interface RegistryDeps {
   window: Pick<Window, "addEventListener" | "removeEventListener"> & {
     navigator: { onLine: boolean };
   };
-  now(): number;
 }
+
+/** Backoff between failed attempts, in ms; the last value repeats. */
+const RETRY_DELAYS = [1_000, 2_000, 5_000, 10_000] as const;
 
 function defaultRegistryDeps(): RegistryDeps {
   return {
     fetchSnapshot: getSnapshot,
     ack: ackAgent,
-    createEventSource: (url) => new EventSource(url) as unknown as EventSourceLike,
-    streamUrl,
-    retryDelays: [1_000, 2_000, 5_000, 10_000],
     document,
     window,
-    now: Date.now,
   };
 }
 
@@ -224,15 +218,15 @@ export class LiveRegistry {
       .filter(([, entry]) => !entry.refetching)
       .map(([id, entry]) => `${id}:${entry.store.getState().seq}`)
       .join(",");
-    const es = this.deps.createEventSource(this.deps.streamUrl(cursors));
+    const es = new EventSource(streamUrl(cursors)) as unknown as EventSourceLike;
     this.es = es;
-    this.lastMessageAt = this.deps.now();
+    this.lastMessageAt = Date.now();
     es.onopen = () => {
-      this.lastMessageAt = this.deps.now();
+      this.lastMessageAt = Date.now();
       this.failures = 0;
     };
     es.onmessage = (message) => {
-      this.lastMessageAt = this.deps.now();
+      this.lastMessageAt = Date.now();
       let frame: StreamFrame;
       try {
         frame = JSON.parse(message.data) as StreamFrame;
@@ -313,11 +307,18 @@ export class LiveRegistry {
       case "agent_closed":
         this.closeAgent(frame.agentId);
         return;
-      case "catalog":
+      case "catalog": {
+        // Every session write sends one. The session and project lists are refetched when what
+        // they show changes (a session added, gone, renamed, titled or opened) or their order
+        // does (a session moving to the top), not when only `updatedAt` moves.
+        const previous = this.live.getState().sessions;
         this.live.setState({ sessions: frame.sessions });
-        void this.queryClient.invalidateQueries({ queryKey: ["sessions"] });
-        void this.queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+        if (!sameListing(previous, frame.sessions)) {
+          void this.queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          void this.queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+        }
         return;
+      }
       case "branch": {
         const { [frame.cwd]: _, ...branches } = this.live.getState().branches;
         if (frame.branch !== null) branches[frame.cwd] = frame.branch;
@@ -363,8 +364,7 @@ export class LiveRegistry {
   }
 
   private delay(failures: number): number {
-    const delays = this.deps.retryDelays;
-    return delays[Math.min(failures, delays.length - 1)] ?? 1_000;
+    return RETRY_DELAYS[Math.min(failures, RETRY_DELAYS.length - 1)] ?? 1_000;
   }
 
   private isOffline(): boolean {
@@ -380,14 +380,14 @@ export class LiveRegistry {
   private reopenIfDead(): void {
     if (!this.running) return;
     const closed = this.es === null || this.es.readyState === EVENT_SOURCE_CLOSED;
-    if (closed || this.deps.now() - this.lastMessageAt > STALE_AFTER_MS) {
+    if (closed || Date.now() - this.lastMessageAt > STALE_AFTER_MS) {
       this.failures = 0;
       this.reconnect();
     }
   }
 
   private readonly onPing = () => {
-    this.lastMessageAt = this.deps.now();
+    this.lastMessageAt = Date.now();
   };
 
   /** The user is back (page visible or window focused). */
@@ -411,4 +411,18 @@ export class LiveRegistry {
   private readonly onOffline = () => {
     this.setStreamState("offline");
   };
+}
+
+/** What the session lists show of a session, bar its recency. */
+function listing(session: SessionSummary): string {
+  const { updatedAt: _, ...shown } = session;
+  return JSON.stringify(shown);
+}
+
+/** Same sessions, showing the same, in the same order (most recent first). */
+function sameListing(a: readonly SessionSummary[], b: readonly SessionSummary[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((session, i) => listing(session) === listing(b[i] as SessionSummary))
+  );
 }
