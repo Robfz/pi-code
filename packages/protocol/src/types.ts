@@ -199,6 +199,33 @@ export interface SequencedEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Live stream — `GET /api/stream` (`docs/design/05-desktop.md`)
+
+/** `agentId:seq` pairs joined by `,` — the `open` query value and every SSE `id:`. */
+export type CursorList = string;
+
+export type StreamFrame =
+  | {
+      type: "baseline";
+      agents: AgentInfo[];
+      /** Sessions updated within the last 7 days, most recent first, without `ownedBy`. */
+      sessions: SessionSummary[];
+      /** cwd → branch, for folders with a live agent inside a git work tree. */
+      branches: Record<string, string>;
+    }
+  /** An opened agent's event; `seq` duplicates its pair in the SSE `id:`. */
+  | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent }
+  /** The agent's cursor can't be replayed: refetch its snapshot. */
+  | { type: "resync"; agentId: AgentId }
+  /** Any agent's info changed (or a new agent). */
+  | { type: "agent"; agent: AgentInfo }
+  | { type: "agent_closed"; agentId: AgentId }
+  /** The 7-day session window; replaces the previous one. */
+  | { type: "catalog"; sessions: SessionSummary[] }
+  /** `null`: not tracked or not a repo. */
+  | { type: "branch"; cwd: string; branch: string | null };
+
+// ---------------------------------------------------------------------------
 // Dialog answers / tree navigation
 
 /** `POST /api/agents/:id/ui-responses`. */

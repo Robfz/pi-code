@@ -53,7 +53,10 @@ export type AttentionTrigger =
 export interface PipelineOptions {
   /** Events kept for SSE replay. Default 10,000. */
   eventLogCapacity?: number;
-  /** Called after every published `agent_status`. */
+  /**
+   * Called with the agent's info after every published `agent_status`, and after any other
+   * published event that changes its `isStreaming`, `sessionName`, `sessionFile` or `sessionId`.
+   */
   onAgentInfo?: (info: AgentInfo) => void;
   /** Called when an agent starts needing attention. */
   onTrigger?: (trigger: AttentionTrigger) => void;
@@ -97,6 +100,15 @@ export function isQueryCommand(type: string): boolean {
 /** Key matching a message entry to its `message_end` event. */
 function messageKey(message: Pick<AgentMessage, "role" | "timestamp">): string {
   return `${message.role}:${String(message.timestamp)}`;
+}
+
+function sessionFieldsDiffer(a: AgentInfo, b: AgentInfo): boolean {
+  return (
+    a.isStreaming !== b.isStreaming ||
+    a.sessionName !== b.sessionName ||
+    a.sessionFile !== b.sessionFile ||
+    a.sessionId !== b.sessionId
+  );
 }
 
 function isCancelled(data: unknown): boolean {
@@ -144,6 +156,8 @@ export class AgentPipeline {
    */
   private freshUi: { statuses: Set<string>; widgets: Set<string> } | undefined;
   private clearIds = 0;
+  /** The info last passed to `onAgentInfo`. */
+  private reported: AgentInfo;
   private gitTimer: NodeJS.Timeout | undefined;
   private gitRefreshing = false;
   private gitAgain = false;
@@ -153,8 +167,9 @@ export class AgentPipeline {
     this.agent = agent;
     this.opts = opts;
     this.log = new EventLog(opts.eventLogCapacity);
+    this.reported = agent.info();
     this.caches = {
-      agent: agent.info(),
+      agent: this.reported,
       state: null,
       transcript: { entries: [], leafId: null },
       stats: null,
@@ -211,13 +226,19 @@ export class AgentPipeline {
     return run;
   }
 
-  /** Synchronous publish: seq, live state, caches, log, fan-out. */
+  /** Synchronous publish: seq, live state, caches, log, fan-out, info report. */
   publish(event: ServerEvent): void {
+    const state = this.caches.state;
     this.live = reduceLive(this.live, event);
     this.caches = applyServerEventToCaches(this.caches, event);
     this.agent.state = this.caches.state;
     if (event.type === "transcript_reset") this.unsyncedMessages.clear();
     this.log.append(event);
+    // Besides the status (reported by `publishStatus`), those fields derive from the state.
+    if (this.caches.state !== state) {
+      const info = this.agent.info();
+      if (sessionFieldsDiffer(info, this.reported)) this.reportInfo(info);
+    }
   }
 
   private publishAll(events: readonly ServerEvent[]): void {
@@ -228,6 +249,11 @@ export class AgentPipeline {
   publishStatus(): void {
     const info = this.agent.info();
     this.publish({ type: "agent_status", agent: info });
+    this.reportInfo(info);
+  }
+
+  private reportInfo(info: AgentInfo): void {
+    this.reported = info;
     this.opts.onAgentInfo?.(info);
   }
 

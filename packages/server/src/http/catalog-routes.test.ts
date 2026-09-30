@@ -8,6 +8,7 @@ import { AgentManager } from "../agents/agent-manager.ts";
 import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
+import { StreamHub } from "../live/stream-hub.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const TEST_DATA = fileURLToPath(new URL("../../test-data", import.meta.url));
@@ -19,12 +20,14 @@ beforeAll(() => {
   home = realpathSync(mkdtempSync(join(tmpdir(), "pi-code-catalog-routes-")));
   mkdirSync(join(home, "Dev", "proj"), { recursive: true });
   const manager = new AgentManager({ home, command: () => ({ bin: "/nonexistent", args: [] }) });
+  const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: (f) => manager.ownerOf(f) });
   app = createApp({
     hostname: HOSTNAME,
     port: 4180,
     staticDir: home,
     manager,
-    catalog: new SessionCatalog({ agentDir: TEST_DATA, ownerOf: (f) => manager.ownerOf(f) }),
+    catalog,
+    hub: new StreamHub({ manager, catalog }),
     piVersion: async () => "test",
   });
 });

@@ -7,6 +7,7 @@ import { SessionCatalog } from "./catalog/sessions.ts";
 import type { Config } from "./config.ts";
 import { CuratorProxy } from "./curator/proxy.ts";
 import { CuratorRegistry } from "./curator/registry.ts";
+import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
 import { type PushSender, PushService } from "./push/push-service.ts";
 import { SubscriptionStore } from "./push/subscriptions.ts";
@@ -79,6 +80,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     staticDir: config.staticDir,
     manager,
     catalog,
+    hub: new StreamHub({ manager, catalog }),
     push,
     piVersion: piVersionProbe(config.piBin),
   });

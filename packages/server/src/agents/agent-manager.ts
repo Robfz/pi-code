@@ -37,7 +37,7 @@ export interface SpawnRequest {
 
 /**
  * Per-agent records, in stdout order, as observed before they enter the agent's pipeline.
- * `status` records follow every published `agent_status` (status or attention changes).
+ * `status` records follow every reported info change (see `PipelineOptions.onAgentInfo`).
  */
 export type AgentRecord =
   | { kind: "event"; event: JsonAgentSessionEvent }
@@ -158,7 +158,10 @@ export class Agent {
 }
 
 export interface AgentManagerEvents {
-  /** An agent's info changed (status or attention). */
+  /**
+   * An agent's info changed: status or attention, or `isStreaming`, `sessionName`,
+   * `sessionFile` or `sessionId`.
+   */
   agent: [AgentInfo];
   /** An agent was closed and removed. */
   closed: [AgentId];

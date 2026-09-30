@@ -13,7 +13,8 @@ import {
 } from "../agents/commands.ts";
 import { ApiError, errorEnvelope } from "../errors.ts";
 import { gitDiff, gitStatus } from "../git/git.ts";
-import { eventStream, type SseOptions } from "./sse.ts";
+import { eventStream } from "./sse.ts";
+import type { SseOptions } from "./stream.ts";
 
 /** `prompt.images` are base64: allow large bodies on `/rpc`. */
 const RPC_BODY_LIMIT = 25 * 1024 * 1024;
@@ -93,11 +94,9 @@ export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = 
       await manager.close(c.req.param("id"));
       return c.body(null, 204);
     })
-    .get("/:id/snapshot", (c) => {
-      const pipeline = manager.require(c.req.param("id")).pipeline;
-      pipeline.setAttention("none");
-      return c.json(pipeline.snapshot(), 200);
-    })
+    .get("/:id/snapshot", (c) =>
+      c.json(manager.require(c.req.param("id")).pipeline.snapshot(), 200),
+    )
     .post("/:id/ack", (c) => {
       manager.require(c.req.param("id")).pipeline.setAttention("none");
       return c.body(null, 204);

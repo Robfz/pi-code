@@ -8,8 +8,9 @@ import { agentsRoutes } from "./http/agents-routes.ts";
 import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
 import { pushRoutes } from "./http/push-routes.ts";
-import type { SseOptions } from "./http/sse.ts";
 import { spaHandler } from "./http/static.ts";
+import { type SseOptions, streamRoutes } from "./http/stream.ts";
+import type { StreamHub } from "./live/stream-hub.ts";
 import type { PushService } from "./push/push-service.ts";
 
 export interface AppDeps {
@@ -22,6 +23,8 @@ export interface AppDeps {
   manager: AgentManager;
   /** Sessions and projects (read-only over pi's sessions dir). */
   catalog: SessionCatalog;
+  /** Shared inputs of `GET /api/stream`. */
+  hub: StreamHub;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
   /** Web Push (routes answer `not_found` without it). */
@@ -37,6 +40,7 @@ function apiRoutes(deps: AppDeps) {
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}))
+    .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))
     .route("/push", pushRoutes(deps.push));
 }
 

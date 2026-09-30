@@ -1,6 +1,6 @@
 /**
  * Integration-test harness: the real Hono app on a real HTTP listener (127.0.0.1, random
- * port), an `AgentManager` spawning the fake pi, and a streaming SSE client.
+ * port), an `AgentManager` spawning the fake pi, and streaming SSE clients.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
@@ -8,13 +8,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ServerType, serve } from "@hono/node-server";
 import {
+  type AgentId,
   type AgentInfo,
   applyServerEventToCaches,
+  type CursorList,
   type PushPayload,
   reduceLive,
+  type SequencedEvent,
   type ServerEvent,
   type SessionCaches,
   type Snapshot,
+  type StreamFrame,
 } from "@pi-code/protocol";
 import type { AgentHostOptions } from "../agents/agent-host.ts";
 import { AgentManager, type AgentManagerDeps } from "../agents/agent-manager.ts";
@@ -22,6 +26,8 @@ import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import { CuratorRegistry } from "../curator/registry.ts";
 import type { ErrorEnvelope } from "../errors.ts";
+import type { SseOptions } from "../http/stream.ts";
+import { StreamHub } from "../live/stream-hub.ts";
 import { type PushSendOptions, PushService } from "../push/push-service.ts";
 import { SubscriptionStore } from "../push/subscriptions.ts";
 import { loadVapidDetails } from "../push/vapid.ts";
@@ -37,7 +43,8 @@ export interface HarnessOptions {
   command?: AgentManagerDeps["command"];
   eventLogCapacity?: number;
   hostOptions?: AgentHostOptions;
-  ssePingMs?: number;
+  /** SSE tuning (e.g. a short ping interval, a small backlog limit). */
+  sse?: SseOptions;
   /** Pipeline tuning (e.g. a stub git status, a short debounce). */
   pipeline?: AgentManagerDeps["pipeline"];
   /**
@@ -62,11 +69,17 @@ export interface Received {
   event: ServerEvent;
 }
 
-/** Minimal streaming SSE client over `fetch`. */
-export class SseClient {
-  readonly events: Received[] = [];
-  /** Named events (`event: <name>`), which aren't `ServerEvent`s. */
-  readonly named: { name: string; id?: string; data: string }[] = [];
+/** One dispatched SSE message. */
+export interface SseMessage {
+  /** `event:` field, for named events. */
+  name?: string;
+  /** `id:` field, when present. */
+  id?: string;
+  data: string;
+}
+
+/** Minimal streaming SSE reader over `fetch`; subclasses record the messages. */
+abstract class SseReader {
   retry: number | undefined;
   status: number | undefined;
   private readonly controller = new AbortController();
@@ -74,20 +87,17 @@ export class SseClient {
   private ended = false;
   readonly done: Promise<void>;
 
-  constructor(url: string, headers: Record<string, string> = {}) {
+  constructor(url: string, headers: Record<string, string>) {
     this.done = this.run(url, headers).finally(() => {
       this.ended = true;
       for (const w of this.waiters) w();
     });
   }
 
-  get lastSeq(): number | undefined {
-    for (let i = this.events.length - 1; i >= 0; i--) {
-      const seq = this.events[i]?.seq;
-      if (seq !== undefined) return seq;
-    }
-    return undefined;
-  }
+  protected abstract received(message: SseMessage): void;
+
+  /** What was received so far (for timeout messages). */
+  protected abstract summary(): string;
 
   private async run(url: string, headers: Record<string, string>): Promise<void> {
     let res: Response;
@@ -115,12 +125,12 @@ export class SseClient {
           buf = buf.slice(nl + 1);
           nl = buf.indexOf("\n");
           if (line === "") {
-            if (name !== undefined) {
-              this.named.push({ name, data: data.join("\n"), ...(id === undefined ? {} : { id }) });
-              for (const w of this.waiters) w();
-            } else if (data.length > 0) {
-              const event = JSON.parse(data.join("\n")) as ServerEvent;
-              this.events.push(id === undefined ? { event } : { seq: Number(id), event });
+            if (name !== undefined || data.length > 0) {
+              this.received({
+                data: data.join("\n"),
+                ...(name === undefined ? {} : { name }),
+                ...(id === undefined ? {} : { id }),
+              });
               for (const w of this.waiters) w();
             }
             id = undefined;
@@ -144,16 +154,6 @@ export class SseClient {
     }
   }
 
-  /** Resolves with the first received event (from the start) satisfying `pred`. */
-  waitFor(pred: (r: Received) => boolean, timeoutMs = 5_000): Promise<Received> {
-    return this.until(() => this.events.find(pred), timeoutMs);
-  }
-
-  /** Resolves once an event with `seq >= seq` arrived. */
-  waitForSeq(seq: number, timeoutMs = 5_000): Promise<Received> {
-    return this.waitFor((r) => r.seq !== undefined && r.seq >= seq, timeoutMs);
-  }
-
   until<T>(check: () => T | undefined, timeoutMs = 5_000): Promise<T> {
     return new Promise((resolve, reject) => {
       const tick = () => {
@@ -168,7 +168,7 @@ export class SseClient {
       };
       const timer = setTimeout(() => {
         cleanup();
-        reject(new Error(`SSE wait timed out; got ${this.events.map(describe).join(", ")}`));
+        reject(new Error(`SSE wait timed out; got ${this.summary()}`));
       }, timeoutMs);
       const cleanup = () => {
         clearTimeout(timer);
@@ -182,6 +182,100 @@ export class SseClient {
   async close(): Promise<void> {
     this.controller.abort();
     await this.done;
+  }
+}
+
+/** Client of the per-agent event stream (`GET /api/agents/:id/events`). */
+export class SseClient extends SseReader {
+  readonly events: Received[] = [];
+  /** Named events (`event: <name>`), which aren't `ServerEvent`s. */
+  readonly named: { name: string; id?: string; data: string }[] = [];
+
+  get lastSeq(): number | undefined {
+    for (let i = this.events.length - 1; i >= 0; i--) {
+      const seq = this.events[i]?.seq;
+      if (seq !== undefined) return seq;
+    }
+    return undefined;
+  }
+
+  protected received({ name, id, data }: SseMessage): void {
+    if (name !== undefined) {
+      this.named.push({ name, data, ...(id === undefined ? {} : { id }) });
+      return;
+    }
+    const event = JSON.parse(data) as ServerEvent;
+    this.events.push(id === undefined ? { event } : { seq: Number(id), event });
+  }
+
+  protected summary(): string {
+    return this.events.map(describe).join(", ");
+  }
+
+  /** Resolves with the first received event (from the start) satisfying `pred`. */
+  waitFor(pred: (r: Received) => boolean, timeoutMs = 5_000): Promise<Received> {
+    return this.until(() => this.events.find(pred), timeoutMs);
+  }
+
+  /** Resolves once an event with `seq >= seq` arrived. */
+  waitForSeq(seq: number, timeoutMs = 5_000): Promise<Received> {
+    return this.waitFor((r) => r.seq !== undefined && r.seq >= seq, timeoutMs);
+  }
+}
+
+/** A `GET /api/stream` frame with its SSE `id:` (the cursor list). */
+export interface ReceivedFrame {
+  id?: CursorList;
+  frame: StreamFrame;
+}
+
+/** Client of the live stream (`GET /api/stream`). */
+export class StreamClient extends SseReader {
+  readonly frames: ReceivedFrame[] = [];
+  /** Named events (`event: <name>`), which aren't frames. */
+  readonly named: SseMessage[] = [];
+
+  /** `id:` of the last frame: where a reconnect resumes. */
+  get lastId(): CursorList | undefined {
+    return this.frames.at(-1)?.id;
+  }
+
+  /** One agent's `event` frames. */
+  events(agentId: AgentId): SequencedEvent[] {
+    return this.frames.flatMap(({ frame }) =>
+      frame.type === "event" && frame.agentId === agentId
+        ? [{ seq: frame.seq, event: frame.event }]
+        : [],
+    );
+  }
+
+  protected received(message: SseMessage): void {
+    if (message.name !== undefined) this.named.push(message);
+    else {
+      const frame = JSON.parse(message.data) as StreamFrame;
+      this.frames.push(message.id === undefined ? { frame } : { id: message.id, frame });
+    }
+  }
+
+  protected summary(): string {
+    return this.frames
+      .map(({ frame }) =>
+        frame.type === "event" ? `${frame.agentId}:${describe(frame)}` : frame.type,
+      )
+      .join(", ");
+  }
+
+  /** Resolves with the first received frame (from the start) satisfying `pred`. */
+  waitFor(pred: (frame: StreamFrame) => boolean, timeoutMs = 5_000): Promise<StreamFrame> {
+    return this.until(() => this.frames.find((f) => pred(f.frame))?.frame, timeoutMs);
+  }
+
+  /** Resolves once an `event` frame of `agentId` with `seq >= seq` arrived. */
+  waitForSeq(agentId: AgentId, seq: number, timeoutMs = 5_000): Promise<StreamFrame> {
+    return this.waitFor(
+      (f) => f.type === "event" && f.agentId === agentId && f.seq >= seq,
+      timeoutMs,
+    );
   }
 }
 
@@ -221,6 +315,7 @@ export class Harness {
   readonly agentDir: string;
   readonly manager: AgentManager;
   readonly catalog: SessionCatalog;
+  readonly hub: StreamHub;
   /** pi-code's data dir (VAPID keys, push subscriptions). */
   readonly dataDir: string;
   push: PushService | undefined;
@@ -230,7 +325,7 @@ export class Harness {
   /** Fixture name or path used for agents opened from now on. */
   fixture: string;
   private server: ServerType | undefined;
-  private readonly clients: SseClient[] = [];
+  private readonly clients: SseReader[] = [];
   port = 0;
 
   constructor(opts: HarnessOptions) {
@@ -269,6 +364,7 @@ export class Harness {
       agentDir: this.agentDir,
       ownerOf: (file) => this.manager.ownerOf(file),
     });
+    this.hub = new StreamHub({ manager: this.manager, catalog: this.catalog });
   }
 
   async listen(opts: HarnessOptions): Promise<void> {
@@ -308,9 +404,10 @@ export class Harness {
       staticDir: this.root,
       manager: this.manager,
       catalog: this.catalog,
+      hub: this.hub,
       piVersion: async () => "test",
       ...(this.push !== undefined ? { push: this.push } : {}),
-      ...(opts.ssePingMs !== undefined ? { sse: { pingMs: opts.ssePingMs } } : {}),
+      ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
     });
   }
 
@@ -382,6 +479,28 @@ export class Harness {
     const headers: Record<string, string> = { accept: "text/event-stream" };
     if (opts.lastEventId !== undefined) headers["last-event-id"] = String(opts.lastEventId);
     const client = new SseClient(`${this.base}/api/agents/${agentId}/events${query}`, headers);
+    this.clients.push(client);
+    return client;
+  }
+
+  /**
+   * Opens `GET /api/stream`: `open` lists `[agentId, seq]` pairs (or is a raw `CursorList`),
+   * `lastEventId` is sent as `Last-Event-ID`.
+   */
+  stream(
+    opts: {
+      open?: readonly (readonly [AgentId, number | string])[] | CursorList;
+      lastEventId?: CursorList;
+    } = {},
+  ): StreamClient {
+    const open =
+      typeof opts.open === "string"
+        ? opts.open
+        : opts.open?.map(([id, seq]) => `${id}:${seq}`).join(",");
+    const query = open === undefined ? "" : `?open=${encodeURIComponent(open)}`;
+    const headers: Record<string, string> = { accept: "text/event-stream" };
+    if (opts.lastEventId !== undefined) headers["last-event-id"] = opts.lastEventId;
+    const client = new StreamClient(`${this.base}/api/stream${query}`, headers);
     this.clients.push(client);
     return client;
   }

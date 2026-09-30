@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
+import { StreamHub } from "../live/stream-hub.ts";
 import { fakePiCommand, isAlive } from "../testing/stub-process.ts";
 import {
   AgentManager,
@@ -22,6 +23,7 @@ let home: string;
 let project: string;
 let manager: AgentManager;
 let records: Array<{ agentId: string; record: AgentRecord }>;
+let app: ReturnType<typeof createApp>;
 
 function makeManager(command: AgentManagerDeps["command"] = () => fakePiCommand("plain-answer")) {
   manager = new AgentManager({
@@ -39,6 +41,16 @@ beforeEach(() => {
   mkdirSync(project, { recursive: true });
   records = [];
   makeManager();
+  const catalog = new SessionCatalog({ agentDir: join(root, "agent") });
+  app = createApp({
+    hostname: HOSTNAME,
+    port: PORT,
+    staticDir: root,
+    manager,
+    catalog,
+    hub: new StreamHub({ manager, catalog }),
+    piVersion: async () => "test",
+  });
 });
 
 afterEach(async () => {
@@ -60,19 +72,8 @@ function waitForStatus(id: string, status: AgentStatus): Promise<AgentInfo> {
   });
 }
 
-function app() {
-  return createApp({
-    hostname: HOSTNAME,
-    port: PORT,
-    staticDir: root,
-    manager,
-    catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
-    piVersion: async () => "test",
-  });
-}
-
 function api(method: string, path: string, body?: unknown) {
-  return app().request(`http://${HOSTNAME}${path}`, {
+  return app.request(`http://${HOSTNAME}${path}`, {
     method,
     headers:
       method === "GET" ? {} : { origin: `https://${HOSTNAME}`, "content-type": "application/json" },
@@ -122,11 +123,21 @@ describe("AgentManager + /api/agents (fake pi)", () => {
     expect((await errorOf(gone)).code).toBe("agent_not_found");
     expect((await api("DELETE", `/api/agents/${agent.id}`)).status).toBe(404);
 
-    // The pipeline seam saw the status transitions, in order.
-    const statuses = records
+    // The pipeline seam saw the status transitions, in order (session fields are reported
+    // while starting, too).
+    const transitions = records
       .filter((r) => r.agentId === agent.id && r.record.kind === "status")
-      .map((r) => (r.record as { agent: AgentInfo }).agent.status);
-    expect(statuses).toEqual(["starting", "ready", "exited"]);
+      .map((r) => {
+        const { status, sessionFile } = (r.record as { agent: AgentInfo }).agent;
+        return { status, sessionFile };
+      });
+    const { sessionFile } = ready;
+    expect(transitions).toEqual([
+      { status: "starting", sessionFile: undefined },
+      { status: "starting", sessionFile },
+      { status: "ready", sessionFile },
+      { status: "exited", sessionFile },
+    ]);
   });
 
   it("forwards pi records to the record handler", async () => {

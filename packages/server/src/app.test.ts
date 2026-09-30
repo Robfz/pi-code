@@ -6,6 +6,7 @@ import { AgentManager } from "./agents/agent-manager.ts";
 import { createApp } from "./app.ts";
 import { SessionCatalog } from "./catalog/sessions.ts";
 import type { ErrorEnvelope } from "./errors.ts";
+import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
@@ -27,12 +28,14 @@ beforeAll(() => {
     home: dist,
     command: () => ({ bin: "/nonexistent", args: [] }),
   });
+  const catalog = new SessionCatalog({ agentDir: join(dist, "agent") });
   app = createApp({
     hostname: HOSTNAME,
     port: PORT,
     staticDir: dist,
     manager,
-    catalog: new SessionCatalog({ agentDir: join(dist, "agent") }),
+    catalog,
+    hub: new StreamHub({ manager, catalog }),
     piVersion: async () => "9.9.9",
   });
 });

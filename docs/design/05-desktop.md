@@ -22,7 +22,7 @@ GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
 
 ### Framing
 
-Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `id: <cursor list>`: the connection's current `agentId:seq` pair for every streamed agent, updated as each frame is queued, so whatever frame came last is a complete resume point. `retry: 2000`. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`).
+Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `id: <cursor list>`: the connection's current `agentId:seq` pair for every streamed agent whose position is established, in `open` order, updated as each frame is queued, so whatever frame came last is a complete resume point. A resyncing agent joins the list with its `resync` frame (so a reconnect before that frame resyncs it again), and a closed agent leaves it. `retry: 2000`. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`).
 
 ```ts
 /** `agentId:seq` pairs joined by `,` — the `open` query value and every SSE `id:`. */
