@@ -2,7 +2,7 @@
 
 pi-code is a personal, mobile-first web client for the [pi](https://github.com/earendil-works/pi) coding agent. It drives the same pi installation, configuration, extensions and session files as the pi TUI; only the rendering layer differs.
 
-Decisions and their rationale live in [`../../MAP.md`](../../MAP.md). This document set describes the resulting system:
+Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../maps/2026-09-26-origin.md). This document set describes the resulting system:
 
 | Document | Scope |
 |---|---|
@@ -11,6 +11,7 @@ Decisions and their rationale live in [`../../MAP.md`](../../MAP.md). This docum
 | `02-api-contract.md` | HTTP + SSE contract between web client and server, shared protocol package |
 | `03-web-client.md` | The React PWA |
 | `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) |
+| `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout |
 
 ## Goals
 

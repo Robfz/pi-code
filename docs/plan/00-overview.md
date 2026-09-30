@@ -1,6 +1,6 @@
 # Implementation plan — overview
 
-One milestone containing every settled feature (see `MAP.md`). Inside it, work is ordered so the load-bearing core — pi process ↔ event pipeline ↔ SSE ↔ reconnect — runs end-to-end before features are layered on.
+One milestone containing every settled feature (see `maps/2026-09-26-origin.md`). Inside it, work is ordered so the load-bearing core — pi process ↔ event pipeline ↔ SSE ↔ reconnect — runs end-to-end before features are layered on.
 
 Component plans:
 
@@ -10,6 +10,7 @@ Component plans:
 | `02-server.md` | Hono server | `S` |
 | `03-web-client.md` | React PWA | `W` |
 | `04-pi-extension.md` | pi-code pi extension | `E` |
+| `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout | `D` |
 
 ## Repository setup (task R1)
 

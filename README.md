@@ -84,7 +84,7 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 
 ## Documentation
 
-- [`MAP.md`](MAP.md) — decisions and their rationale
+- [`maps/`](maps/) — decision maps and their rationale
 - [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md)
 - [`docs/plan/`](docs/plan/) — implementation plan
 - [`docs/spikes/`](docs/spikes/) — protocol spike findings
