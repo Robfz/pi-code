@@ -1,7 +1,8 @@
 /**
- * Diff viewer (`docs/design/03-web-client.md`, "Diffs"): `@git-diff-view/react`, unified on
- * narrow screens and split from 1024px, following the app theme. Large patches are guarded
- * behind a "Show anyway" button; patches the library can't render fall back to plain text.
+ * Diff viewer (`docs/design/03-web-client.md`, "Diffs"): `@git-diff-view/react`, split once the
+ * viewer itself is at least 1024px wide (unified below, whatever the viewport), following the
+ * app theme. Large patches are guarded behind a "Show anyway" button; patches the library can't
+ * render fall back to plain text.
  */
 
 import { useTheme } from "next-themes";
@@ -9,13 +10,14 @@ import { Component, lazy, memo, type ReactNode, Suspense, useMemo, useState } fr
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { parsePatch } from "./parse-patch";
-import { useMediaQuery } from "./use-media-query";
+import { useWidthAtLeast } from "./use-width-at-least";
 
 /** Diff body lines above which rendering waits for an explicit "Show anyway". */
 export const LARGE_DIFF_LINES = 1500;
 const LARGE_DIFF_CHARS = 400_000;
 
-export const WIDE_QUERY = "(min-width: 1024px)";
+/** Viewer width (px) from which the diff is split. */
+export const SPLIT_MIN_WIDTH = 1024;
 
 const DiffViewImpl = lazy(() => import("./diff-view-impl"));
 
@@ -71,7 +73,7 @@ export const DiffViewer = memo(function DiffViewer({
   maxLines = LARGE_DIFF_LINES,
 }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
-  const wide = useMediaQuery(WIDE_QUERY);
+  const [widthRef, wide] = useWidthAtLeast<HTMLDivElement>(SPLIT_MIN_WIDTH);
   const { resolvedTheme, forcedTheme } = useTheme();
   const [force, setForce] = useState(false);
 
@@ -102,6 +104,7 @@ export const DiffViewer = memo(function DiffViewer({
   const newName = parsed.newName ?? fileName ?? parsed.oldName;
   return (
     <div
+      ref={widthRef}
       data-testid="diff-viewer"
       data-mode={wide ? "split" : "unified"}
       className={cn("min-w-0 overflow-hidden rounded-md border text-xs", className)}

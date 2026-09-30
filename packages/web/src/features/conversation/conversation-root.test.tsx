@@ -68,6 +68,7 @@ describe("ConversationRoot", () => {
     sendFrame({ type: "agent_closed", agentId: "a1" });
     expect(await screen.findByRole("heading", { name: "Conversation closed" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
 
     await userEvent.setup().click(screen.getByRole("button", { name: "New conversation" }));
     expect(await screen.findByLabelText("Folder path")).toBeInTheDocument();

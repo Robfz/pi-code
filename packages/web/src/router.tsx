@@ -20,7 +20,7 @@ import { AppShell } from "@/features/pwa/app-shell";
 import { SettingsScreen } from "@/features/settings/settings-screen";
 import { ShareScreen } from "@/features/share/share-screen";
 import { TreeScreen } from "@/features/tree/tree-screen";
-import { HomeScreen } from "@/routes/home";
+import { IndexScreen } from "@/routes/index";
 import { PlaceholderScreen } from "@/routes/placeholder";
 
 const rootRoute = createRootRoute({
@@ -35,7 +35,7 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: HomeScreen,
+  component: IndexScreen,
 });
 
 const sessionsRoute = createRoute({

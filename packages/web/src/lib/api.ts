@@ -170,6 +170,12 @@ export async function listSessions(cwd?: string): Promise<SessionSummary[]> {
   return (await request<SessionsResponse>("GET", `/api/sessions${query}`)).sessions;
 }
 
+/** Sessions of any age whose cwd path or name contains `q` (case-insensitive), most recent first. */
+export async function searchSessions(q: string): Promise<SessionSummary[]> {
+  return (await request<SessionsResponse>("GET", `/api/sessions?q=${encodeURIComponent(q)}`))
+    .sessions;
+}
+
 /** Directory autocomplete under `$HOME` (`prefix` may start with `~`). */
 export async function listDirs(prefix: string): Promise<DirSuggestion[]> {
   return (await request<DirsResponse>("GET", `/api/fs/dirs?prefix=${encodeURIComponent(prefix)}`))

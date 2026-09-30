@@ -107,7 +107,6 @@ describe("ServerEvent", () => {
       | "bash_done"
       | "live_reset"
       | "agent_status"
-      | "resync"
     >();
   });
 });

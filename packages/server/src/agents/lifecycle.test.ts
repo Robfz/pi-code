@@ -12,7 +12,7 @@ import {
 } from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ErrorEnvelope } from "../errors.ts";
-import { type Harness, type HarnessOptions, startHarness } from "../testing/http-harness.ts";
+import { type Harness, type HarnessOptions, seqOf, startHarness } from "../testing/http-harness.ts";
 import type { SpawnRequest } from "./agent-manager.ts";
 
 const MINI_PI = fileURLToPath(new URL("../testing/mini-pi.ts", import.meta.url));
@@ -228,7 +228,7 @@ describe("restart", () => {
     const before = await h.snapshot(a.id);
     const file = before.agent.sessionFile as string;
     expect(before.transcript.entries).toHaveLength(2);
-    const client = h.sse(a.id, { since: before.seq });
+    const client = h.stream({ open: [[a.id, before.seq]] });
 
     const notYet = await h.json<ErrorEnvelope>("POST", `/api/agents/${a.id}/restart`, {});
     expect(notYet.status).toBe(409);
@@ -257,15 +257,17 @@ describe("restart", () => {
     expect(Object.keys(after.live.statuses)).toEqual([`mini:${after.agent.sessionId}`]);
 
     // Same event stream: exited → starting → ready, seq continuing.
-    await client.waitForSeq(after.seq);
-    const statuses = client.events
+    await client.waitForSeq(a.id, after.seq);
+    const statuses = client
+      .events(a.id)
       .filter((r) => r.event.type === "agent_status")
       .map((r) => (r.event as Extract<ServerEvent, { type: "agent_status" }>).agent.status);
     expect(statuses.slice(-3)).toEqual(["exited", "starting", "ready"]);
     // The `exited` status event carries the exit code and stderr tail.
-    const exitedEvent = client.events.find(
-      (r) => r.event.type === "agent_status" && r.event.agent.status === "exited",
-    )?.event as Extract<ServerEvent, { type: "agent_status" }>;
+    const exitedEvent = client
+      .events(a.id)
+      .find((r) => r.event.type === "agent_status" && r.event.agent.status === "exited")
+      ?.event as Extract<ServerEvent, { type: "agent_status" }>;
     expect(exitedEvent.agent.exitCode).toBe(3);
     expect(exitedEvent.agent.stderrTail).toContain("fatal: crashed");
     await prompt(h, a.id, "again");
@@ -275,9 +277,12 @@ describe("restart", () => {
   it("drops the exited process's live state with live_reset, in snapshot and stream alike", async () => {
     const h = await start();
     const a = await openReady(h, { cwd: h.project });
-    const client = h.sse(a.id, { since: 0 });
+    const client = h.stream({ open: [[a.id, 0]] });
     await h.rpc(a.id, { type: "prompt", message: "hang" });
-    await client.waitFor((r) => r.event.type === "pi" && r.event.event.type === "queue_update");
+    await client.waitForEvent(
+      a.id,
+      (r) => r.event.type === "pi" && r.event.event.type === "queue_update",
+    );
     await h.idle(a.id);
     const busy = await h.snapshot(a.id);
     expect(busy.live.tools["hang-tool"]?.status).toBe("running");
@@ -290,22 +295,25 @@ describe("restart", () => {
     expect(snap.live.run.active).toBe(false);
     expect(snap.live.tools).toEqual({});
     expect(snap.live.queue).toEqual({ steering: [], followUp: [] });
-    await client.waitForSeq(snap.seq);
-    const types = client.events.map((r) => r.event.type);
+    await client.waitForSeq(a.id, snap.seq);
+    const types = client.events(a.id).map((r) => r.event.type);
     expect(types).toContain("live_reset");
     expect(types.lastIndexOf("live_reset")).toBeLessThan(types.lastIndexOf("agent_status"));
-    expect(client.events.map((r) => r.event).reduce(reduceLive, initialLiveState())).toEqual(
-      snap.live,
-    );
+    expect(
+      client
+        .events(a.id)
+        .map((r) => r.event)
+        .reduce(reduceLive, initialLiveState()),
+    ).toEqual(snap.live);
 
     // A restart has nothing left to drop.
     const before = snap.seq;
     await h.json("POST", `/api/agents/${a.id}/restart`, {});
     await h.waitForStatus(a.id, "ready");
     await h.idle(a.id);
-    await client.waitForSeq(h.manager.require(a.id).pipeline.seq);
+    await client.waitForSeq(a.id, seqOf(h, a.id));
     expect(
-      client.events.filter((r) => (r.seq ?? 0) > before && r.event.type === "live_reset"),
+      client.events(a.id).filter((r) => r.seq > before && r.event.type === "live_reset"),
     ).toEqual([]);
   });
 
@@ -399,7 +407,7 @@ describe("tree navigation", () => {
     const { id, entries } = await conversation(h);
     const [user1, assistant1, user2] = entries.map((e) => e.id) as [string, string, string];
     const seq = (await h.snapshot(id)).seq;
-    const client = h.sse(id, { since: seq });
+    const client = h.stream({ open: [[id, seq]] });
 
     const nav = await h.json<{ cancelled: boolean }>("POST", `/api/agents/${id}/tree/navigate`, {
       entryId: assistant1,
@@ -408,7 +416,7 @@ describe("tree navigation", () => {
     expect(nav).toEqual({ status: 200, body: { cancelled: false } });
     let snap = await h.snapshot(id);
     expect(snap.transcript.leafId).toBe(assistant1);
-    await client.waitFor((r) => r.event.type === "transcript_reset");
+    await client.waitForEvent(id, (r) => r.event.type === "transcript_reset");
 
     // Navigating to where the leaf already is: nothing moves.
     const same = await h.json("POST", `/api/agents/${id}/tree/navigate`, {
@@ -510,10 +518,10 @@ describe("git status in the pipeline", () => {
     const status = await h.json("GET", `/api/agents/${a.id}/git/status`);
     expect(status.body).toEqual({ status: { branch: "main", dirty: false } });
 
-    const client = h.sse(a.id, { since: (await h.snapshot(a.id)).seq });
+    const client = h.stream({ open: [[a.id, (await h.snapshot(a.id)).seq]] });
     writeFileSync(join(h.project, "a.txt"), "two\n");
     await prompt(h, a.id, "edit");
-    const event = await client.waitFor((r) => r.event.type === "git_status", 3_000);
+    const event = await client.waitForEvent(a.id, (r) => r.event.type === "git_status", 3_000);
     expect(event.event).toEqual({ type: "git_status", status: { branch: "main", dirty: true } });
     expect((await h.snapshot(a.id)).gitStatus).toEqual({ branch: "main", dirty: true });
   });

@@ -1,8 +1,9 @@
-import type { AgentInfo, Attention } from "@pi-code/protocol";
+import type { AgentInfo } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FolderIcon, HistoryIcon, LoaderIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { useState } from "react";
+import { AttentionBadge } from "@/components/attention-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProjectPicker } from "@/features/catalog/project-picker";
@@ -11,15 +12,6 @@ import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { useLive, useLiveAgents } from "@/store/context";
-
-const ATTENTION: Record<Exclude<Attention, "none">, { label: string; className: string }> = {
-  finished: {
-    label: "Finished",
-    className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  },
-  failed: { label: "Failed", className: "bg-destructive/15 text-destructive" },
-  input: { label: "Needs input", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
-};
 
 function statusLabel(agent: AgentInfo): string | null {
   switch (agent.status) {
@@ -36,7 +28,6 @@ function statusLabel(agent: AgentInfo): string | null {
 
 function AgentRow({ agent }: { agent: AgentInfo }) {
   const status = statusLabel(agent);
-  const attention = agent.attention !== "none" ? ATTENTION[agent.attention] : undefined;
   return (
     <li>
       <Link
@@ -51,7 +42,7 @@ function AgentRow({ agent }: { agent: AgentInfo }) {
           </span>
           <span className="truncate text-xs text-muted-foreground">{agent.cwd}</span>
         </div>
-        {attention && <Badge className={attention.className}>{attention.label}</Badge>}
+        <AttentionBadge attention={agent.attention} />
         {status && (
           <Badge variant="outline" className="gap-1">
             {agent.isStreaming && <LoaderIcon className="animate-spin" />}

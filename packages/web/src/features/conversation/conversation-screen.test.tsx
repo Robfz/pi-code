@@ -1,7 +1,8 @@
 import type { ServerEvent } from "@pi-code/protocol";
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationStore } from "@/store/conversation-store";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { fixtureEvents } from "@/test/fixtures";
 import { hydratedStore, renderWithStore } from "@/test/render";
 import { ConversationScreen } from "./conversation-screen";
@@ -146,5 +147,23 @@ describe("ConversationScreen live rendering", () => {
       (e) => e.type === "ui_request" && e.request.method === "confirm",
     );
     expect(screen.getByTestId("dialog-confirm")).toHaveTextContent("You picked banana");
+  });
+});
+
+describe("ConversationScreen width", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("caps the transcript and composer at max-w-3xl below 1024px", async () => {
+    stubMatchMedia(() => false);
+    await renderWithStore(<ConversationScreen />, hydratedStore());
+    expect(screen.getByTestId("transcript-column")).toHaveClass("max-w-3xl");
+    expect(screen.getByTestId("composer-column")).toHaveClass("max-w-3xl");
+  });
+
+  it("uses the full content width from 1024px", async () => {
+    stubMatchMedia((query) => query === "(min-width: 1024px)");
+    await renderWithStore(<ConversationScreen />, hydratedStore());
+    expect(screen.getByTestId("transcript-column")).not.toHaveClass("max-w-3xl");
+    expect(screen.getByTestId("composer-column")).not.toHaveClass("max-w-3xl");
   });
 });

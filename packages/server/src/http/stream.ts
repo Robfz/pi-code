@@ -40,7 +40,7 @@ interface SseSubscription {
  * `retry:` first and a named `ping` every `pingMs`. `subscribe` runs synchronously before
  * anything is written; `unsubscribe` runs when the connection ends.
  */
-export function queuedSse(
+function queuedSse(
   c: Context,
   opts: SseOptions,
   subscribe: (sink: SseSink) => SseSubscription,

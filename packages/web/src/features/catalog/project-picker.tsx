@@ -8,7 +8,7 @@ import {
   LoaderIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,19 +23,11 @@ import { errorMessage, listDirs, listProjects } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { useOpenAgent } from "./use-open-agent";
 
 /** Delay before the path field queries `/api/fs/dirs`. */
 export const AUTOCOMPLETE_DEBOUNCE_MS = 250;
-
-export function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 /** Strip trailing slashes (keeping a lone "/"). */
 function normalize(path: string): string {

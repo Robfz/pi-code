@@ -50,7 +50,9 @@ export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
 }
 
 export interface FetchCall {
+  /** Path only; the query string is in `search`. */
   url: string;
+  search: string;
   method: string;
   body: unknown;
 }
@@ -68,7 +70,8 @@ export function stubFetch(
     let body: unknown;
     const raw = init?.body ?? undefined;
     if (typeof raw === "string") body = JSON.parse(raw);
-    const call = { url: new URL(url, "http://localhost:3000").pathname, method, body };
+    const parsed = new URL(url, "http://localhost:3000");
+    const call = { url: parsed.pathname, search: parsed.search, method, body };
     calls.push(call);
     const [status, payload] = handler(call) ?? [200, {}];
     return new Response(status === 204 ? null : JSON.stringify(payload), {

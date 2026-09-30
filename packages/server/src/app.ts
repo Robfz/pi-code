@@ -39,7 +39,7 @@ function apiRoutes(deps: AppDeps) {
     .basePath("/api")
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
-    .route("/agents", agentsRoutes(deps.manager, deps.sse ? { sse: deps.sse } : {}))
+    .route("/agents", agentsRoutes(deps.manager))
     .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))
     .route("/push", pushRoutes(deps.push));
 }

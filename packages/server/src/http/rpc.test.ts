@@ -1,14 +1,20 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentInfo, ServerEvent, SessionEntry, Snapshot } from "@pi-code/protocol";
+import type {
+  AgentInfo,
+  SequencedEvent,
+  ServerEvent,
+  SessionEntry,
+  Snapshot,
+} from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { fixturePath, loadFixture } from "../../../../test/fake-pi.ts";
 import {
   type Harness,
   type HarnessOptions,
-  type Received,
   replay,
-  type SseClient,
+  type StreamClient,
+  seqOf,
   startHarness,
   stateOf,
 } from "../testing/http-harness.ts";
@@ -28,11 +34,11 @@ afterEach(async () => {
 
 type Of<T extends ServerEvent["type"]> = Extract<ServerEvent, { type: T }>;
 
-const isPi = (type: string) => (r: Received) =>
+const isPi = (type: string) => (r: SequencedEvent) =>
   r.event.type === "pi" && r.event.event.type === type;
 const ofType =
   <T extends ServerEvent["type"]>(type: T) =>
-  (r: Received): r is Received & { event: Of<T> } =>
+  (r: SequencedEvent): r is SequencedEvent & { event: Of<T> } =>
     r.event.type === type;
 
 function entryKinds(entries: readonly SessionEntry[]): string[] {
@@ -41,12 +47,14 @@ function entryKinds(entries: readonly SessionEntry[]): string[] {
 
 /** Events of `type` received after `seq`. */
 function eventsAfter<T extends ServerEvent["type"]>(
-  client: SseClient,
+  client: StreamClient,
+  agentId: string,
   seq: number,
   type: T,
 ): Of<T>[] {
-  return client.events
-    .filter((r) => (r.seq ?? 0) > seq && r.event.type === type)
+  return client
+    .events(agentId)
+    .filter((r) => r.seq > seq && r.event.type === type)
     .map((r) => r.event as Of<T>);
 }
 
@@ -62,15 +70,9 @@ function recordedFinalEntries(fixture: string): { entries: SessionEntry[]; leafI
   return last.data;
 }
 
-async function settle(h: Harness, client: SseClient, agentId: string, fromSeq: number) {
-  await client.until(() =>
-    client.events.find((r) => (r.seq ?? 0) > fromSeq && isPi("agent_settled")(r)),
-  );
+async function settle(h: Harness, client: StreamClient, agentId: string, fromSeq: number) {
+  await client.waitForEvent(agentId, (r) => r.seq > fromSeq && isPi("agent_settled")(r));
   await h.idle(agentId);
-}
-
-function seqOf(h: Harness, agentId: string): number {
-  return h.manager.require(agentId).pipeline.seq;
 }
 
 const STATE = {
@@ -133,9 +135,9 @@ describe("command rules", () => {
   it("requires streamingBehavior for a prompt while the agent runs", async () => {
     const h = await start({ fixture: "steer-followup", speed: 1 });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     expect((await h.rpc(agent.id, { type: "prompt", message: "go" })).status).toBe(200);
-    await client.waitFor(isPi("agent_start"));
+    await client.waitForEvent(agent.id, isPi("agent_start"));
     const res = await h.rpc(agent.id, { type: "prompt", message: "more" });
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe("streaming_behavior_required");
@@ -239,7 +241,7 @@ describe("command rules", () => {
     const h = await start({ fixture: "entry-types" });
     const agent = await h.open();
     const initial = await h.snapshot(agent.id);
-    const client = h.sse(agent.id, { since: initial.seq });
+    const client = h.stream({ open: [[agent.id, initial.seq]] });
 
     expect((await h.rpc(agent.id, { type: "prompt", message: "Say hi" })).status).toBe(200);
     await settle(h, client, agent.id, initial.seq);
@@ -249,11 +251,11 @@ describe("command rules", () => {
     let seq = seqOf(h, agent.id);
     let res = await h.rpc(agent.id, { type: "set_session_name", name: "s0 entries" });
     expect(res.status).toBe(200);
-    await client.waitForSeq(seqOf(h, agent.id));
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
     expect(
-      eventsAfter(client, seq, "entries_appended").flatMap((e) => entryKinds(e.entries)),
+      eventsAfter(client, agent.id, seq, "entries_appended").flatMap((e) => entryKinds(e.entries)),
     ).toContain("session_info");
-    expect(eventsAfter(client, seq, "state")).toHaveLength(1);
+    expect(eventsAfter(client, agent.id, seq, "state")).toHaveLength(1);
 
     // set_model emits no pi event: the state refresh is what reports it.
     for (const command of [
@@ -264,8 +266,8 @@ describe("command rules", () => {
       seq = seqOf(h, agent.id);
       res = await h.rpc(agent.id, command);
       expect(res.status, command.type).toBe(200);
-      await client.waitForSeq(seqOf(h, agent.id));
-      expect(eventsAfter(client, seq, "state"), command.type).toHaveLength(1);
+      await client.waitForSeq(agent.id, seqOf(h, agent.id));
+      expect(eventsAfter(client, agent.id, seq, "state"), command.type).toHaveLength(1);
     }
 
     // Extension commands run inside the prompt response and add entries without agent events.
@@ -274,7 +276,7 @@ describe("command rules", () => {
       200,
     );
     expect((await h.rpc(agent.id, { type: "prompt", message: "/s0-entries" })).status).toBe(200);
-    await client.waitForSeq(seqOf(h, agent.id));
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
     expect(entryKinds(h.manager.require(agent.id).pipeline.transcript.entries)).toEqual(
       expect.arrayContaining(["label", "custom", "custom_message"]),
     );
@@ -284,9 +286,9 @@ describe("command rules", () => {
     await settle(h, client, agent.id, seq);
     seq = seqOf(h, agent.id);
     expect((await h.rpc(agent.id, { type: "prompt", message: "/s0-branch" })).status).toBe(200);
-    await client.waitForSeq(seqOf(h, agent.id));
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
     expect(
-      eventsAfter(client, seq, "entries_appended").flatMap((e) => entryKinds(e.entries)),
+      eventsAfter(client, agent.id, seq, "entries_appended").flatMap((e) => entryKinds(e.entries)),
     ).toContain("branch_summary");
     seq = seqOf(h, agent.id);
     expect((await h.rpc(agent.id, { type: "prompt", message: "Say ok" })).status).toBe(200);
@@ -304,10 +306,13 @@ describe("command rules", () => {
       expect(res.status, command.type).toBe(200);
       // Published before the response: the pipeline is already past it.
       expect(h.manager.require(agent.id).pipeline.snapshot().seq).toBeGreaterThan(seq);
-      await client.waitForSeq(seqOf(h, agent.id));
-      expect(eventsAfter(client, seq, "transcript_reset"), command.type).toHaveLength(1);
+      await client.waitForSeq(agent.id, seqOf(h, agent.id));
+      expect(eventsAfter(client, agent.id, seq, "transcript_reset"), command.type).toHaveLength(1);
       // Stats of the old session would be stale: refreshed right after the reset.
-      const labels = client.events.filter((r) => (r.seq ?? 0) > seq).map((r) => r.event.type);
+      const labels = client
+        .events(agent.id)
+        .filter((r) => r.seq > seq)
+        .map((r) => r.event.type);
       const reset = labels.indexOf("transcript_reset");
       expect(labels[reset + 1], command.type).toBe("stats");
     }
@@ -318,8 +323,11 @@ describe("command rules", () => {
     expect(final.transcript.leafId).toBe(recorded.leafId);
 
     // The whole session replays onto the first snapshot.
-    await client.waitForSeq(final.seq);
-    const events = client.events.filter((r) => (r.seq ?? 0) <= final.seq).map((r) => r.event);
+    await client.waitForSeq(agent.id, final.seq);
+    const events = client
+      .events(agent.id)
+      .filter((r) => r.seq <= final.seq)
+      .map((r) => r.event);
     expect(replay(initial, events)).toEqual(stateOf(final));
   });
 });
@@ -328,7 +336,7 @@ describe("bash", () => {
   it("returns 202 and streams bash_output, bash_done, then the entry", async () => {
     const h = await start({ fixture: "bash-command" });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     const commands = [
       { type: "bash", command: "echo one; sleep 0.3; echo two; sleep 0.3; ls" },
       { type: "bash", command: "echo hidden-output", excludeFromContext: true },
@@ -340,30 +348,39 @@ describe("bash", () => {
       expect(res.status).toBe(202);
       expect(res.body.data.id).toBeTypeOf("string");
       ids.push(res.body.data.id);
-      await client.waitFor((r) => r.event.type === "bash_done" && r.event.id === res.body.data.id);
+      await client.waitForEvent(
+        agent.id,
+        (r) => r.event.type === "bash_done" && r.event.id === res.body.data.id,
+      );
     }
     await h.idle(agent.id);
-    await client.waitForSeq(seqOf(h, agent.id));
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
 
     const first = ids[0] as string;
-    const output = client.events.filter(ofType("bash_output")).filter((r) => r.event.id === first);
+    const output = client
+      .events(agent.id)
+      .filter(ofType("bash_output"))
+      .filter((r) => r.event.id === first);
     expect(output.length).toBe(3);
     expect(output.map((r) => r.event.command)).toEqual(Array(3).fill(commands[0]?.command));
     expect(output.map((r) => r.event.delta).join("")).toContain("one\ntwo\n");
 
-    const done = client.events.filter(ofType("bash_done"));
+    const done = client.events(agent.id).filter(ofType("bash_done"));
     expect(done.map((r) => r.event.id)).toEqual(ids);
     expect(done.map((r) => r.event.result.exitCode)).toEqual([0, 0, 3]);
     expect(done[0]?.event.command).toBe(commands[0]?.command);
     // `!!` commands are flagged on both events; `!` commands carry no flag.
     expect(done.map((r) => r.event.excludeFromContext)).toEqual([undefined, true, undefined]);
-    const hidden = client.events.filter(ofType("bash_output")).filter((r) => r.event.id === ids[1]);
+    const hidden = client
+      .events(agent.id)
+      .filter(ofType("bash_output"))
+      .filter((r) => r.event.id === ids[1]);
     expect(hidden.length).toBeGreaterThan(0);
     expect(hidden.every((r) => r.event.excludeFromContext === true)).toBe(true);
     expect(output.every((r) => r.event.excludeFromContext === undefined)).toBe(true);
     // Each bash_done is followed by its bashExecution entry.
     for (const d of done) {
-      const next = client.events.find((r) => r.seq === (d.seq as number) + 1)?.event;
+      const next = client.events(agent.id).find((r) => r.seq === d.seq + 1)?.event;
       expect(next?.type).toBe("entries_appended");
       expect(entryKinds((next as Of<"entries_appended">).entries)).toContain("bashExecution");
     }
@@ -379,7 +396,7 @@ describe("dialogs", () => {
   it("round-trips the extension-dialog fixture and expires the timed dialog", async () => {
     const h = await start({ fixture: "extension-dialog" });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     const prompt = h.rpc(agent.id, { type: "prompt", message: "/s0-dialog" });
 
     const answers: Array<[string, Record<string, unknown>]> = [
@@ -389,7 +406,8 @@ describe("dialogs", () => {
       ["editor", { cancelled: true }],
     ];
     for (const [method, answer] of answers) {
-      const req = await client.waitFor(
+      const req = await client.waitForEvent(
+        agent.id,
         (r) => r.event.type === "ui_request" && r.event.request.method === method,
       );
       const id = (req.event as Of<"ui_request">).request.id;
@@ -400,7 +418,10 @@ describe("dialogs", () => {
 
       const res = await h.api("POST", `/api/agents/${agent.id}/ui-responses`, { id, ...answer });
       expect(res.status, method).toBe(204);
-      await client.waitFor((r) => r.event.type === "ui_resolved" && r.event.id === id);
+      await client.waitForEvent(
+        agent.id,
+        (r) => r.event.type === "ui_resolved" && r.event.id === id,
+      );
       // Answered: no longer pending.
       const again = await h.json<{ error: { code: string } }>(
         "POST",
@@ -413,7 +434,8 @@ describe("dialogs", () => {
     expect((await prompt).status).toBe(200);
 
     // The select with a 1.5 s timeout: pi resolves it silently; the server's timer publishes it.
-    const timed = await client.waitFor(
+    const timed = await client.waitForEvent(
+      agent.id,
       (r) =>
         r.event.type === "ui_request" &&
         r.event.request.method === "select" &&
@@ -429,12 +451,13 @@ describe("dialogs", () => {
         expiresAt: timedEvent.receivedAt + 1500,
       },
     ]);
-    const resolved = await client.waitFor(
+    const resolved = await client.waitForEvent(
+      agent.id,
       (r) => r.event.type === "ui_resolved" && r.event.id === timedEvent.request.id,
       4_000,
     );
     expect(Date.now()).toBeGreaterThanOrEqual(timedEvent.receivedAt + 1500);
-    expect(resolved.seq).toBeGreaterThan(timed.seq as number);
+    expect(resolved.seq).toBeGreaterThan(timed.seq);
     const expired = await h.json<{ error: { code: string } }>(
       "POST",
       `/api/agents/${agent.id}/ui-responses`,
@@ -469,7 +492,7 @@ describe("transcript resets", () => {
     const h = await start({ fixture: "compaction" });
     const agent = await h.open();
     const initial = await h.snapshot(agent.id);
-    const client = h.sse(agent.id, { since: initial.seq });
+    const client = h.stream({ open: [[agent.id, initial.seq]] });
 
     let seq = seqOf(h, agent.id);
     expect((await h.rpc(agent.id, { type: "prompt", message: "PINEAPPLE" })).status).toBe(200);
@@ -481,13 +504,16 @@ describe("transcript resets", () => {
     expect(failed.status).toBe(502);
     expect(failed.body.error?.code).toBe("pi_error");
     await h.idle(agent.id);
-    expect(eventsAfter(client, seq, "transcript_reset")).toHaveLength(0);
+    expect(eventsAfter(client, agent.id, seq, "transcript_reset")).toHaveLength(0);
 
     for (let i = 1; i <= 3; i++) {
       const command = `seq 1 2100 | sed 's/$/ filler line ${i} lorem ipsum/'`;
       const res = await h.rpc<{ id: string }>(agent.id, { type: "bash", command });
       expect(res.status).toBe(202);
-      await client.waitFor((r) => r.event.type === "bash_done" && r.event.id === res.body.data.id);
+      await client.waitForEvent(
+        agent.id,
+        (r) => r.event.type === "bash_done" && r.event.id === res.body.data.id,
+      );
     }
     seq = seqOf(h, agent.id);
     expect((await h.rpc(agent.id, { type: "prompt", message: "2+2" })).status).toBe(200);
@@ -496,16 +522,17 @@ describe("transcript resets", () => {
     seq = seqOf(h, agent.id);
     const compact = await h.rpc(agent.id, { type: "compact" });
     expect(compact.status).toBe(200);
-    await client.waitForSeq(seqOf(h, agent.id));
-    const labels = client.events
-      .filter((r) => (r.seq ?? 0) > seq)
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
+    const labels = client
+      .events(agent.id)
+      .filter((r) => r.seq > seq)
       .map((r) => (r.event.type === "pi" ? `pi:${r.event.event.type}` : r.event.type));
     expect(labels.slice(0, 3)).toEqual([
       "pi:compaction_start",
       "pi:compaction_end",
       "transcript_reset",
     ]);
-    const [reset] = eventsAfter(client, seq, "transcript_reset");
+    const [reset] = eventsAfter(client, agent.id, seq, "transcript_reset");
     const compaction = reset?.transcript.entries.find((e) => e.type === "compaction");
     expect(compaction).toBeDefined();
     expect(reset?.transcript.leafId).toBe(compaction?.id);
@@ -519,8 +546,11 @@ describe("transcript resets", () => {
     expect(final.transcript.entries.map((e) => e.id)).toEqual(recorded.entries.map((e) => e.id));
     expect(final.transcript.leafId).toBe(recorded.leafId);
 
-    await client.waitForSeq(final.seq);
-    const events = client.events.filter((r) => (r.seq ?? 0) <= final.seq).map((r) => r.event);
+    await client.waitForSeq(agent.id, final.seq);
+    const events = client
+      .events(agent.id)
+      .filter((r) => r.seq <= final.seq)
+      .map((r) => r.event);
     expect(replay(initial, events)).toEqual(stateOf(final));
   });
 
@@ -546,13 +576,13 @@ describe("transcript resets", () => {
     ]);
     const agent = await h.open();
     const before = await h.snapshot(agent.id);
-    const client = h.sse(agent.id, { since: before.seq });
+    const client = h.stream({ open: [[agent.id, before.seq]] });
     expect((await h.rpc(agent.id, { type: "set_session_name", name: "x" })).status).toBe(200);
-    await client.waitForSeq(seqOf(h, agent.id));
-    const resets = eventsAfter(client, before.seq, "transcript_reset");
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
+    const resets = eventsAfter(client, agent.id, before.seq, "transcript_reset");
     expect(resets).toHaveLength(1);
     // A state refresh follows (set_session_name mutates state).
-    expect(eventsAfter(client, before.seq, "state")).toHaveLength(1);
+    expect(eventsAfter(client, agent.id, before.seq, "state")).toHaveLength(1);
     return { reset: resets[0] as Of<"transcript_reset">, before };
   }
 

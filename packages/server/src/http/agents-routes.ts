@@ -13,8 +13,6 @@ import {
 } from "../agents/commands.ts";
 import { ApiError, errorEnvelope } from "../errors.ts";
 import { gitDiff, gitStatus } from "../git/git.ts";
-import { eventStream } from "./sse.ts";
-import type { SseOptions } from "./stream.ts";
 
 /** `prompt.images` are base64: allow large bodies on `/rpc`. */
 const RPC_BODY_LIMIT = 25 * 1024 * 1024;
@@ -38,12 +36,8 @@ function parseTrustBody(value: unknown): TrustBody {
   throw new ApiError("invalid_body", "expected { trusted: boolean }");
 }
 
-export interface AgentsRoutesOptions {
-  sse?: SseOptions;
-}
-
 /** `/api/agents` routes. Chained so the route types reach `AppType`. */
-export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = {}) {
+export function agentsRoutes(manager: AgentManager) {
   return new Hono()
     .get("/", (c) => c.json({ agents: manager.list() }, 200))
     .post(
@@ -100,10 +94,6 @@ export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = 
     .post("/:id/ack", (c) => {
       manager.require(c.req.param("id")).pipeline.setAttention("none");
       return c.body(null, 204);
-    })
-    .get("/:id/events", (c) => {
-      const agent = manager.require(c.req.param("id"));
-      return eventStream(c, agent.pipeline.log, opts.sse);
     })
     .post(
       "/:id/rpc",

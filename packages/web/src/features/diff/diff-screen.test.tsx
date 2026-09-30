@@ -11,7 +11,8 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { loadedDiff, stubCanvas, stubMatchMedia } from "@/components/diff/testing";
+import { loadedDiff, stubCanvas } from "@/components/diff/testing";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
@@ -77,7 +78,7 @@ describe("DiffScreen", () => {
     await renderScreen("agent-7");
     const rows = await screen.findAllByTestId("diff-file");
     expect(calls).toEqual([
-      { url: "/api/agents/agent-7/git/diff", method: "GET", body: undefined },
+      { url: "/api/agents/agent-7/git/diff", search: "", method: "GET", body: undefined },
     ]);
     expect(rows).toHaveLength(3);
     expect(screen.getByText("3 files changed ·")).toBeInTheDocument();

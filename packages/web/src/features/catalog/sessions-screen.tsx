@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { errorMessage, listProjects, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
+import { useIsDesktop } from "@/lib/use-media-query";
 import { SessionList } from "./session-list";
 
 /** `/sessions`: all sessions, filterable by project (`?cwd=`). */
 export function SessionsScreen({ cwd }: { cwd?: string }) {
   const navigate = useNavigate();
+  const desktop = useIsDesktop();
   const projects = useQuery({ queryKey: queryKeys.projects, queryFn: listProjects });
   const sessions = useQuery({
     queryKey: queryKeys.sessions(cwd),
@@ -21,11 +23,13 @@ export function SessionsScreen({ cwd }: { cwd?: string }) {
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-4 pt-[env(safe-area-inset-top)] pb-8">
       <header className="-mx-2 flex h-12 items-center gap-1">
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/" aria-label="Home">
-            <ChevronLeftIcon />
-          </Link>
-        </Button>
+        {!desktop && (
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/" aria-label="Home">
+              <ChevronLeftIcon />
+            </Link>
+          </Button>
+        )}
         <h1 className="text-sm font-medium">Sessions</h1>
       </header>
       <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">

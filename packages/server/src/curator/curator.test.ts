@@ -436,9 +436,9 @@ describe("pipeline", () => {
       },
     ]);
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     expect((await h.rpc(agent.id, { type: "prompt", message: "search" })).status).toBe(200);
-    const event = await client.waitFor((r) => r.event.type === "curator");
+    const event = await client.waitForEvent(agent.id, (r) => r.event.type === "curator");
     const proxied = `https://${HOSTNAME}:8443/?session=${TOKEN}`;
     expect(event.event).toEqual({ type: "curator", toolCallId: "call-1", url: proxied });
     await h.idle(agent.id);
@@ -446,15 +446,16 @@ describe("pipeline", () => {
     expect((await h.snapshot(agent.id)).live.curator).toEqual({ "call-1": proxied });
 
     expect((await h.rpc(agent.id, { type: "abort" })).status).toBe(200);
-    await client.waitFor(
+    await client.waitForEvent(
+      agent.id,
       (r) => r.event.type === "pi" && r.event.event.type === "tool_execution_end",
     );
     await h.idle(agent.id);
-    expect(client.events.filter((r) => r.event.type === "curator")).toHaveLength(1);
+    expect(client.events(agent.id).filter((r) => r.event.type === "curator")).toHaveLength(1);
     expect(h.curators?.lookup(TOKEN)).toBeUndefined();
-    const types = client.events.map((r) =>
-      r.event.type === "pi" ? r.event.event.type : (r.event as ServerEvent).type,
-    );
+    const types = client
+      .events(agent.id)
+      .map((r) => (r.event.type === "pi" ? r.event.event.type : (r.event as ServerEvent).type));
     // The curator event follows the update that carried the URL.
     expect(types.indexOf("curator")).toBe(types.indexOf("tool_execution_update") + 1);
   });
@@ -498,13 +499,14 @@ describe("pipeline", () => {
       },
     ]);
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     expect((await h.rpc(agent.id, { type: "prompt", message: "go" })).status).toBe(200);
-    await client.waitFor(
+    await client.waitForEvent(
+      agent.id,
       (r) => r.event.type === "pi" && r.event.event.type === "tool_execution_update",
     );
     await h.idle(agent.id);
-    expect(client.events.some((r) => r.event.type === "curator")).toBe(false);
+    expect(client.events(agent.id).some((r) => r.event.type === "curator")).toBe(false);
     expect(h.curators?.size).toBe(0);
   });
 });

@@ -3,27 +3,11 @@
  * number widths with one, so tests that render diffs install a minimal 2D context.
  */
 
-import { vi } from "vitest";
-
 export function stubCanvas(): void {
   HTMLCanvasElement.prototype.getContext = (() => ({
     font: "",
     measureText: (text: string) => ({ width: text.length * 7 }),
   })) as unknown as HTMLCanvasElement["getContext"];
-}
-
-/** Make `matchMedia(query)` report `matches` (e.g. a wide screen for split view). */
-export function stubMatchMedia(matches: (query: string) => boolean): void {
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: matches(query),
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  }));
 }
 
 /**

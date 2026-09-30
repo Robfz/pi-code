@@ -142,7 +142,6 @@ describe("ignored events", () => {
     ["stats", { type: "stats", stats: {} as never }],
     ["git_status", { type: "git_status", status: { branch: "main", dirty: true } }],
     ["agent_status ready", { type: "agent_status", agent: { status: "ready" } as AgentInfo }],
-    ["resync", { type: "resync" }],
     ["ui_resolved for unknown id", { type: "ui_resolved", id: "nope" }],
     [
       "entries_appended without anything to clear",

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AgentInfo,
+  SequencedEvent,
   ServerEvent,
   SessionEntry,
   Snapshot,
@@ -14,9 +15,10 @@ import {
   describe,
   type Harness,
   type HarnessOptions,
-  type Received,
+  promptAndSettle,
   replay,
   type StreamClient,
+  seqOf,
   startHarness,
   stateOf,
 } from "../testing/http-harness.ts";
@@ -33,7 +35,7 @@ afterEach(async () => {
   harness = undefined;
 });
 
-const isPi = (type: string) => (r: Received) =>
+const isPi = (type: string) => (r: SequencedEvent) =>
   r.event.type === "pi" && r.event.event.type === type;
 
 function entryKinds(entries: readonly SessionEntry[]): string[] {
@@ -48,16 +50,6 @@ function recordedEventTypes(fixture: string): string[] {
     .filter(
       (t) => t !== "response" && t !== "extension_ui_request" && t !== "bash_execution_update",
     );
-}
-
-/** Prompts and waits until the run and its side effects are published. */
-async function promptAndSettle(h: Harness, agentId: string, message = "hi"): Promise<void> {
-  const res = await h.rpc(agentId, { type: "prompt", message });
-  expect(res.status, JSON.stringify(res.body)).toBe(200);
-  const client = h.sse(agentId, { since: 0 });
-  await client.waitFor(isPi("agent_settled"), 10_000);
-  await client.close();
-  await h.idle(agentId);
 }
 
 group("pipeline and snapshot", () => {
@@ -89,23 +81,23 @@ group("pipeline and snapshot", () => {
     expect(snap.agent.attention).toBe("finished");
     expect(snap.agent.isStreaming).toBe(false);
     expect(snap.gitStatus).toBeNull();
-    expect(snap.seq).toBe(h.manager.require(agent.id).pipeline.seq);
+    expect(snap.seq).toBe(seqOf(h, agent.id));
   });
 
   it("keeps events strictly ordered when get_entries is slow", async () => {
     const h = await start({ fixture: "plain-answer", delayGetEntriesMs: 60 });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     const t0 = Date.now();
     expect((await h.rpc(agent.id, { type: "prompt", message: "hi" })).status).toBe(200);
-    await client.waitFor(isPi("agent_settled"), 10_000);
+    await client.waitForEvent(agent.id, isPi("agent_settled"), 10_000);
     await h.idle(agent.id);
-    const seq = h.manager.require(agent.id).pipeline.seq;
-    await client.waitForSeq(seq);
+    const seq = seqOf(h, agent.id);
+    await client.waitForSeq(agent.id, seq);
     // Several syncs, each 60 ms late, ran in sequence.
     expect(Date.now() - t0).toBeGreaterThan(4 * 60);
 
-    const events = client.events;
+    const events = client.events(agent.id);
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
 
     // pi events come out exactly in stdout order.
@@ -154,15 +146,16 @@ group("pipeline and snapshot", () => {
     const h = await start({ fixture: "tool-calls", speed: 4 });
     const agent = await h.open();
     const snapshots: Promise<Snapshot>[] = [h.snapshot(agent.id)];
-    const watcher = h.sse(agent.id, { since: 0 });
+    const watcher = h.stream({ open: [[agent.id, 0]] });
     let count = 0;
     const settled = watcher.until(() => {
       // Take a snapshot every few events while the run streams.
-      while (count < watcher.events.length) {
+      const events = watcher.events(agent.id);
+      while (count < events.length) {
         count += 1;
         if (count % 4 === 0) snapshots.push(h.snapshot(agent.id));
       }
-      return watcher.events.find(isPi("agent_settled"));
+      return events.find(isPi("agent_settled"));
     }, 10_000);
     expect((await h.rpc(agent.id, { type: "prompt", message: "go" })).status).toBe(200);
     await settled;
@@ -175,119 +168,23 @@ group("pipeline and snapshot", () => {
     expect(new Set(taken.map((s) => s.seq)).size).toBeGreaterThan(3);
 
     for (const snap of taken) {
-      const client = h.sse(agent.id, { since: snap.seq });
-      if (snap.seq < final.seq) await client.waitForSeq(final.seq);
-      const events = client.events
-        .filter((r) => r.seq !== undefined && r.seq <= final.seq)
+      const client = h.stream({ open: [[agent.id, snap.seq]] });
+      if (snap.seq < final.seq) await client.waitForSeq(agent.id, final.seq);
+      const events = client
+        .events(agent.id)
+        .filter((r) => r.seq <= final.seq)
         .map((r) => r.event);
       expect(events.length, `from ${snap.seq}`).toBe(final.seq - snap.seq);
       expect(replay(snap, events), `from ${snap.seq}`).toEqual(stateOf(final));
       await client.close();
     }
   });
-});
 
-group("SSE", () => {
-  it("resumes after a disconnect with the same events as an uninterrupted client", async () => {
-    const h = await start({ fixture: "tool-calls", speed: 4 });
-    const agent = await h.open();
-    const steady = h.sse(agent.id, { since: 0 });
-    const first = h.sse(agent.id, { since: 0 });
-    expect((await h.rpc(agent.id, { type: "prompt", message: "go" })).status).toBe(200);
-    await first.until(() => (first.events.length >= 12 ? true : undefined));
-    await first.close();
-    const lastSeq = first.lastSeq as number;
-    expect(first.events.length).toBeGreaterThanOrEqual(12);
-
-    await new Promise((r) => setTimeout(r, 150));
-    const second = h.sse(agent.id, { lastEventId: lastSeq, since: 1 }); // header wins
-    await steady.waitFor(isPi("agent_settled"), 10_000);
-    await h.idle(agent.id);
-    const seq = h.manager.require(agent.id).pipeline.seq;
-    await steady.waitForSeq(seq);
-    await second.waitForSeq(seq);
-
-    const resumed = [...first.events, ...second.events];
-    expect(resumed.map((r) => r.seq)).toEqual(steady.events.map((r) => r.seq));
-    expect(resumed).toEqual(steady.events);
-    expect(second.events[0]?.seq).toBe(lastSeq + 1);
-  });
-
-  it("sends resync when the resume point is out of range", async () => {
-    const h = await start({ fixture: "plain-answer", eventLogCapacity: 5 });
-    const agent = await h.open();
-    await promptAndSettle(h, agent.id);
-    const seq = h.manager.require(agent.id).pipeline.seq;
-    expect(seq).toBeGreaterThan(10);
-
-    for (const since of [seq + 1, 1, "abc", -1]) {
-      const client = h.sse(agent.id, { since });
-      const first = await client.waitFor(() => true);
-      expect(first, String(since)).toEqual({ event: { type: "resync" } });
-      await client.close();
-    }
-    // Still in the ring: plain replay.
-    const inRange = h.sse(agent.id, { since: seq - 3 });
-    await inRange.waitForSeq(seq);
-    expect(inRange.events.map((r) => r.seq)).toEqual([seq - 2, seq - 1, seq]);
-    // Up to date: nothing to replay, then live events.
-    const current = h.sse(agent.id, { lastEventId: seq });
-    await h.api("POST", `/api/agents/${agent.id}/ack`, {}); // finished → none
-    await h.snapshot(agent.id); // already none: no event
-    expect((await h.rpc(agent.id, { type: "get_state" })).status).toBe(200); // query: no event
-    await current.waitForSeq(seq + 1);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(current.events.map(describe)).toEqual(["agent_status"]);
-    expect(current.events[0]?.seq).toBe(seq + 1);
-    expect(current.status).toBe(200);
-  });
-
-  it("streams only new events without a resume point, pings, and cleans up on disconnect", async () => {
-    const h = await start({ fixture: "plain-answer", sse: { pingMs: 40 } });
-    const agent = await h.open();
-    const log = h.manager.require(agent.id).pipeline.log;
-    const client = h.sse(agent.id);
-    await client.until(() => client.named.find((e) => e.name === "ping"));
-    // A named event without an `id:`: it doesn't move `Last-Event-ID` or the seq.
-    expect(client.named[0]).toEqual({ name: "ping", data: "{}" });
-    expect(client.retry).toBe(2000);
-    expect(client.events).toEqual([]);
-    expect(log.subscriberCount).toBe(1);
-
-    const seq = log.seq;
-    expect((await h.rpc(agent.id, { type: "prompt", message: "hi" })).status).toBe(200);
-    await client.waitFor(isPi("agent_settled"));
-    expect(client.events[0]?.seq).toBe(seq + 1);
-
-    await client.close();
-    const deadline = Date.now() + 2_000;
-    while (log.subscriberCount > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    expect(log.subscriberCount).toBe(0);
-  });
-
-  it("ends streams with the final status when the agent is closed", async () => {
+  it("returns 404 for the snapshot of an unknown agent", async () => {
     const h = await start();
-    const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
-    await client.waitFor(
-      (r) => r.event.type === "agent_status" && r.event.agent.status === "ready",
-    );
-    expect((await h.api("DELETE", `/api/agents/${agent.id}`, {})).status).toBe(204);
-    await client.done;
-    expect(client.events.at(-1)?.event).toMatchObject({
-      type: "agent_status",
-      agent: { status: "exited" },
-    });
-  });
-
-  it("returns 404 for unknown agents", async () => {
-    const h = await start();
-    const res = await h.api("GET", "/api/agents/nope/events");
+    const res = await h.api("GET", "/api/agents/nope/snapshot");
     expect(res.status).toBe(404);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("agent_not_found");
-    expect((await h.api("GET", "/api/agents/nope/snapshot")).status).toBe(404);
   });
 });
 
@@ -295,20 +192,20 @@ group("attention", () => {
   it("is set when a run finishes, kept by snapshots and cleared by ack", async () => {
     const h = await start({ fixture: "plain-answer" });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     await promptAndSettle(h, agent.id);
     const listed = await h.json<{ agents: { attention: string }[] }>("GET", "/api/agents");
     expect(listed.body.agents[0]?.attention).toBe("finished");
-    const seq = h.manager.require(agent.id).pipeline.seq;
+    const seq = seqOf(h, agent.id);
     expect((await h.snapshot(agent.id)).agent.attention).toBe("finished");
     expect(h.manager.require(agent.id).info().attention).toBe("finished");
-    expect(h.manager.require(agent.id).pipeline.seq).toBe(seq);
+    expect(seqOf(h, agent.id)).toBe(seq);
 
     const res = await h.api("POST", `/api/agents/${agent.id}/ack`, {});
     expect(res.status).toBe(204);
-    const status = await client.waitFor(
-      (r) =>
-        r.event.type === "agent_status" && r.event.agent.attention === "none" && (r.seq ?? 0) > 3,
+    const status = await client.waitForEvent(
+      agent.id,
+      (r) => r.event.type === "agent_status" && r.event.agent.attention === "none" && r.seq > 3,
     );
     expect(status.event).toMatchObject({ agent: { status: "ready", attention: "none" } });
     expect(h.manager.require(agent.id).info().attention).toBe("none");
@@ -317,12 +214,12 @@ group("attention", () => {
   it("stays none after a user abort", async () => {
     const h = await start({ fixture: "abort" });
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     expect((await h.rpc(agent.id, { type: "prompt", message: "story" })).status).toBe(200);
     // The abort response arrives after agent_settled.
     const abort = await h.rpc(agent.id, { type: "abort" });
     expect(abort.status).toBe(200);
-    await client.waitFor(isPi("agent_settled"));
+    await client.waitForEvent(agent.id, isPi("agent_settled"));
     await h.idle(agent.id);
     expect(h.manager.require(agent.id).info().attention).toBe("none");
     const snap = await h.snapshot(agent.id);
@@ -345,10 +242,6 @@ function agentFrames(client: StreamClient, agentId: string): AgentInfo[] {
   return client.frames.flatMap(({ frame }) =>
     frame.type === "agent" && frame.agent.id === agentId ? [frame.agent] : [],
   );
-}
-
-function seqOf(h: Harness, agentId: string): number {
-  return h.manager.require(agentId).pipeline.seq;
 }
 
 function range(from: number, to: number): number[] {
@@ -479,10 +372,13 @@ group("live stream", () => {
   it("sends agent_closed on DELETE and keeps streaming", async () => {
     const h = await start();
     const agent = await h.open();
+    const log = h.manager.require(agent.id).pipeline.log;
     const client = h.stream({ open: [[agent.id, seqOf(h, agent.id)]] });
     await client.waitFor(isFrame("baseline"));
     expect((await h.api("DELETE", `/api/agents/${agent.id}`, {})).status).toBe(204);
     await client.waitFor(isFrame("agent_closed"));
+    // The closed log dropped the connection's subscription.
+    expect(log.subscriberCount).toBe(0);
     expect(client.frames.at(-1)?.frame).toEqual({ type: "agent_closed", agentId: agent.id });
     expect(client.events(agent.id).at(-1)?.event).toMatchObject({
       type: "agent_status",
@@ -531,12 +427,22 @@ group("live stream", () => {
     expect(client.frames[1]?.id).toBe(`${agent.id}:${seq + 1}`);
   });
 
-  it("pings with a named event without an id", async () => {
+  it("pings with a named event without an id, and unsubscribes on disconnect", async () => {
     const h = await start({ sse: { pingMs: 40 } });
-    const client = h.stream();
+    const agent = await h.open();
+    const log = h.manager.require(agent.id).pipeline.log;
+    const client = h.stream({ open: [[agent.id, seqOf(h, agent.id)]] });
     await client.until(() => client.named.find((e) => e.name === "ping"));
     expect(client.named[0]).toEqual({ name: "ping", data: "{}" });
     expect(client.frames.map((f) => f.frame.type)).toEqual(["baseline"]);
+    expect(log.subscriberCount).toBe(1);
+
+    await client.close();
+    const deadline = Date.now() + 2_000;
+    while (log.subscriberCount > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(log.subscriberCount).toBe(0);
   });
 });
 
@@ -667,6 +573,32 @@ group("live stream resume", () => {
       [`${a.id}:${seqA + 1}`, "event"],
       [`${a.id}:${seqA + 1}`, "agent"],
     ]);
+  });
+
+  it("resyncs an open cursor that isn't a seq or is ahead of the log", async () => {
+    const h = await start({ fixture: "plain-answer" });
+    const agent = await h.open();
+    await promptAndSettle(h, agent.id);
+    const seq = seqOf(h, agent.id);
+
+    for (const since of ["abc", -1, seq + 1]) {
+      const client = h.stream({ open: [[agent.id, since]] });
+      await client.waitFor(isFrame("resync"));
+      expect(
+        client.frames.map((f) => f.frame.type),
+        String(since),
+      ).toEqual(["baseline", "resync"]);
+      await client.close();
+    }
+    // Up to date: snapshots and queries publish nothing; the ack publishes the status change.
+    const current = h.stream({ open: [[agent.id, seq]] });
+    await h.api("POST", `/api/agents/${agent.id}/ack`, {}); // finished → none
+    await h.snapshot(agent.id); // already none: no event
+    expect((await h.rpc(agent.id, { type: "get_state" })).status).toBe(200); // query: no event
+    await current.waitForSeq(agent.id, seq + 1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(current.events(agent.id).map(describe)).toEqual(["agent_status"]);
+    expect(current.events(agent.id)[0]?.seq).toBe(seq + 1);
   });
 
   it("resyncs a Last-Event-ID cursor that isn't a seq or is ahead of the log", async () => {

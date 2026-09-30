@@ -12,6 +12,7 @@ export const queryKeys = {
   health: ["health"] as const,
   projects: ["projects"] as const,
   sessions: (cwd?: string) => ["sessions", cwd ?? null] as const,
+  sessionSearch: (q: string) => ["sessions", "search", q] as const,
   dirs: (prefix: string) => ["dirs", prefix] as const,
   models: (agentId: string) => ["agent", agentId, "models"] as const,
   thinkingLevels: (agentId: string, modelKey: string) =>

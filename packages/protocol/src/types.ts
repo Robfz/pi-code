@@ -144,7 +144,7 @@ export interface Snapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Events — `GET /api/agents/:id/events`
+// Events — carried in `GET /api/stream` `event` frames
 
 export type ServerEvent =
   /**
@@ -187,8 +187,7 @@ export type ServerEvent =
    */
   | { type: "live_reset" }
   /** Agent status / attention changes. */
-  | { type: "agent_status"; agent: AgentInfo }
-  | { type: "resync" };
+  | { type: "agent_status"; agent: AgentInfo };
 
 export type ServerEventType = ServerEvent["type"];
 
