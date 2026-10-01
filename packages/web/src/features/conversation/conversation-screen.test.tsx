@@ -2,6 +2,7 @@ import { initialLiveState, type ServerEvent } from "@pi-code/protocol";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import type { ConversationStore } from "@/store/conversation-store";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { fixtureEvents, makeAgent } from "@/test/fixtures";
@@ -162,7 +163,7 @@ describe("ConversationScreen width", () => {
   });
 
   it("uses the full content width from 1024px", async () => {
-    stubMatchMedia((query) => query === "(min-width: 1024px)");
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
     await renderWithStore(<ConversationScreen />, hydratedStore());
     expect(screen.getByTestId("transcript-column")).not.toHaveClass("max-w-3xl");
     expect(screen.getByTestId("composer-column")).not.toHaveClass("max-w-3xl");
@@ -193,7 +194,7 @@ describe("ConversationScreen desktop scoped sheets", () => {
   let before: HTMLButtonElement;
   let after: HTMLButtonElement;
   const render = async (store: ReturnType<typeof hydratedStore>) => {
-    stubMatchMedia((query) => query === "(min-width: 1024px)");
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
     await renderWithStore(<ConversationScreen />, store);
     before = document.createElement("button");
     before.textContent = "Before";

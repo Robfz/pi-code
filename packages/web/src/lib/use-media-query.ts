@@ -21,8 +21,11 @@ function useMediaQuery(query: string): boolean {
   );
 }
 
-/** Desktop shell, docked sidebar and full-width transcript from this width. */
-export const DESKTOP_QUERY = "(min-width: 1024px)";
+/**
+ * Desktop shell, docked sidebar and full-width transcript from this width. Tailwind's `lg`
+ * (64rem), so `lg:` classes switch together with it whatever the browser's font size.
+ */
+export const DESKTOP_QUERY = "(min-width: 64rem)";
 
 export function useIsDesktop(): boolean {
   return useMediaQuery(DESKTOP_QUERY);
