@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { FakeEventSource } from "./fake-event-source";
 
 // jsdom lacks these; next-themes and the router use them.
 if (typeof window.matchMedia !== "function") {
@@ -22,7 +23,10 @@ Element.prototype.setPointerCapture ??= () => {};
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.scrollTo = () => {};
+// jsdom has no EventSource; the live registry's streams become scriptable fakes.
+globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 
 afterEach(() => {
   cleanup();
+  FakeEventSource.instances = [];
 });

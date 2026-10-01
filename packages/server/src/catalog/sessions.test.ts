@@ -80,10 +80,23 @@ describe("session summaries (fixture files)", () => {
       agentDir: TEST_DATA,
       ownerOf: (file) => (file === owned ? "agent-1" : undefined),
     });
-    const sessions = await catalog.sessions("/home/user/proj");
+    const sessions = await catalog.sessions({ cwd: "/home/user/proj" });
     expect(sessions.map((s) => s.id)).toEqual(["forked", "v3-full", "v1-legacy"]);
     expect(sessions.map((s) => s.ownedBy)).toEqual([undefined, undefined, "agent-1"]);
-    expect(await catalog.sessions("/home/user/none")).toEqual([]);
+    expect(await catalog.sessions({ cwd: "/home/user/none" })).toEqual([]);
+  });
+
+  it("matches q against cwd and name, case-insensitively, combined with cwd", async () => {
+    const catalog = new SessionCatalog({ agentDir: TEST_DATA });
+    const ids = async (filter: { cwd?: string; q?: string }) =>
+      (await catalog.sessions(filter)).map((s) => s.id);
+    expect(await ids({ q: "USER/OTHER" })).toEqual(["header-only", "v2-hook"]);
+    expect(await ids({ q: "renamed SESSION" })).toEqual(["v3-full"]);
+    expect(await ids({ q: "renamed", cwd: "/home/user/other" })).toEqual([]);
+    expect(await ids({ q: "user", cwd: "/home/user/other" })).toEqual(["header-only", "v2-hook"]);
+    // Not matched: the first message, the file name.
+    expect(await ids({ q: "failing test" })).toEqual([]);
+    expect(await ids({ q: "legacy" })).toEqual([]);
   });
 
   it("lists projects by recent activity with counts", async () => {

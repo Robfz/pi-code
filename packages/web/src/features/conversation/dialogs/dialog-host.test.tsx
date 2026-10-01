@@ -130,6 +130,77 @@ describe("DialogHost", () => {
     await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "x1", cancelled: true }]));
   });
 
+  it("page-modal: Tab wraps around inside the sheet", async () => {
+    stubFetch(() => [204, null]);
+    await renderWithStore(
+      <DialogHost />,
+      withDialogs({
+        request: { ...base, id: "t1", method: "confirm", title: "T", message: "m" },
+        receivedAt: Date.now(),
+      }),
+    );
+    const sheet = screen.getByTestId("dialog-confirm");
+    const buttons = within(sheet).getAllByRole("button");
+    buttons.at(-1)?.focus();
+    await userEvent.setup().tab();
+    expect(buttons[0]).toHaveFocus();
+  });
+
+  it("tapping outside doesn't answer; the sheet's × cancels", async () => {
+    const { calls } = stubFetch(() => [204, null]);
+    await renderWithStore(
+      <DialogHost />,
+      withDialogs({
+        request: { ...base, id: "o1", method: "confirm", title: "T", message: "m" },
+        receivedAt: Date.now(),
+      }),
+    );
+    const user = userEvent.setup();
+    const overlay = document.querySelector<HTMLElement>('[data-slot="sheet-overlay"]');
+    expect(overlay).not.toBeNull();
+    await user.click(overlay as HTMLElement);
+    expect(screen.getByTestId("dialog-confirm")).toBeInTheDocument();
+    expect(uiBodies(calls)).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "o1", cancelled: true }]));
+  });
+
+  it("with a container: non-modal and scoped to it, overlay included", async () => {
+    const { calls } = stubFetch(() => [204, null]);
+    const container = document.createElement("div");
+    const outside = document.createElement("button");
+    outside.textContent = "Outside";
+    document.body.append(container, outside);
+    try {
+      await renderWithStore(
+        <DialogHost container={container} />,
+        withDialogs({
+          request: { ...base, id: "s1", method: "confirm", title: "T", message: "m" },
+          receivedAt: Date.now(),
+        }),
+      );
+      const sheet = await screen.findByTestId("dialog-confirm");
+      expect(container).toContainElement(sheet);
+      expect(container.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+      const user = userEvent.setup();
+      // The rest of the page takes clicks and focus; the dialog stays pending.
+      await user.click(outside);
+      expect(outside).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(screen.getByTestId("dialog-confirm")).toBeInTheDocument();
+      expect(uiBodies(calls)).toEqual([]);
+      // Tab leaves it rather than wrapping around.
+      within(sheet).getByRole("button", { name: "Close" }).focus();
+      await user.tab();
+      expect(outside).toHaveFocus();
+      await user.click(within(sheet).getByRole("button", { name: "No" }));
+      await waitFor(() => expect(uiBodies(calls)).toEqual([{ id: "s1", confirmed: false }]));
+    } finally {
+      container.remove();
+      outside.remove();
+    }
+  });
+
   it("shows a countdown; at 0 the dialog stays until the server's ui_resolved", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const now = Date.now();

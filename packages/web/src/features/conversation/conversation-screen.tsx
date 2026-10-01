@@ -1,4 +1,6 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { useIsDesktop } from "@/lib/use-media-query";
+import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { ActionSheets } from "./action-sheets";
 import { AgentStatePanel, TrustSheet } from "./agent-state";
@@ -7,6 +9,7 @@ import { DialogHost } from "./dialogs/dialog-host";
 import { DocumentTitle, NoticeToaster, Widgets } from "./extension-ui";
 import { ConversationHeader } from "./header";
 import { QueueDisplay } from "./queue-display";
+import { ScopedCoverProvider, useScopedCover } from "./scoped-overlay";
 import { StatusBar } from "./status-bar";
 import { LiveSection } from "./transcript/live-section";
 import { Transcript } from "./transcript/transcript";
@@ -18,26 +21,51 @@ export function ConversationScreen() {
   const contentRef = useRef<HTMLDivElement>(null);
   useStickToBottom(scrollRef, contentRef);
   const exited = useConversation((s) => s.agent.status === "exited");
+  const desktop = useIsDesktop();
+  // Where desktop scopes the dialog and trust sheets, clear of the sidebar.
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  // What such a sheet's overlay covers is inert while it's open: focus skips to the sidebar.
+  const { covered, cover } = useScopedCover();
+  const inert = covered || undefined;
+  // Full content width on desktop; capped below.
+  const column = cn("flex w-full flex-col", !desktop && "mx-auto max-w-3xl");
 
   return (
-    <div className="flex h-dvh flex-col">
-      <ConversationHeader />
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4">
+    <div ref={setRoot} className="relative flex h-dvh flex-col">
+      <ConversationHeader inert={inert} />
+      <div
+        ref={scrollRef}
+        inert={inert}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div
+          ref={contentRef}
+          data-testid="transcript-column"
+          className={cn(column, "gap-4 px-3 py-4 lg:px-32 lg:py-8")}
+        >
           <Transcript />
           <LiveSection />
           <AgentStatePanel />
         </div>
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div
+        data-testid="composer-column"
+        inert={inert}
+        className={cn(
+          column,
+          "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:px-32",
+        )}
+      >
         <QueueDisplay />
         <Widgets placement="aboveEditor" />
         {!exited && <Composer />}
         <Widgets placement="belowEditor" />
         <StatusBar />
       </div>
-      <DialogHost />
-      <TrustSheet />
+      <ScopedCoverProvider value={cover}>
+        <DialogHost container={desktop ? root : undefined} />
+        <TrustSheet container={desktop ? root : undefined} />
+      </ScopedCoverProvider>
       <ActionSheets />
       <NoticeToaster />
       <DocumentTitle />

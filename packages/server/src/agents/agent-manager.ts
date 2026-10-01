@@ -19,10 +19,10 @@ import { AgentPipeline, type AttentionTrigger, type PipelineOptions } from "./pi
 import { needsTrustDecision } from "./trust.ts";
 
 /** Environment variable carrying the user's trust decision to the pi-code extension. */
-export const TRUST_ENV = "PI_CODE_TRUST";
+const TRUST_ENV = "PI_CODE_TRUST";
 
 /** What to spawn for an agent. */
-export interface SpawnSpec {
+interface SpawnSpec {
   bin: string;
   args: string[];
   env?: NodeJS.ProcessEnv;
@@ -37,14 +37,14 @@ export interface SpawnRequest {
 
 /**
  * Per-agent records, in stdout order, as observed before they enter the agent's pipeline.
- * `status` records follow every published `agent_status` (status or attention changes).
+ * `status` records follow every reported info change (see `PipelineOptions.onAgentInfo`).
  */
 export type AgentRecord =
   | { kind: "event"; event: JsonAgentSessionEvent }
   | { kind: "ui_request"; request: RpcExtensionUIRequest }
   | { kind: "status"; agent: AgentInfo };
 
-export type AgentRecordHandler = (agent: Agent, record: AgentRecord) => void;
+type AgentRecordHandler = (agent: Agent, record: AgentRecord) => void;
 
 export interface AgentManagerDeps {
   /** `$HOME`: agents' cwds must resolve inside it. */
@@ -86,7 +86,8 @@ export function piCommand(piBin: string, extensionPath: string): (req: SpawnRequ
 export class Agent {
   readonly id: AgentId;
   readonly cwd: string;
-  readonly startedAt: string;
+  /** Creation time, reset by `restart`: where the idle sweep's clock starts. */
+  startedAt: string;
   status: AgentStatus = "starting";
   attention: Attention = "none";
   /** Cached `get_state` data (kept current by the pipeline). */
@@ -157,8 +158,11 @@ export class Agent {
   }
 }
 
-export interface AgentManagerEvents {
-  /** An agent's info changed (status or attention). */
+interface AgentManagerEvents {
+  /**
+   * An agent's info changed: status or attention, or `isStreaming`, `sessionName`,
+   * `sessionFile` or `sessionId`.
+   */
   agent: [AgentInfo];
   /** An agent was closed and removed. */
   closed: [AgentId];
@@ -290,6 +294,7 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
     const awaitTrust = await this.needsTrust(agent.cwd);
     if (agent.status !== "exited" || this.agents.get(id) !== agent) return agent;
     if (file !== undefined) agent.requestedSessionFile = file;
+    agent.startedAt = new Date().toISOString();
     if (awaitTrust) {
       agent.pipeline.setStatus("awaiting_trust");
       this.requestTrust(agent);

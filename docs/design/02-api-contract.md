@@ -2,7 +2,7 @@
 
 HTTP + Server-Sent Events between the web client and the server. All types live in `packages/protocol` and are imported by both sides. pi's own protocol types are re-exported from `@earendil-works/pi-coding-agent` (type-only imports): `RpcCommand`, `RpcResponse`, `RpcSessionState`, `RpcExtensionUIRequest`, `RpcExtensionUIResponse`, `JsonAgentSessionEvent`, `ModelInfo`, plus message and session-entry types.
 
-Both sides share these types; the client calls the API through a small typed `fetch` wrapper. SSE is consumed with the browser's `EventSource`.
+Both sides share these types; the client calls the API through a small typed `fetch` wrapper. The live stream is consumed with the browser's `EventSource`, one per tab. The design behind the stream, the catalog window and attention acks is in [`05-desktop.md`](05-desktop.md).
 
 ## Conventions
 
@@ -87,8 +87,8 @@ type BashResult = /* pi bash response data */;
 ### `GET /api/projects`
 → `200 { projects: ProjectSummary[] }`, most recent first.
 
-### `GET /api/sessions?cwd=<abs path>`
-`cwd` optional; without it, all sessions across projects.
+### `GET /api/sessions?cwd=<abs path>&q=<text>`
+Both optional. `cwd` keeps the sessions whose header `cwd` equals it; `q` keeps those whose `cwd` path or `name` contains it, case-insensitively. Without either, all sessions across projects, whatever their age.
 → `200 { sessions: SessionSummary[] }`, most recent first.
 
 ### `GET /api/fs/dirs?prefix=<path>`
@@ -109,7 +109,7 @@ type OpenAgentBody = { cwd: string } | { sessionFile: string };
 - `{ cwd }` → new agent with a new session in that directory.
 - `{ sessionFile }` → resume. If the session is already open, returns the existing agent with `200`; otherwise `201`.
 
-→ `201 | 200 { agent: AgentInfo }`, returned immediately (`status: "awaiting_trust"` or `"starting"`); the client connects to snapshot/SSE right away. If the owning agent has exited, it is restarted and returned (same id, `200`).
+→ `201 | 200 { agent: AgentInfo }`, returned immediately (`status: "awaiting_trust"` or `"starting"`); the client fetches the snapshot and opens the agent on the stream right away. If the owning agent has exited, it is restarted and returned (same id, `200`).
 
 A session file must be an absolute path to an existing `.jsonl` file whose realpath is inside `$HOME` or pi's sessions dir (`<agentDir>/sessions`). `400 invalid_body` (not absolute), `400 outside_home`, `404 session_not_found`.
 
@@ -127,7 +127,7 @@ Close: stops the pi process and releases the session. → `204`.
 Only for `status: "exited"`. Respawns with the last session file. → `200 { agent: AgentInfo }`.
 
 ### `GET /api/agents/:id/snapshot`
-Full state for (re)hydration. Also clears the agent's attention.
+Full state for (re)hydration. No side effects: fetching it leaves `attention` as it is.
 ```ts
 interface Snapshot {
   agent: AgentInfo;
@@ -142,13 +142,48 @@ interface Snapshot {
 → `200 Snapshot`.
 
 ### `POST /api/agents/:id/ack`
-Clears attention (client calls it when the conversation becomes visible). → `204`.
+Sets attention to `none`, except `input` while the agent has a pending dialog or trust prompt, which stays. The web client calls it for the conversation on screen ([`05-desktop.md`](05-desktop.md), "Live registry"). → `204`.
 
-## Events — `GET /api/agents/:id/events`
+`input` attention clears when the agent's last pending dialog is resolved (answered or timed out), when the trust prompt is answered, and when pi exits.
 
-`text/event-stream`. Each event: `id: <seq>` and `data: <ServerEvent JSON>`. `retry: 2000`. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`) so clients can detect a dead stream; it is not a `ServerEvent`, doesn't advance `seq` and isn't replayed.
+## Live stream — `GET /api/stream`
 
-Resume: send `Last-Event-ID` (EventSource does this automatically on reconnect) or `?since=<seq>` on first connect after a snapshot. If the server can't replay from there, the first event is `resync` (without an `id:`). Without a resume point, only new events are sent.
+`text/event-stream`, one per tab. It carries every agent's info and the session catalog, plus the events of each agent the request **opens**.
+
+```
+GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
+```
+
+- `open` (optional): the opened agents, each with the last `seq` the client holds (from its snapshot or the last applied event). Without it, only `baseline` and the frames every connection gets (`agent`, `agent_closed`, `catalog`, `branch`). Pairs without `:` or without an id are ignored, and so are ids of unknown agents.
+- `Last-Event-ID`: the same `agentId:seq,…` format (EventSource sends the last `id:` on reconnect). `open` decides which agents are streamed; for each, a cursor from `Last-Event-ID` wins over the query's. Header cursors for agents not in `open` are ignored.
+- Per agent, a cursor replays the events after it when it is a non-negative integer, not ahead of the agent's log, and its successor is still in the log's ring buffer (a caught-up cursor replays nothing). Otherwise that agent gets a `resync` frame and streams live from the log's current `seq`; the other agents are unaffected.
+
+The response waits for the first catalog scan after startup. Then it writes `retry: 2000`, the `baseline` frame, per opened agent (in `open` order) its replayed `event` frames or its `resync`, then live frames. Replay and subscription happen in one synchronous block, so no event falls between them. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`) lets clients detect a dead stream; it is not a frame and isn't replayed. A connection with 20,000 live frames queued (a stalled socket; replay isn't counted) is ended, and the client reconnects.
+
+Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `id: <CursorList>`: the `agentId:seq` pair of every opened agent whose position is established, in `open` order, as of that frame, so the last received `id:` is a complete resume point. A resyncing agent joins the list with its `resync` frame (at the log's `seq`); an agent whose log closes (the agent was removed) leaves it, and its events stop.
+
+```ts
+/** `agentId:seq` pairs joined by `,` — the `open` query value and every SSE `id:`. */
+type CursorList = string;
+
+type StreamFrame =
+  | { type: "baseline"; agents: AgentInfo[]; sessions: SessionSummary[]; branches: Record<string, string> }
+  | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent } // opened agents only
+  | { type: "resync"; agentId: AgentId }                  // the cursor can't be replayed: refetch the snapshot
+  | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
+  | { type: "agent_closed"; agentId: AgentId }
+  | { type: "catalog"; sessions: SessionSummary[] }       // the 7-day window; replaces the previous one
+  | { type: "branch"; cwd: string; branch: string | null }; // null: no longer tracked
+```
+
+- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session whose `updatedAt` is within the last 7 days, most recent first, without `ownedBy` (clients match agents by `sessionFile`). `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree.
+- `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
+- `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included) or the hourly tick changes the window; `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+
+## Events
+
+The `ServerEvent`s of one agent, carried in `event` frames. `seq` is per agent and increases by one per event. `resync` is not a `ServerEvent`; it exists only as a stream frame.
 
 Once pi is up, the initial state arrives as `transcript_reset` → `stats` → (`git_status`) → `agent_status` with `status: "ready"`.
 
@@ -166,8 +201,7 @@ type ServerEvent =
   | { type: "bash_output"; id: string; delta: string; command?: string; excludeFromContext?: boolean } // `!` / `!!` streaming output
   | { type: "bash_done"; id: string; result: BashResult; command?: string; excludeFromContext?: boolean }
   | { type: "live_reset" }                                   // pi exited or was respawned
-  | { type: "agent_status"; agent: AgentInfo }               // status / attention changes
-  | { type: "resync" };
+  | { type: "agent_status"; agent: AgentInfo };              // status / attention changes
 ```
 
 - `bash_*`: `id` is the rpc command id; `command` is the command line sent; `excludeFromContext: true` for commands sent with `excludeFromContext` (`!!`).

@@ -10,7 +10,7 @@ import { isInside } from "../paths.ts";
 
 export const MAX_DIR_SUGGESTIONS = 50;
 
-export interface ListDirsOptions {
+interface ListDirsOptions {
   /** `$HOME` (confinement root; `~` expands to it). */
   home: string;
   /** Header cwds that have pi sessions. */

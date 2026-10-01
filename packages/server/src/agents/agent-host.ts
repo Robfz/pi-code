@@ -28,7 +28,7 @@ interface ResponseRecord {
 }
 
 /** A command in flight: its id (known before pi answers) and pi's `response.data`. */
-export interface HostRequest<T> {
+interface HostRequest<T> {
   id: string;
   response: Promise<T>;
 }
@@ -45,13 +45,13 @@ export interface HostExit {
   requested: boolean;
 }
 
-export interface HostProtocolError {
+interface HostProtocolError {
   message: string;
   line?: string;
   record?: unknown;
 }
 
-export interface AgentHostEvents {
+interface AgentHostEvents {
   /** Every stdout record that isn't a response or an extension UI request (pi session events). */
   event: [JsonAgentSessionEvent];
   /** `extension_ui_request` records. */
@@ -77,7 +77,7 @@ export interface AgentHostOptions {
   idPrefix?: string;
 }
 
-export interface SpawnOptions extends AgentHostOptions {
+interface SpawnOptions extends AgentHostOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
 }

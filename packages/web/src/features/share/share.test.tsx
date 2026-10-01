@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { useConversationUi } from "@/features/conversation/conversation-ui";
 import { createQueryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/router";
+import { sendBaseline } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
 import { composeShareText, parseShareParams } from "./share-text";
@@ -55,16 +56,6 @@ describe("composeShareText", () => {
   });
 });
 
-class NoopEventSource {
-  readyState = 0;
-  onopen = null;
-  onmessage = null;
-  onerror = null;
-  constructor(readonly url: string) {}
-  addEventListener() {}
-  close() {}
-}
-
 const SHARED =
   "/share?title=Great%20article&text=Check%20this%20https%3A%2F%2Fex.com%2Fa&url=https%3A%2F%2Fex.com%2Fa";
 const EXPECTED = "Great article\n\nCheck this https://ex.com/a";
@@ -73,9 +64,6 @@ function stubApi(extra: (call: FetchCall) => [number, unknown] | undefined = () 
   return stubFetch((call) => {
     const result = extra(call);
     if (result) return result;
-    if (call.url === "/api/agents" && call.method === "GET") {
-      return [200, { agents: [makeAgent({ id: "a1", cwd: "/home/me/alpha" })] }];
-    }
     if (call.url === "/api/sessions") {
       return [
         200,
@@ -112,9 +100,11 @@ function stubApi(extra: (call: FetchCall) => [number, unknown] | undefined = () 
   });
 }
 
+/** Renders the app at `path`, with agent a1 open on the live stream. */
 function renderAt(path: string) {
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
   render(<App router={router} queryClient={createQueryClient()} />);
+  sendBaseline([makeAgent({ id: "a1", cwd: "/home/me/alpha" })]);
   return router;
 }
 
@@ -125,7 +115,6 @@ afterEach(() => {
 
 describe("Share target", () => {
   it("prefills the composer of an open agent", async () => {
-    vi.stubGlobal("EventSource", NoopEventSource);
     stubApi();
     const router = renderAt(SHARED);
     const user = userEvent.setup();
@@ -141,7 +130,6 @@ describe("Share target", () => {
   });
 
   it("uses the edited text", async () => {
-    vi.stubGlobal("EventSource", NoopEventSource);
     stubApi();
     renderAt(SHARED);
     const user = userEvent.setup();
@@ -153,7 +141,6 @@ describe("Share target", () => {
   });
 
   it("resumes a recent session with the draft", async () => {
-    vi.stubGlobal("EventSource", NoopEventSource);
     const { calls } = stubApi((call) =>
       call.url === "/api/agents" && call.method === "POST"
         ? [200, { agent: makeAgent({ id: "b2", cwd: "/home/me/beta" }) }]
@@ -168,7 +155,6 @@ describe("Share target", () => {
   });
 
   it("starts a new conversation in a folder with the draft", async () => {
-    vi.stubGlobal("EventSource", NoopEventSource);
     const { calls } = stubApi((call) =>
       call.url === "/api/agents" && call.method === "POST"
         ? [201, { agent: makeAgent({ id: "n3", cwd: "/home/me/gamma" }) }]

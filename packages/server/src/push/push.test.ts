@@ -12,7 +12,12 @@ import { join } from "node:path";
 import type { AgentInfo, AssistantMessage, ServerEvent } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fixturePath, loadFixture } from "../../../../test/fake-pi.ts";
-import { type Harness, type HarnessOptions, startHarness } from "../testing/http-harness.ts";
+import {
+  type Harness,
+  type HarnessOptions,
+  promptAndSettle,
+  startHarness,
+} from "../testing/http-harness.ts";
 import { PushService, truncate } from "./push-service.ts";
 import { SUBSCRIPTIONS_FILE, SubscriptionStore } from "./subscriptions.ts";
 import { loadVapidDetails, VAPID_FILE, vapidSubject } from "./vapid.ts";
@@ -48,21 +53,6 @@ function subscription(n: number) {
 async function subscribe(h: Harness, n: number): Promise<void> {
   const res = await h.api("POST", "/api/push/subscriptions", subscription(n));
   expect(res.status).toBe(204);
-}
-
-/** Prompts and waits until the run settled and the resulting pushes went out. */
-async function promptAndSettle(h: Harness, agentId: string, message = "hi"): Promise<void> {
-  const client = h.sse(agentId, { since: 0 });
-  const settledBefore = client.events.length;
-  const res = await h.rpc(agentId, { type: "prompt", message });
-  expect(res.status, JSON.stringify(res.body)).toBe(200);
-  await client.until(() =>
-    client.events
-      .slice(settledBefore)
-      .find((r) => r.event.type === "pi" && r.event.event.type === "agent_settled"),
-  );
-  await h.idle(agentId);
-  await h.push?.idle();
 }
 
 /** Text of the last assistant message recorded in a fixture. */
@@ -316,18 +306,19 @@ describe("triggers", () => {
     const h = await start({ fixture: "abort" });
     await subscribe(h, 1);
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     for (const message of ["story", "sleep"]) {
-      const before = client.events.filter(
-        (r) => r.event.type === "pi" && r.event.event.type === "agent_settled",
-      ).length;
+      const before = client
+        .events(agent.id)
+        .filter((r) => r.event.type === "pi" && r.event.event.type === "agent_settled").length;
       expect((await h.rpc(agent.id, { type: "prompt", message })).status).toBe(200);
       expect((await h.rpc(agent.id, { type: "abort" })).status).toBe(200);
       await client.until(
         () =>
-          client.events.filter(
-            (r) => r.event.type === "pi" && r.event.event.type === "agent_settled",
-          ).length > before || undefined,
+          client
+            .events(agent.id)
+            .filter((r) => r.event.type === "pi" && r.event.event.type === "agent_settled").length >
+            before || undefined,
       );
     }
     await h.idle(agent.id);
@@ -339,7 +330,7 @@ describe("triggers", () => {
     const h = await start({ fixture: "extension-dialog" });
     await subscribe(h, 1);
     const agent = await h.open();
-    const client = h.sse(agent.id, { since: 0 });
+    const client = h.stream({ open: [[agent.id, 0]] });
     const prompt = h.rpc(agent.id, { type: "prompt", message: "/s0-dialog" });
     const answers: Array<[string, Record<string, unknown>]> = [
       ["select", { value: "banana" }],
@@ -349,7 +340,8 @@ describe("triggers", () => {
     ];
     const titles: string[] = [];
     for (const [method, answer] of answers) {
-      const req = await client.waitFor(
+      const req = await client.waitForEvent(
+        agent.id,
         (r) => r.event.type === "ui_request" && r.event.request.method === method,
       );
       const request = (req.event as Of<"ui_request">).request as { id: string; title: string };
@@ -362,7 +354,8 @@ describe("triggers", () => {
       expect(res.status).toBe(204);
     }
     expect((await prompt).status).toBe(200);
-    await client.waitFor(
+    await client.waitForEvent(
+      agent.id,
       (r) =>
         r.event.type === "ui_request" &&
         "timeout" in r.event.request &&

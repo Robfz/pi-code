@@ -13,6 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query-client";
 import { HomeScreen } from "@/routes/home";
+import { LiveRegistryProvider } from "@/store/context";
+import { type LiveOverview, LiveRegistry } from "@/store/live-registry";
 import { makeAgent } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
 import { ProjectPicker } from "./project-picker";
@@ -32,14 +34,21 @@ function session(patch: Partial<SessionSummary> & { file: string }): SessionSumm
   };
 }
 
-/** Routes: `/` → `ui`, `/sessions` → SessionsScreen, anything else → empty. */
-async function renderRoutes(ui: React.ReactNode, path = "/") {
+/**
+ * Routes: `/` → `ui`, `/sessions` → SessionsScreen, anything else → empty; `live` seeds the live
+ * registry (never started).
+ */
+async function renderRoutes(ui: React.ReactNode, path = "/", live: Partial<LiveOverview> = {}) {
   const queryClient = createQueryClient();
   queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
+  const registry = new LiveRegistry(queryClient);
+  registry.live.setState(live);
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>
-        <Outlet />
+        <LiveRegistryProvider registry={registry}>
+          <Outlet />
+        </LiveRegistryProvider>
       </QueryClientProvider>
     ),
   });
@@ -176,19 +185,20 @@ describe("Sessions", () => {
     const sessions = Array.from({ length: 12 }, (_, i) =>
       session({ file: `/s/${i}.jsonl`, firstMessage: `message ${i}` }),
     );
-    stubFetch((call) => {
-      if (call.url === "/api/agents") {
-        return [200, { agents: [makeAgent({ id: "a1", attention: "input" })] }];
-      }
-      if (call.url === "/api/sessions") return [200, { sessions }];
-      return undefined;
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/sessions" ? [200, { sessions }] : undefined,
+    );
+    await renderRoutes(<HomeScreen />, "/", {
+      loaded: true,
+      agents: { a1: makeAgent({ id: "a1", attention: "input" }) },
+      connection: "live",
     });
-    await renderRoutes(<HomeScreen />);
     expect(await screen.findByText("Needs input")).toBeInTheDocument();
     const recent = await screen.findByRole("list", { name: "Recent sessions" });
     expect(within(recent).getAllByTestId("session-row")).toHaveLength(10);
     expect(within(recent).getByText("message 0")).toBeInTheDocument();
     expect(within(recent).queryByText("message 10")).toBeNull();
+    expect(calls.some((c) => c.url === "/api/agents")).toBe(false);
   });
 
   it("/sessions filters by project and opens a session through POST /api/agents", async () => {

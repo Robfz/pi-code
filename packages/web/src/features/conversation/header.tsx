@@ -1,6 +1,5 @@
 import { Link } from "@tanstack/react-router";
 import {
-  ChevronLeftIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CopyPlusIcon,
@@ -13,6 +12,7 @@ import {
   ShrinkIcon,
   SquarePenIcon,
 } from "lucide-react";
+import { HomeBackButton } from "@/components/home-back-button";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,7 +21,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SidebarSheet } from "@/features/sidebar/sidebar-sheet";
 import { baseName } from "@/lib/content";
+import { useIsDesktop } from "@/lib/use-media-query";
 import { useConversation } from "@/store/context";
 import { selectSessionName } from "@/store/selectors";
 import { useUiPrefs } from "@/store/ui-prefs";
@@ -30,10 +32,11 @@ import { ConnectionIndicator } from "./connection-indicator";
 import { useSessionActions } from "./session-actions";
 
 /**
- * Session name · project · connection · tool expansion toggle · menu (tree, diff, fork, clone,
- * compact, rename, new session, close). Session commands need a ready agent.
+ * Back to Home and the conversations sheet (below the desktop breakpoint only) · session name ·
+ * project · connection · tool expansion toggle · menu (tree, diff, fork, clone, compact, rename,
+ * new session, close). Session commands need a ready agent. `inert` while a scoped sheet covers it.
  */
-export function ConversationHeader() {
+export function ConversationHeader({ inert }: { inert?: boolean }) {
   const agentId = useConversation((s) => s.agentId);
   const cwd = useConversation((s) => s.agent.cwd);
   const name = useConversation(selectSessionName);
@@ -43,15 +46,16 @@ export function ConversationHeader() {
   const actions = useSessionActions();
   const openSheet = useOpenSheet();
   const folder = cwd ? baseName(cwd) : "";
+  const desktop = useIsDesktop();
 
   return (
-    <header className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
+    <header
+      inert={inert}
+      className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur lg:px-32"
+    >
       <div className="flex h-12 min-w-0 flex-1 items-center gap-1">
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/" aria-label="Home">
-            <ChevronLeftIcon />
-          </Link>
-        </Button>
+        <HomeBackButton />
+        {!desktop && <SidebarSheet />}
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <h1 className="truncate text-sm font-medium">{name ?? (folder || "Conversation")}</h1>
           {name !== undefined && folder !== "" && (

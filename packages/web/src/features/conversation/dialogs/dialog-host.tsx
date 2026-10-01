@@ -1,10 +1,12 @@
 import type { PendingDialog } from "@pi-code/protocol";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { errorMessage, isApiRequestError, respondUi } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { selectDialogs } from "@/store/selectors";
+import { ScopedOverlay } from "../scoped-overlay";
 import {
   ConfirmDialogView,
   type DialogAnswer,
@@ -18,8 +20,14 @@ import {
  * `POST /ui-responses`; the dialog hides right away and `ui_resolved` removes it from the store.
  * A dialog whose countdown reaches 0 stays until the server's `ui_resolved` (the server resolves
  * timed-out dialogs itself; this device's clock may be skewed).
+ *
+ * Cancel, the sheet's × and Escape answer `cancelled`; tapping outside does nothing, and a
+ * dialog left unanswered stays pending (it's in the store, so it shows again on return).
+ * With `container` (the conversation column on desktop) the sheet is non-modal and scoped to
+ * it, overlay included, so the rest of the page (the sidebar) stays usable and Tab can leave it
+ * (the covered column is inert meanwhile); `null` (the container isn't mounted yet) shows nothing.
  */
-export function DialogHost() {
+export function DialogHost({ container }: { container?: HTMLElement | null }) {
   const agentId = useConversation((s) => s.agentId);
   const dialogs = useConversation(selectDialogs);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
@@ -29,23 +37,32 @@ export function DialogHost() {
     setDismissed((prev) => new Set(prev).add(id));
   }, []);
 
-  if (!dialog) return null;
+  if (!dialog || container === null) return null;
   return (
-    <DialogSheet key={dialog.request.id} agentId={agentId} dialog={dialog} onDismiss={dismiss} />
+    <DialogSheet
+      key={dialog.request.id}
+      agentId={agentId}
+      dialog={dialog}
+      container={container}
+      onDismiss={dismiss}
+    />
   );
 }
 
 function DialogSheet({
   agentId,
   dialog,
+  container,
   onDismiss,
 }: {
   agentId: string;
   dialog: PendingDialog;
+  container: HTMLElement | undefined;
   onDismiss(id: string): void;
 }) {
   const { request } = dialog;
   const [busy, setBusy] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   async function answer(body: DialogAnswer) {
     setBusy(true);
@@ -73,18 +90,35 @@ function DialogSheet({
   return (
     <Sheet
       open
+      modal={container === undefined}
       onOpenChange={(open) => {
         if (!open && !busy) void answer({ cancelled: true });
       }}
     >
+      <ScopedOverlay container={container} />
       <SheetContent
         side="bottom"
+        ref={contentRef}
+        container={container}
+        loopFocus={container === undefined}
         data-testid={`dialog-${request.method}`}
-        className={
-          editor
-            ? "h-dvh pb-[env(safe-area-inset-bottom)]"
-            : "max-h-[85dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
-        }
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          // Scoped: Escape typed outside the sheet (e.g. in the sidebar search) isn't for it.
+          const target = event.target;
+          if (
+            container &&
+            target instanceof Node &&
+            target !== document.body &&
+            !contentRef.current?.contains(target)
+          )
+            event.preventDefault();
+        }}
+        className={cn(
+          "pb-[env(safe-area-inset-bottom)]",
+          container && "absolute",
+          editor ? (container ? "h-full" : "h-dvh") : "max-h-[85dvh] rounded-t-2xl",
+        )}
       >
         {request.method === "select" && <SelectDialogView request={request} {...props} />}
         {request.method === "confirm" && <ConfirmDialogView request={request} {...props} />}

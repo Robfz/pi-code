@@ -88,26 +88,36 @@ function rawRequest(
 }
 
 // ---------------------------------------------------------------------------
-// Minimal SSE client
+// Minimal client of one agent on the live stream
 
 interface SseEvent {
-  id?: number;
+  /** The event's seq; absent on `resync` / `agent_closed` frames. */
+  seq?: number;
   data: Json;
 }
 
+/**
+ * `GET /api/stream?open=<agentId>:<since>`, keeping that agent's frames: each `event` frame as
+ * its `ServerEvent` with the frame's seq, `resync` and `agent_closed` frames as they are.
+ * `lastEventId` is sent as `Last-Event-ID: <agentId>:<lastEventId>`.
+ */
 class Sse {
   readonly events: SseEvent[] = [];
+  /** Seq of the last event received. */
   lastId: number | undefined;
   ended = false;
   private readonly ctrl = new AbortController();
   private waiters: (() => void)[] = [];
   readonly done: Promise<void>;
 
-  constructor(agentId: string, opts: { since?: number; lastEventId?: number } = {}) {
-    const q = opts.since === undefined ? "" : `?since=${opts.since}`;
+  private readonly agentId: string;
+
+  constructor(agentId: string, since: number, lastEventId?: number | string) {
+    this.agentId = agentId;
     const headers: Json = {};
-    if (opts.lastEventId !== undefined) headers["Last-Event-ID"] = String(opts.lastEventId);
-    this.done = this.run(`${BASE}/api/agents/${agentId}/events${q}`, headers);
+    if (lastEventId !== undefined) headers["Last-Event-ID"] = `${agentId}:${lastEventId}`;
+    const open = encodeURIComponent(`${agentId}:${since}`);
+    this.done = this.run(`${BASE}/api/stream?open=${open}`, headers);
   }
 
   private async run(url: string, headers: Json) {
@@ -133,18 +143,22 @@ class Sse {
     }
   }
 
-  private onFrame(frame: string) {
-    let id: number | undefined;
+  private onFrame(message: string) {
     const data: string[] = [];
-    for (const line of frame.split("\n")) {
-      if (line.startsWith("id:")) id = Number(line.slice(3).trim());
-      else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    let named = false;
+    for (const line of message.split("\n")) {
+      if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+      else if (line.startsWith("event:")) named = true; // ping
     }
-    if (data.length === 0) return;
-    if (id !== undefined) this.lastId = id;
-    const ev: SseEvent = { data: JSON.parse(data.join("\n")) };
-    if (id !== undefined) ev.id = id;
-    this.events.push(ev);
+    if (data.length === 0 || named) return;
+    const frame: Json = JSON.parse(data.join("\n"));
+    if (frame.agentId !== this.agentId) return;
+    if (frame.type === "event") {
+      this.lastId = frame.seq;
+      this.events.push({ seq: frame.seq, data: frame.event });
+    } else if (frame.type === "resync" || frame.type === "agent_closed") {
+      this.events.push({ data: frame });
+    } else return;
     this.wake();
   }
 
@@ -410,7 +424,7 @@ async function main() {
     const info = r.json.agent;
     agentId = info.id;
     assert(info.status === "starting", `initial status ${info.status}`);
-    sse = new Sse(agentId, { since: 0 });
+    sse = new Sse(agentId, 0);
     debugSse = sse;
     await sse.waitFor(
       (e) => e.type === "agent_status" && e.agent.status === "ready",
@@ -439,7 +453,7 @@ async function main() {
     assert(Array.isArray(snap.transcript?.entries), "snapshot transcript");
     assert(snap.stats && typeof snap.stats === "object", "snapshot stats null");
     assert(
-      typeof snap.seq === "number" && snap.seq >= (sse.events[stateIdx]?.id ?? 0),
+      typeof snap.seq === "number" && snap.seq >= (sse.events[stateIdx]?.seq ?? 0),
       "snapshot seq",
     );
     const kinds = snap.transcript.entries.map((e: Json) => e.type);
@@ -504,18 +518,19 @@ async function main() {
       `stats: ${JSON.stringify(snap.stats).slice(0, 200)}`,
     );
     await assertTranscriptConsistent(agentId);
-    // Resume points: ?since=<snapshot seq> starts right after it; unknown ids get resync.
-    const tail = new Sse(agentId, { since: snap.seq });
+    // Resume points: open=<id>:<snapshot seq> starts right after it; a Last-Event-ID cursor
+    // the log can't replay from gets resync.
+    const tail = new Sse(agentId, snap.seq);
     await api("POST", `/api/agents/${agentId}/ack`, {});
     await rpcOk(agentId, { type: "set_thinking_level", level: "low" });
-    await tail.waitFor((e) => e.type === "state", "state after since", 5_000);
+    await tail.waitFor((e) => e.type === "state", "state after open", 5_000);
     tail.close();
     assert(
-      tail.events[0]?.id === snap.seq + 1,
-      `since → first id ${tail.events[0]?.id}, want ${snap.seq + 1}`,
+      tail.events[0]?.seq === snap.seq + 1,
+      `open → first seq ${tail.events[0]?.seq}, want ${snap.seq + 1}`,
     );
     for (const bogus of [snap.seq + 10_000, "abc"]) {
-      const r = new Sse(agentId, { lastEventId: bogus as number });
+      const r = new Sse(agentId, snap.seq, bogus);
       await r.waitFor(() => true, "first event", 5_000).catch(() => undefined);
       r.close();
       assert(
@@ -527,9 +542,9 @@ async function main() {
   });
 
   await scenario(4, "reconnect with Last-Event-ID mid-stream", async () => {
-    const full = new Sse(agentId);
-    const flaky = new Sse(agentId);
-    await sleep(300);
+    const start = (await api("GET", `/api/agents/${agentId}/snapshot`)).json.seq as number;
+    const full = new Sse(agentId, start);
+    const flaky = new Sse(agentId, start);
     await rpcOk(agentId, {
       type: "prompt",
       message: "Do not use any tools. Count from 1 to 60 as plain text, one number per line.",
@@ -540,11 +555,12 @@ async function main() {
     flaky.close();
     // Hydrate mid-stream like the web client: snapshot, then events since its seq.
     const mid = (await api("GET", `/api/agents/${agentId}/snapshot`)).json;
-    const hydrated = new Sse(agentId, { since: mid.seq });
+    const hydrated = new Sse(agentId, mid.seq);
     await flaky.done;
     await sleep(1500);
     assert(cutAt !== undefined, "no id seen");
-    const resumed = new Sse(agentId, { lastEventId: cutAt });
+    // Reconnect like EventSource: the same URL, plus Last-Event-ID.
+    const resumed = new Sse(agentId, start, cutAt);
     await full.waitFor(isPi("agent_settled"), "full settle");
     await resumed.waitFor(isPi("agent_settled"), "resumed settle");
     await sleep(200);
@@ -563,7 +579,7 @@ async function main() {
       gitStatus: mid.gitStatus,
     };
     for (const e of hydrated.events) {
-      if ((e.id ?? 0) > final.seq) break;
+      if ((e.seq ?? 0) > final.seq) break;
       live = reduceLive(live, e.data as never);
       caches = applyServerEventToCaches(caches as never, e.data as never) as typeof caches;
     }
@@ -573,14 +589,14 @@ async function main() {
       assert(isDeepStrictEqual(got[key], want[key]), `snapshot + replay ≠ final snapshot (${key})`);
     }
     assert(resumed.data()[0]?.type !== "resync", "got resync");
-    const firstResumedId = resumed.events[0]?.id;
+    const firstResumedId = resumed.events[0]?.seq;
     assert(firstResumedId === cutAt + 1, `resumed at ${firstResumedId}, expected ${cutAt + 1}`);
     const a = deltasText(full.data());
     const b = deltasText([...flaky.data(), ...resumed.data()]);
     assert(a.length > 50 && a === b, `delta text differs (${a.length} vs ${b.length})`);
-    const settledId = full.events.find((e) => isPi("agent_settled")(e.data))?.id as number;
+    const settledId = full.events.find((e) => isPi("agent_settled")(e.data))?.seq as number;
     const upToSettle = (evs: SseEvent[]) =>
-      evs.map((e) => e.id as number).filter((id) => id <= settledId);
+      evs.map((e) => e.seq as number).filter((id) => id <= settledId);
     const ids = upToSettle([...flaky.events, ...resumed.events]);
     assert(
       ids.every((id, i) => i === 0 || id === (ids[i - 1] as number) + 1),
@@ -1055,7 +1071,7 @@ async function main() {
     assert(other.status === 201, `second agent → ${other.status}`);
     const otherId = other.json.agent.id as string;
     try {
-      const os = new Sse(otherId, { since: 0 });
+      const os = new Sse(otherId, 0);
       await os.waitFor(
         (e) => e.type === "agent_status" && e.agent.status === "ready",
         "B ready",
@@ -1217,7 +1233,7 @@ async function main() {
     assert(r.status === 201, `resume → ${r.status} ${r.text.slice(0, 200)}`);
     const bId = r.json.agent.id as string;
     try {
-      const bs = new Sse(bId, { since: 0 });
+      const bs = new Sse(bId, 0);
       await bs.waitFor(
         (e) => e.type === "agent_status" && e.agent.status === "ready",
         "B ready",
@@ -1281,13 +1297,12 @@ async function main() {
     spend = stats?.cost ?? 0;
   }
 
-  await scenario(11, "close agent → process gone, SSE ends", async () => {
+  await scenario(11, "close agent → process gone, agent_closed", async () => {
     const pids = agentPids.length ? agentPids : piPids().filter((p) => !pidsBefore.has(p));
     assert(pids.length > 0, "no pi process found for the agent");
     const del = await api("DELETE", `/api/agents/${agentId}`, {});
     assert(del.status === 204, `DELETE → ${del.status} ${del.text}`);
-    await Promise.race([s.done, sleep(5000)]);
-    assert(s.ended, "SSE stream did not end");
+    await s.waitFor((e) => e.type === "agent_closed", "agent_closed", 5_000);
     await sleep(500);
     const alive = piPids().filter((p) => pids.includes(p));
     assert(alive.length === 0, `pi still running: ${alive}`);
@@ -1319,7 +1334,7 @@ async function main() {
       assert(info.trustPrompt?.cwd === dir && info.attention === "input", JSON.stringify(info));
       const busy = await rpc(info.id, { type: "get_state" });
       assert(busy.json?.error?.code === "agent_busy", `rpc while awaiting → ${busy.status}`);
-      const ts = new Sse(info.id, { since: 0 });
+      const ts = new Sse(info.id, 0);
       const t = await api("POST", `/api/agents/${info.id}/trust`, { trusted: true });
       assert(
         t.status === 200 && t.json.agent.status === "starting",

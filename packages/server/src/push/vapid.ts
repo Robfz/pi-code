@@ -3,7 +3,7 @@ import { join } from "node:path";
 import webpush from "web-push";
 import { readJsonFile, writeJsonFileAtomic } from "../store/json-file.ts";
 
-export interface VapidKeys {
+interface VapidKeys {
   publicKey: string;
   privateKey: string;
 }

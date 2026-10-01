@@ -144,7 +144,7 @@ export interface Snapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Events — `GET /api/agents/:id/events`
+// Events — carried in `GET /api/stream` `event` frames
 
 export type ServerEvent =
   /**
@@ -187,8 +187,7 @@ export type ServerEvent =
    */
   | { type: "live_reset" }
   /** Agent status / attention changes. */
-  | { type: "agent_status"; agent: AgentInfo }
-  | { type: "resync" };
+  | { type: "agent_status"; agent: AgentInfo };
 
 export type ServerEventType = ServerEvent["type"];
 
@@ -197,6 +196,33 @@ export interface SequencedEvent {
   seq: number;
   event: ServerEvent;
 }
+
+// ---------------------------------------------------------------------------
+// Live stream — `GET /api/stream` (`docs/design/05-desktop.md`)
+
+/** `agentId:seq` pairs joined by `,` — the `open` query value and every SSE `id:`. */
+export type CursorList = string;
+
+export type StreamFrame =
+  | {
+      type: "baseline";
+      agents: AgentInfo[];
+      /** Sessions updated within the last 7 days, most recent first, without `ownedBy`. */
+      sessions: SessionSummary[];
+      /** cwd → branch, for folders with a live agent inside a git work tree. */
+      branches: Record<string, string>;
+    }
+  /** An opened agent's event; `seq` duplicates its pair in the SSE `id:`. */
+  | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent }
+  /** The agent's cursor can't be replayed: refetch its snapshot. */
+  | { type: "resync"; agentId: AgentId }
+  /** Any agent's info changed (or a new agent). */
+  | { type: "agent"; agent: AgentInfo }
+  | { type: "agent_closed"; agentId: AgentId }
+  /** The 7-day session window; replaces the previous one. */
+  | { type: "catalog"; sessions: SessionSummary[] }
+  /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
+  | { type: "branch"; cwd: string; branch: string | null };
 
 // ---------------------------------------------------------------------------
 // Dialog answers / tree navigation

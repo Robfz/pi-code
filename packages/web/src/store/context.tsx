@@ -1,6 +1,9 @@
+import type { AgentInfo } from "@pi-code/protocol";
 import { createContext, type ReactNode, useContext } from "react";
 import { useStore } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type { ConversationState, ConversationStore } from "./conversation-store";
+import type { LiveOverview, LiveRegistry } from "./live-registry";
 
 const ConversationStoreContext = createContext<ConversationStore | null>(null);
 
@@ -25,4 +28,32 @@ export function useConversationStore(): ConversationStore {
 /** Subscribe to a slice of the current conversation (`useConversation(s => s.live.streaming)`). */
 export function useConversation<T>(selector: (state: ConversationState) => T): T {
   return useStore(useConversationStore(), selector);
+}
+
+const LiveRegistryContext = createContext<LiveRegistry | null>(null);
+
+export function LiveRegistryProvider({
+  registry,
+  children,
+}: {
+  registry: LiveRegistry;
+  children: ReactNode;
+}) {
+  return <LiveRegistryContext.Provider value={registry}>{children}</LiveRegistryContext.Provider>;
+}
+
+export function useLiveRegistry(): LiveRegistry {
+  const registry = useContext(LiveRegistryContext);
+  if (registry === null) throw new Error("useLiveRegistry outside LiveRegistryProvider");
+  return registry;
+}
+
+/** Subscribe to a slice of the tab's live overview (`useLive(s => s.agents)`). */
+export function useLive<T>(selector: (state: LiveOverview) => T): T {
+  return useStore(useLiveRegistry().live, selector);
+}
+
+/** The live agents, or `undefined` until the stream's first baseline. */
+export function useLiveAgents(): AgentInfo[] | undefined {
+  return useLive(useShallow((s) => (s.loaded ? Object.values(s.agents) : undefined)));
 }

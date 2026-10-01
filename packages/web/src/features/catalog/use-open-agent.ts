@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { errorMessage, openAgent } from "@/lib/api";
-import { queryKeys } from "@/lib/query-client";
 
 /**
  * `POST /api/agents` (new conversation in a folder, or resume a session — the server returns
@@ -23,7 +22,6 @@ export function useOpenAgent({
     mutationFn: (body: OpenAgentBody) => openAgent(body),
     onSuccess: (agent) => {
       onOpened?.(agent);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } });
     },

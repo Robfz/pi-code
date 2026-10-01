@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { errorEnvelope } from "../errors.ts";
 
-export interface GuardOptions {
+interface GuardOptions {
   /** Tailnet hostname (lowercase, no port). */
   hostname: string;
   /** Main listener port. */
@@ -14,7 +14,7 @@ export function allowedHosts({ hostname, port }: GuardOptions): Set<string> {
 }
 
 /** Origins allowed on non-GET requests. */
-export function allowedOrigins({ hostname, port }: GuardOptions): Set<string> {
+function allowedOrigins({ hostname, port }: GuardOptions): Set<string> {
   return new Set([`https://${hostname}`, `http://localhost:${port}`, `http://127.0.0.1:${port}`]);
 }
 

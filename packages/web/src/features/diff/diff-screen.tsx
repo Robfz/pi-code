@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, getGitDiff, isApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ScreenHeader } from "@/routes/placeholder";
 
 export const gitDiffQueryKey = (agentId: string) => ["agent", agentId, "git-diff"] as const;
 
@@ -174,8 +175,8 @@ export function DiffScreen() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-3 px-2 pb-6 pt-[env(safe-area-inset-top)]">
-      <header className="flex h-12 items-center gap-1">
+    <div className="flex min-h-dvh w-full flex-col">
+      <ScreenHeader>
         <Button variant="ghost" size="icon" asChild>
           <Link to="/agents/$agentId" params={{ agentId }} aria-label="Back to conversation">
             <ChevronLeftIcon />
@@ -191,8 +192,8 @@ export function DiffScreen() {
         >
           <RefreshCwIcon className={cn(diff.isFetching && "animate-spin")} />
         </Button>
-      </header>
-      {body}
+      </ScreenHeader>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-2 pt-3 pb-6">{body}</div>
     </div>
   );
 }

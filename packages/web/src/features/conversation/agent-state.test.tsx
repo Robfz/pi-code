@@ -82,11 +82,4 @@ describe("agent lifecycle states", () => {
     );
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   });
-
-  it("shows a closed conversation when the agent is gone", async () => {
-    const store = hydratedStore();
-    store.getState().setLoadError({ code: "agent_not_found", message: "no" });
-    await renderWithStore(<AgentStatePanel />, store);
-    expect(screen.getByRole("alert")).toHaveTextContent("This conversation is closed.");
-  });
 });

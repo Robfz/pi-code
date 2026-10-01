@@ -151,7 +151,6 @@ describe("applyServerEventToCaches", () => {
       pi({ type: "agent_settled" }),
       pi({ type: "thinking_level_changed", level: "low" }),
       pi({ type: "message_start", message: { role: "user" } }),
-      { type: "resync" },
       { type: "ui_resolved", id: "x" },
       { type: "unknown_thing" } as unknown as ServerEvent,
     ] as ServerEvent[]) {

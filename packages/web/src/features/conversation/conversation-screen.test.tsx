@@ -1,9 +1,12 @@
-import type { ServerEvent } from "@pi-code/protocol";
-import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { initialLiveState, type ServerEvent } from "@pi-code/protocol";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import type { ConversationStore } from "@/store/conversation-store";
-import { fixtureEvents } from "@/test/fixtures";
-import { hydratedStore, renderWithStore } from "@/test/render";
+import { stubMatchMedia } from "@/test/dom-stubs";
+import { fixtureEvents, makeAgent } from "@/test/fixtures";
+import { hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ConversationScreen } from "./conversation-screen";
 
 /** Apply events one by one until `stop` returns true for the event just applied. */
@@ -146,5 +149,141 @@ describe("ConversationScreen live rendering", () => {
       (e) => e.type === "ui_request" && e.request.method === "confirm",
     );
     expect(screen.getByTestId("dialog-confirm")).toHaveTextContent("You picked banana");
+  });
+});
+
+describe("ConversationScreen width", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("caps the transcript and composer at max-w-3xl below 1024px", async () => {
+    stubMatchMedia(() => false);
+    await renderWithStore(<ConversationScreen />, hydratedStore());
+    expect(screen.getByTestId("transcript-column")).toHaveClass("max-w-3xl");
+    expect(screen.getByTestId("composer-column")).toHaveClass("max-w-3xl");
+  });
+
+  it("uses the full content width from 1024px", async () => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    await renderWithStore(<ConversationScreen />, hydratedStore());
+    expect(screen.getByTestId("transcript-column")).not.toHaveClass("max-w-3xl");
+    expect(screen.getByTestId("composer-column")).not.toHaveClass("max-w-3xl");
+  });
+});
+
+/**
+ * Where sequential focus navigation goes from `from`, as a browser does it: the next (or
+ * previous) focusable element in document order, skipping inert subtrees (jsdom and user-event
+ * don't) and Radix's focus guards.
+ */
+function tabStop(from: Element, shift = false): Element | undefined {
+  const stops = [
+    ...document.querySelectorAll("a[href], button, input, select, textarea, [tabindex]"),
+  ].filter(
+    (el) =>
+      el === from ||
+      (el instanceof HTMLElement &&
+        el.tabIndex >= 0 &&
+        !el.matches(":disabled, [data-radix-focus-guard]") &&
+        !el.closest("[inert]")),
+  );
+  return stops[stops.indexOf(from) + (shift ? -1 : 1)];
+}
+
+describe("ConversationScreen desktop scoped sheets", () => {
+  // Sidebar stand-ins, before and after the conversation in document order.
+  let before: HTMLButtonElement;
+  let after: HTMLButtonElement;
+  const render = async (store: ReturnType<typeof hydratedStore>) => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    await renderWithStore(<ConversationScreen />, store);
+    before = document.createElement("button");
+    before.textContent = "Before";
+    after = document.createElement("button");
+    after.textContent = "After";
+    document.body.prepend(before);
+    document.body.append(after);
+  };
+  afterEach(() => {
+    before.remove();
+    after.remove();
+    vi.unstubAllGlobals();
+  });
+
+  /** The first and last focusable elements of `sheet`. */
+  const edges = (sheet: HTMLElement) => {
+    const inside = [...sheet.querySelectorAll<HTMLElement>("button, input, textarea")];
+    return [inside[0] as HTMLElement, inside.at(-1) as HTMLElement] as const;
+  };
+
+  it("dialog: the covered column is inert; Escape outside the sheet doesn't answer", async () => {
+    const { calls } = stubFetch(() => [204, null]);
+    const uiBodies = () =>
+      calls.filter((c) => c.url === "/api/agents/a1/ui-responses").map((c) => c.body);
+    const store = hydratedStore({
+      live: {
+        ...initialLiveState(),
+        dialogs: [
+          {
+            request: {
+              type: "extension_ui_request",
+              id: "d1",
+              method: "confirm",
+              title: "T",
+              message: "m",
+            },
+            receivedAt: Date.now(),
+          },
+        ],
+      },
+    });
+    await render(store);
+    const sheet = await screen.findByTestId("dialog-confirm");
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    for (const covered of [
+      composer,
+      screen.getByTestId("transcript-column"),
+      screen.getByTestId("composer-column"),
+      document.querySelector("header"),
+    ]) {
+      expect(covered?.closest("[inert]")).not.toBeNull();
+    }
+    expect(sheet.closest("[inert]")).toBeNull();
+
+    // Focus leaving the sheet skips the covered controls, either way.
+    const [first, last] = edges(sheet);
+    expect(tabStop(last)).toBe(after);
+    expect(tabStop(first, true)).toBe(before);
+
+    // Escape where focus can't be in a browser (the inert composer), or outside, isn't for it.
+    const user = userEvent.setup();
+    composer.focus();
+    await user.keyboard("{Escape}");
+    before.focus();
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("dialog-confirm")).toBeInTheDocument();
+    expect(uiBodies()).toEqual([]);
+
+    // Escape in the sheet cancels; the column is live again.
+    first.focus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(uiBodies()).toEqual([{ id: "d1", cancelled: true }]));
+    await waitFor(() => expect(screen.queryByTestId("dialog-confirm")).toBeNull());
+    expect(composer.closest("[inert]")).toBeNull();
+  });
+
+  it("trust sheet: the covered column is inert and focus leaving the sheet skips it", async () => {
+    stubFetch(() => [204, null]);
+    const store = hydratedStore({ agent: makeAgent({ status: "awaiting_trust" }) });
+    await render(store);
+    const sheet = await screen.findByTestId("trust-sheet");
+    expect(screen.getByTestId("composer-column")).toHaveAttribute("inert");
+    const [first, last] = edges(sheet);
+    expect(tabStop(last)).toBe(after);
+    expect(tabStop(first, true)).toBe(before);
+    act(() =>
+      store.getState().apply({ type: "agent_status", agent: makeAgent({ status: "ready" }) }, 1),
+    );
+    await waitFor(() => expect(screen.queryByTestId("trust-sheet")).toBeNull());
+    expect(screen.getByTestId("composer-column")).not.toHaveAttribute("inert");
   });
 });

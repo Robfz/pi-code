@@ -1,8 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { loadedDiff, stubCanvas, stubMatchMedia } from "@/components/diff/testing";
+import { loadedDiff, stubCanvas } from "@/components/diff/testing";
 import { useUiPrefs } from "@/store/ui-prefs";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { bashOutcome, listResult, readRange } from "./builtin";
 import { langFromPath, splitNotice } from "./common";
 import { fixtureToolCall, propsAt } from "./testing";

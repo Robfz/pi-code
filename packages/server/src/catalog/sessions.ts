@@ -2,10 +2,10 @@
  * Session catalog: read-only over pi's sessions dir (`<agentDir>/sessions/--<cwd>--/*.jsonl`,
  * docs/session-format.md). Only header `cwd`s are trusted; directory names are lossy.
  */
-import { existsSync } from "node:fs";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import type { AgentId, ProjectSummary, SessionSummary } from "@pi-code/protocol";
+import { findGitDir } from "../git/branches.ts";
 
 /** Longest `firstMessage`, in characters. */
 export const FIRST_MESSAGE_MAX = 200;
@@ -15,7 +15,7 @@ const LIST_TTL_MS = 1_000;
 const PARSE_CONCURRENCY = 16;
 
 /** What the file itself says (everything but `ownedBy`). */
-export type ParsedSession = Omit<SessionSummary, "ownedBy">;
+type ParsedSession = Omit<SessionSummary, "ownedBy">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -167,7 +167,7 @@ interface CacheEntry {
   summary: ParsedSession | undefined;
 }
 
-export interface SessionCatalogDeps {
+interface SessionCatalogDeps {
   /** pi's agent dir; sessions live in `<agentDir>/sessions`. */
   agentDir: string;
   /** The agent that has a session file open, if any. */
@@ -182,17 +182,6 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
-/** Whether `dir` is inside a git work tree (a `.git` entry in it or an ancestor). */
-export function isInsideGitRepo(dir: string): boolean {
-  let current = dir;
-  for (;;) {
-    if (existsSync(join(current, ".git"))) return true;
-    const parent = dirname(current);
-    if (parent === current) return false;
-    current = parent;
-  }
-}
-
 /** Session summaries and projects, cached per file by `(path, mtime, size)`. */
 export class SessionCatalog {
   private readonly deps: SessionCatalogDeps;
@@ -204,12 +193,23 @@ export class SessionCatalog {
     this.deps = deps;
   }
 
-  /** All sessions (optionally only those whose header `cwd` equals `cwd`), most recent first. */
-  async sessions(cwd?: string): Promise<SessionSummary[]> {
+  /**
+   * All sessions, most recent first. `cwd` keeps those whose header `cwd` equals it; `q` those
+   * whose `cwd` or `name` contains it, case-insensitively.
+   */
+  async sessions(filter: { cwd?: string; q?: string } = {}): Promise<SessionSummary[]> {
     const parsed = await this.scan();
     const owner = this.deps.ownerOf;
+    const { cwd } = filter;
+    const q = filter.q?.toLowerCase();
     return parsed
       .filter((s) => cwd === undefined || s.cwd === cwd)
+      .filter(
+        (s) =>
+          q === undefined ||
+          s.cwd.toLowerCase().includes(q) ||
+          (s.name?.toLowerCase().includes(q) ?? false),
+      )
       .map((s) => {
         const ownedBy = owner?.(s.file);
         return ownedBy === undefined ? { ...s } : { ...s, ownedBy };
@@ -233,7 +233,7 @@ export class SessionCatalog {
         cwd,
         sessionCount: p.count,
         updatedAt: p.updatedAt,
-        isGitRepo: isInsideGitRepo(cwd),
+        isGitRepo: findGitDir(cwd) !== undefined,
       }))
       .sort(byRecency);
   }
@@ -294,7 +294,8 @@ export class SessionCatalog {
       const summary = await this.summarize(file);
       if (summary !== undefined) summaries.push(summary);
     });
-    return summaries.sort(byRecency);
+    // Ties by file, so equal scans list sessions in the same order.
+    return summaries.sort((a, b) => byRecency(a, b) || a.file.localeCompare(b.file));
   }
 
   private async summarize(file: string): Promise<ParsedSession | undefined> {

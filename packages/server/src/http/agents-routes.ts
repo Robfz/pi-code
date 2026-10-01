@@ -13,7 +13,6 @@ import {
 } from "../agents/commands.ts";
 import { ApiError, errorEnvelope } from "../errors.ts";
 import { gitDiff, gitStatus } from "../git/git.ts";
-import { eventStream, type SseOptions } from "./sse.ts";
 
 /** `prompt.images` are base64: allow large bodies on `/rpc`. */
 const RPC_BODY_LIMIT = 25 * 1024 * 1024;
@@ -37,12 +36,8 @@ function parseTrustBody(value: unknown): TrustBody {
   throw new ApiError("invalid_body", "expected { trusted: boolean }");
 }
 
-export interface AgentsRoutesOptions {
-  sse?: SseOptions;
-}
-
 /** `/api/agents` routes. Chained so the route types reach `AppType`. */
-export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = {}) {
+export function agentsRoutes(manager: AgentManager) {
   return new Hono()
     .get("/", (c) => c.json({ agents: manager.list() }, 200))
     .post(
@@ -93,18 +88,12 @@ export function agentsRoutes(manager: AgentManager, opts: AgentsRoutesOptions = 
       await manager.close(c.req.param("id"));
       return c.body(null, 204);
     })
-    .get("/:id/snapshot", (c) => {
-      const pipeline = manager.require(c.req.param("id")).pipeline;
-      pipeline.setAttention("none");
-      return c.json(pipeline.snapshot(), 200);
-    })
+    .get("/:id/snapshot", (c) =>
+      c.json(manager.require(c.req.param("id")).pipeline.snapshot(), 200),
+    )
     .post("/:id/ack", (c) => {
-      manager.require(c.req.param("id")).pipeline.setAttention("none");
+      manager.require(c.req.param("id")).pipeline.ack();
       return c.body(null, 204);
-    })
-    .get("/:id/events", (c) => {
-      const agent = manager.require(c.req.param("id"));
-      return eventStream(c, agent.pipeline.log, opts.sse);
     })
     .post(
       "/:id/rpc",

@@ -5,13 +5,15 @@ import { ArrowRightIcon, FolderIcon, LoaderIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { SessionList } from "@/features/catalog/session-list";
 import { useConversationUi } from "@/features/conversation/conversation-ui";
-import { errorMessage, listAgents, listSessions } from "@/lib/api";
+import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { PlaceholderScreen } from "@/routes/placeholder";
+import { useLiveAgents } from "@/store/context";
 import { composeShareText, parseShareParams } from "./share-text";
 
 const RECENT_SESSIONS = 8;
@@ -37,7 +39,7 @@ export function ShareScreen() {
     composeShareText(parseShareParams(router.history.location.search)),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
-  const agents = useQuery({ queryKey: queryKeys.agents, queryFn: listAgents });
+  const openAgents = useLiveAgents();
   const sessions = useQuery({ queryKey: queryKeys.sessions(), queryFn: () => listSessions() });
 
   const handOff = (agent: Pick<AgentInfo, "id">) => {
@@ -48,7 +50,6 @@ export function ShareScreen() {
     void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } });
   };
 
-  const openAgents = agents.data ?? [];
   const recent = (sessions.data ?? []).filter((s) => s.ownedBy === undefined);
 
   return (
@@ -74,16 +75,11 @@ export function ShareScreen() {
 
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">Open conversations</h2>
-          {agents.isPending && <Loading />}
-          {agents.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {errorMessage(agents.error)}
-            </p>
-          )}
-          {agents.data && openAgents.length === 0 && (
+          {openAgents === undefined && <AgentsLoading />}
+          {openAgents?.length === 0 && (
             <p className="text-sm text-muted-foreground">No open conversations.</p>
           )}
-          {openAgents.length > 0 && (
+          {openAgents !== undefined && openAgents.length > 0 && (
             <ul className="flex flex-col gap-2" aria-label="Open conversations">
               {openAgents.map((agent) => (
                 <li key={agent.id}>

@@ -9,7 +9,7 @@ import type { GitFileDiff, GitStatus } from "@pi-code/protocol";
 import { ApiError } from "../errors.ts";
 
 /** Git's well-known empty tree: the diff base of a repository without commits. */
-export const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /** Files larger than this are listed without a patch. */
 export const MAX_PATCH_BYTES = 1024 * 1024;
@@ -19,7 +19,7 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 /** Concurrent `git diff --no-index` runs for untracked files. */
 const UNTRACKED_CONCURRENCY = 8;
 
-export class GitError extends Error {
+class GitError extends Error {
   override name = "GitError";
   constructor(
     message: string,
@@ -40,7 +40,7 @@ interface GitResult {
  * Runs `git args` in `cwd`. Resolves for exit codes in `okCodes` (default `[0]`), rejects with
  * `GitError` otherwise, on timeout, or when the output exceeds `MAX_OUTPUT_BYTES`.
  */
-export function runGit(
+function runGit(
   cwd: string,
   args: readonly string[],
   opts: { okCodes?: readonly number[] } = {},
@@ -94,7 +94,7 @@ export function runGit(
 }
 
 /** The work tree's top-level directory, or `null` when `cwd` isn't inside a git work tree. */
-export async function gitTopLevel(cwd: string): Promise<string | null> {
+async function gitTopLevel(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
     const top = stdout.trim();

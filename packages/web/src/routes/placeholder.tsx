@@ -1,9 +1,19 @@
-import { Link } from "@tanstack/react-router";
-import { ChevronLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { HomeBackButton } from "@/components/home-back-button";
 
-/** Simple screen shell: back-to-Home button, title, content (defaults to "Coming soon."). */
+/** A screen's top bar, like the conversation header: full width, bottom border, 48px row. */
+export function ScreenHeader({ children }: { children: ReactNode }) {
+  return (
+    <header className="flex shrink-0 items-center border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
+      <div className="flex h-12 min-w-0 flex-1 items-center gap-1">{children}</div>
+    </header>
+  );
+}
+
+/**
+ * Simple screen shell: header with a back-to-Home button (phones only; desktop has the sidebar)
+ * and title, then content (defaults to "Coming soon.").
+ */
 export function PlaceholderScreen({
   title,
   back,
@@ -14,18 +24,14 @@ export function PlaceholderScreen({
   children?: ReactNode;
 }) {
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-2 pt-[env(safe-area-inset-top)]">
-      <header className="flex h-12 items-center gap-1">
-        {back ?? (
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/" aria-label="Home">
-              <ChevronLeftIcon />
-            </Link>
-          </Button>
-        )}
-        <h1 className="text-sm font-medium">{title}</h1>
-      </header>
-      <div className="px-2 text-sm text-muted-foreground">{children ?? "Coming soon."}</div>
+    <div className="flex min-h-dvh w-full flex-col">
+      <ScreenHeader>
+        {back ?? <HomeBackButton />}
+        <h1 className="truncate text-sm font-medium">{title}</h1>
+      </ScreenHeader>
+      <div className="mx-auto w-full max-w-2xl px-4 pt-4 text-sm text-muted-foreground">
+        {children ?? "Coming soon."}
+      </div>
     </div>
   );
 }

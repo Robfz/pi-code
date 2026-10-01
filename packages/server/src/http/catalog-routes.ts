@@ -7,8 +7,9 @@ export function catalogRoutes(catalog: SessionCatalog, home: string) {
   return new Hono()
     .get("/projects", async (c) => c.json({ projects: await catalog.projects() }, 200))
     .get("/sessions", async (c) => {
-      const cwd = c.req.query("cwd");
-      return c.json({ sessions: await catalog.sessions(cwd || undefined) }, 200);
+      const cwd = c.req.query("cwd") || undefined;
+      const q = c.req.query("q") || undefined;
+      return c.json({ sessions: await catalog.sessions({ cwd, q }) }, 200);
     })
     .get("/fs/dirs", async (c) => {
       const dirs = await listDirs(c.req.query("prefix") ?? "", {

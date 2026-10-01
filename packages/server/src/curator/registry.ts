@@ -1,10 +1,10 @@
 /** Registrations expire after this long unless the tool reports its curator again. */
-export const CURATOR_TTL_MS = 30 * 60 * 1000;
+const CURATOR_TTL_MS = 30 * 60 * 1000;
 
 /** Port of the dedicated HTTPS `tailscale serve` entry for the curator proxy. */
 export const CURATOR_PUBLIC_PORT = 8443;
 
-export interface CuratorTarget {
+interface CuratorTarget {
   port: number;
   agentId: string;
   toolCallId: string;
@@ -15,7 +15,7 @@ export interface CuratorTarget {
  * Tools whose `details.curatorUrl` is trusted: pi-web-access's `web_search` is the only tool
  * that starts a curator. Other tools could report any URL, which the proxy would then forward to.
  */
-export const CURATOR_TOOLS: ReadonlySet<string> = new Set(["web_search"]);
+const CURATOR_TOOLS: ReadonlySet<string> = new Set(["web_search"]);
 
 /** The pipeline's view of the registry. */
 export interface CuratorHook {
@@ -35,7 +35,7 @@ export interface CuratorHook {
   releaseAgent(agentId: string): void;
 }
 
-export interface CuratorRegistryOptions {
+interface CuratorRegistryOptions {
   /** Tailnet hostname. */
   hostname: string;
   /** The curator proxy listener's local port (used in dev, when the hostname is `localhost`). */

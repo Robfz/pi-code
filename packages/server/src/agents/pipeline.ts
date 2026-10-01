@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
   type AgentInfo,
   type AgentMessage,
@@ -27,11 +29,12 @@ import {
 import { type CuratorHook, curatorUrlOf } from "../curator/registry.ts";
 import { ApiError, isApiError } from "../errors.ts";
 import { gitStatus } from "../git/git.ts";
+import { canonicalize } from "../paths.ts";
 import type { AgentHost, HostCommand } from "./agent-host.ts";
 import { EventLog } from "./event-log.ts";
 
 /** What the pipeline needs from its agent (implemented by `Agent`). */
-export interface PipelineAgent {
+interface PipelineAgent {
   readonly id: string;
   readonly cwd: string;
   /** The current pi process (throws while there is none, see `hasHost`). */
@@ -53,7 +56,10 @@ export type AttentionTrigger =
 export interface PipelineOptions {
   /** Events kept for SSE replay. Default 10,000. */
   eventLogCapacity?: number;
-  /** Called after every published `agent_status`. */
+  /**
+   * Called with the agent's info after every published `agent_status`, and after any other
+   * published event that changes its `isStreaming`, `sessionName`, `sessionFile` or `sessionId`.
+   */
   onAgentInfo?: (info: AgentInfo) => void;
   /** Called when an agent starts needing attention. */
   onTrigger?: (trigger: AttentionTrigger) => void;
@@ -77,7 +83,7 @@ export const SESSION_CHANGING_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Commands after which `get_state` is refreshed and published as `state`. */
-export const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
+const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
   "set_model",
   "cycle_model",
   "set_thinking_level",
@@ -90,13 +96,22 @@ export const STATE_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Query commands: no side effects, so no entry sync after them. */
-export function isQueryCommand(type: string): boolean {
+function isQueryCommand(type: string): boolean {
   return type.startsWith("get_");
 }
 
 /** Key matching a message entry to its `message_end` event. */
 function messageKey(message: Pick<AgentMessage, "role" | "timestamp">): string {
   return `${message.role}:${String(message.timestamp)}`;
+}
+
+function sessionFieldsDiffer(a: AgentInfo, b: AgentInfo): boolean {
+  return (
+    a.isStreaming !== b.isStreaming ||
+    a.sessionName !== b.sessionName ||
+    a.sessionFile !== b.sessionFile ||
+    a.sessionId !== b.sessionId
+  );
 }
 
 function isCancelled(data: unknown): boolean {
@@ -144,6 +159,8 @@ export class AgentPipeline {
    */
   private freshUi: { statuses: Set<string>; widgets: Set<string> } | undefined;
   private clearIds = 0;
+  /** The info last passed to `onAgentInfo`. */
+  private reported: AgentInfo;
   private gitTimer: NodeJS.Timeout | undefined;
   private gitRefreshing = false;
   private gitAgain = false;
@@ -153,8 +170,9 @@ export class AgentPipeline {
     this.agent = agent;
     this.opts = opts;
     this.log = new EventLog(opts.eventLogCapacity);
+    this.reported = agent.info();
     this.caches = {
-      agent: agent.info(),
+      agent: this.reported,
       state: null,
       transcript: { entries: [], leafId: null },
       stats: null,
@@ -211,13 +229,19 @@ export class AgentPipeline {
     return run;
   }
 
-  /** Synchronous publish: seq, live state, caches, log, fan-out. */
+  /** Synchronous publish: seq, live state, caches, log, fan-out, info report. */
   publish(event: ServerEvent): void {
+    const state = this.caches.state;
     this.live = reduceLive(this.live, event);
     this.caches = applyServerEventToCaches(this.caches, event);
     this.agent.state = this.caches.state;
     if (event.type === "transcript_reset") this.unsyncedMessages.clear();
     this.log.append(event);
+    // Besides the status (reported by `publishStatus`), those fields derive from the state.
+    if (this.caches.state !== state) {
+      const info = this.agent.info();
+      if (sessionFieldsDiffer(info, this.reported)) this.reportInfo(info);
+    }
   }
 
   private publishAll(events: readonly ServerEvent[]): void {
@@ -228,6 +252,11 @@ export class AgentPipeline {
   publishStatus(): void {
     const info = this.agent.info();
     this.publish({ type: "agent_status", agent: info });
+    this.reportInfo(info);
+  }
+
+  private reportInfo(info: AgentInfo): void {
+    this.reported = info;
     this.opts.onAgentInfo?.(info);
   }
 
@@ -241,6 +270,16 @@ export class AgentPipeline {
     if (this.agent.attention === attention) return;
     this.agent.attention = attention;
     this.publishStatus();
+  }
+
+  /**
+   * `POST /ack`: clears `finished` / `failed`. `input` stays while a dialog or the trust
+   * prompt is pending; it clears when those are answered.
+   */
+  ack(): void {
+    const pending = this.live.dialogs.length > 0 || this.agent.status === "awaiting_trust";
+    if (this.agent.attention === "input" && pending) return;
+    this.setAttention("none");
   }
 
   // -------------------------------------------------------------------------
@@ -277,7 +316,7 @@ export class AgentPipeline {
   private async initialize(): Promise<void> {
     const host = this.agent.host;
     try {
-      const state = await host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(host);
       const transcript = await host.send<Transcript>({ type: "get_entries" });
       const stats = await host
         .send<SessionStats>({ type: "get_session_stats" })
@@ -728,7 +767,7 @@ export class AgentPipeline {
   private async resetTranscript(): Promise<ServerEvent[]> {
     try {
       const transcript = await this.agent.host.send<Transcript>({ type: "get_entries" });
-      const state = await this.agent.host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(this.agent.host);
       return [{ type: "transcript_reset", transcript, state }];
     } catch (e) {
       this.warnUnlessExited("transcript reset", e);
@@ -757,12 +796,27 @@ export class AgentPipeline {
 
   private async fetchState(): Promise<ServerEvent[]> {
     try {
-      const state = await this.agent.host.send<RpcSessionState>({ type: "get_state" });
+      const state = await this.getState(this.agent.host);
       return [{ type: "state", state }];
     } catch (e) {
       this.warnUnlessExited("state refresh", e);
       return [];
     }
+  }
+
+  /**
+   * `get_state` with `sessionFile` canonicalized, matching the catalog's paths (pi reports a new
+   * session's path as it built it, e.g. through a symlinked agent dir). A file that doesn't exist
+   * yet (pi writes new sessions lazily) is canonicalized through its directory.
+   */
+  private async getState(host: AgentHost): Promise<RpcSessionState> {
+    const state = await host.send<RpcSessionState>({ type: "get_state" });
+    const raw = state.sessionFile;
+    if (raw === undefined) return state;
+    const sessionFile = existsSync(raw)
+      ? await canonicalize(raw)
+      : join(await canonicalize(dirname(raw)), basename(raw));
+    return { ...state, sessionFile };
   }
 
   private warnUnlessExited(what: string, e: unknown): void {

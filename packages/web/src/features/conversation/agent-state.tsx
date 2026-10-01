@@ -12,15 +12,21 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { closeAgent, errorMessage, restartAgent, trustAgent } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { selectAgent } from "@/store/selectors";
+import { ScopedOverlay } from "./scoped-overlay";
 
-/** Project-trust prompt for an `awaiting_trust` agent → `POST /trust`. */
-export function TrustSheet() {
+/**
+ * Project-trust prompt for an `awaiting_trust` agent → `POST /trust`. Only its buttons answer:
+ * Escape and taps outside don't. `container` scopes it as in `DialogHost` (non-modal, overlay
+ * included, so the sidebar stays usable); `null` shows nothing.
+ */
+export function TrustSheet({ container }: { container?: HTMLElement | null }) {
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
   const [busy, setBusy] = useState(false);
-  if (!hydrated || agent.status !== "awaiting_trust") return null;
+  if (!hydrated || agent.status !== "awaiting_trust" || container === null) return null;
   const cwd = agent.trustPrompt?.cwd ?? agent.cwd;
 
   async function answer(trusted: boolean) {
@@ -36,12 +42,15 @@ export function TrustSheet() {
   }
 
   return (
-    <Sheet open>
+    <Sheet open modal={container === undefined}>
+      <ScopedOverlay container={container} />
       <SheetContent
         side="bottom"
+        container={container}
+        loopFocus={container === undefined}
         showCloseButton={false}
         data-testid="trust-sheet"
-        className="rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
+        className={cn("rounded-t-2xl pb-[env(safe-area-inset-bottom)]", container && "absolute")}
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
@@ -80,23 +89,7 @@ export function AgentStatePanel() {
   const navigate = useNavigate();
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
-  const loadError = useConversation((s) => s.loadError);
   const [busy, setBusy] = useState(false);
-
-  if (loadError) {
-    return (
-      <div role="alert" className="flex flex-col items-center gap-3 py-12 text-center text-sm">
-        <p className="text-muted-foreground">
-          {loadError.code === "agent_not_found"
-            ? "This conversation is closed."
-            : loadError.message}
-        </p>
-        <Button variant="outline" onClick={() => void navigate({ to: "/" })}>
-          Back to home
-        </Button>
-      </div>
-    );
-  }
 
   if (!hydrated || agent.status === "starting") {
     return (

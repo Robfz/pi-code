@@ -4,7 +4,7 @@ import { API_ERROR_STATUS, type ApiErrorCode } from "@pi-code/protocol";
  * Contract error codes plus two server-internal ones: `not_found` (no such route) and
  * `internal` (unexpected failures).
  */
-export type ErrorCode = ApiErrorCode | "not_found" | "internal";
+type ErrorCode = ApiErrorCode | "not_found" | "internal";
 
 export interface ErrorEnvelope {
   error: { code: ErrorCode; message: string };

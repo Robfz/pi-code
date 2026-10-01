@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!docs", "!MAP.md", "!**/routeTree.gen.ts"]
+    "includes": ["**", "!docs", "!maps", "!**/routeTree.gen.ts"]
   },
   "formatter": {
     "enabled": true,

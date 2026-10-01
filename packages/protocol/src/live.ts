@@ -202,7 +202,7 @@ export function reduceLive(state: LiveState, event: ServerEvent): LiveState {
       // pi is gone: nothing in flight will finish. Dialogs stay until `ui_resolved`.
       return event.agent.status === "exited" ? settle(state) : state;
     default:
-      // state, stats, git_status, resync, and unknown types don't touch live state.
+      // state, stats, git_status, and unknown types don't touch live state.
       return state;
   }
 }

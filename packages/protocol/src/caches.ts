@@ -27,7 +27,7 @@ export interface SessionCaches {
  *   `agent_settled` (`isStreaming`, also on `agent`), `compaction_start` / `compaction_end`
  *   (`isCompacting`), `queue_update` (`pendingMessageCount`).
  *
- * Everything else (live-only events, `resync`, unknown types) returns `caches` unchanged.
+ * Everything else (live-only events, unknown types) returns `caches` unchanged.
  * Server and client both run it after `reduceLive` for every published event.
  */
 export function applyServerEventToCaches<C extends SessionCaches>(

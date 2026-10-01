@@ -5,10 +5,11 @@ Hono on Node (latest LTS via mise). One process, started by hand. Source: `packa
 ```
 src/
   main.ts            config, listeners, graceful shutdown
-  http/              Hono app: middleware (host/origin guards), routes, SSE, static SPA
-  agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log
-  catalog/           projects, sessions, path autocomplete
-  git/               diff + status
+  http/              Hono app: middleware (host/origin guards), routes, the live stream, static SPA
+  agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log, idle sweep
+  live/              StreamHub: shared inputs of the live stream
+  catalog/           projects, sessions, path autocomplete, session watcher
+  git/               diff + status, folder branches
   push/              VAPID keys, subscriptions, triggers
   curator/           curator proxy listener
   store/             small JSON files in the data dir
@@ -50,7 +51,7 @@ Responsibilities:
 - **Correlation.** Every command gets an `id`; a map of pending promises resolves on the matching `response`. `extension_ui_response` is the exception: pi sends no response, so it is written without a pending entry. `parse` errors (no id) are logged.
 - **Routing.** stdout records are `response` → pending map; `extension_ui_request` → pipeline; everything else is a session event → pipeline.
 - **stderr** is diagnostics only: kept in a bounded tail (last 200 lines) exposed on crash.
-- **Lifecycle.** `status: awaiting_trust | starting | ready | exited`. The agent is registered before spawn; its pipeline runs from spawn; it becomes ready after the first successful `get_state`. On unexpected exit, the agent becomes `exited` with `exitCode` and stderr tail; it stays listed so the client can restart it (respawn with `--session <last file>`). Closing: end stdin (pi disposes and exits), SIGTERM after 5 s, SIGKILL after 10 s.
+- **Lifecycle.** `status: awaiting_trust | starting | ready | exited`. The agent is registered before spawn; its pipeline runs from spawn; it becomes ready after the first successful `get_state`. On unexpected exit, the agent becomes `exited` with `exitCode` and stderr tail; it stays listed so the client can restart it (respawn with `--session <last file>`) until it is closed (by the user or the idle sweep). Closing: end stdin (pi disposes and exits), SIGTERM after 5 s, SIGKILL after 10 s.
 
 The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi loads TypeScript extensions directly).
 
@@ -59,7 +60,8 @@ The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi 
 - `agents: Map<agentId, Agent>` and `owners: Map<sessionFile, agentId>`.
 - `open({ cwd })` → new agent, new session.
 - `open({ sessionFile })` → if already owned, return the existing agent; else spawn with `--session` and `cwd` read from the session header.
-- `close(agentId)` → stop process, drop ownership.
+- `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id` and the idle sweep).
+- Emits `agent` on every `AgentInfo` change and `closed` when an agent is removed; the StreamHub turns them into frames.
 - After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
 - `cwd` must resolve inside `$HOME` (realpath), else `400`.
 
@@ -83,17 +85,25 @@ All records from one agent flow through a single **sequential** async queue, so 
    - `agent_settled`, dialog `extension_ui_request`, run failure → notification triggers (see Push).
    - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`.
    - `bash` completion → emit `bash_done`, then sync entries (the `bashExecution` entry has no `message_end`).
-2. **Publish**, synchronously per event: assign the next `seq`, reduce into `LiveState` with the shared reducer (`@pi-code/protocol`), update the cached transcript/state, append to the event log, fan out to SSE subscribers. Nothing awaits inside this step, so state and `seq` always advance together.
+2. **Publish**, synchronously per event: assign the next `seq`, reduce into `LiveState` with the shared reducer (`@pi-code/protocol`), update the cached transcript/state, append to the event log, fan out to the log's subscribers (live-stream connections that opened the agent). Nothing awaits inside this step, so state and `seq` always advance together.
 
 `message_update` deltas are forwarded as-is (pi already strips cumulative partials on the wire).
 
 ### Event log
 
-A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` is per-agent and monotonic for the agent's lifetime. Replay from `Last-Event-ID` succeeds if `seq + 1` is still in the buffer; otherwise the server emits `resync`.
+A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` is per-agent and monotonic for the agent's lifetime. Replay from a live-stream cursor (from `open=` or `Last-Event-ID`) succeeds if `seq + 1` is still in the buffer (or the cursor is caught up); otherwise that agent gets a `resync` frame. When the agent is removed, the log closes and its subscribers stop.
 
 ### Snapshot
 
-`GET /api/agents/:id/snapshot` returns `{ agent, state, transcript, live, seq }` where `transcript` is the server's cached entry list (kept current by the pipeline), `live` the reducer state, and `seq` the last event's seq. Built synchronously from memory, so it always reflects exactly the events up to `seq`.
+`GET /api/agents/:id/snapshot` returns `{ agent, state, transcript, live, seq }` where `transcript` is the server's cached entry list (kept current by the pipeline), `live` the reducer state, and `seq` the last event's seq. Built synchronously from memory, so it always reflects exactly the events up to `seq`. It has no side effects; in particular it leaves attention as it is.
+
+## Live stream
+
+`GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, writes `retry:`, the baseline, then each opened agent's replay (or `resync`) as separate writes, and drains a per-connection frame queue of live frames to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the 7-day catalog window and the folder branch map, kept in memory so a baseline needs no I/O.
+
+- **Session watcher** (`catalog/watcher.ts`): `fs.watch` on pi's sessions dir, recursive, TUI sessions included. Changes trigger a rescan (trailing throttle, 500 ms); the hub broadcasts `catalog` when the window differs.
+- **Folder branches** (`git/branches.ts`): for each cwd with a live agent, the git dir is resolved once (worktree `.git` files included), watched non-recursively, and `HEAD` re-read on every event; changes go out as `branch` frames.
+- **Idle sweep** (`agents/idle-sweep.ts`): hourly, recomputes the catalog window and closes every non-streaming agent, exited included, whose activity (the later of `startedAt` and its session's last entry) is at least 7 days old, pending dialogs included. The 7 days are `CATALOG_WINDOW_MS` (`live/stream-hub.ts`), the constant the catalog window uses too.
 
 ### Commands
 
@@ -113,6 +123,7 @@ Dialog answers go through `POST /api/agents/:id/ui-responses`, written to pi as 
 Read-only over `~/.pi/agent/sessions`, parsing the documented session format.
 
 - **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached by `(path, mtime, size)`.
+- **Search** — `GET /api/sessions?q=`: case-insensitive substring match on the session's `cwd` path and name, over all sessions whatever their age.
 - **Projects** = distinct header `cwd`s, sorted by most recent session activity, with session counts. Directory names are not trusted (lossy); only header `cwd`s are used.
 - **Path autocomplete** — `GET /api/fs/dirs?prefix=~/De`: expands `~`, lists directories only, requires the realpath to stay inside `$HOME`, hides dot-directories unless the typed segment starts with `.`, returns at most 50 entries, and flags which are git repos and which have pi sessions.
 
@@ -127,7 +138,7 @@ Runs `git` with `cwd` = the agent's cwd, 10 s timeout, no shell.
 
 - VAPID keys generated on first run, stored in `DATA_DIR/vapid.json`. Subscriptions in `DATA_DIR/push-subscriptions.json`, keyed by endpoint; removed on `404/410` from the push service.
 - Uses the `web-push` library; TTL 1 h; urgency `high` for dialogs, `normal` otherwise.
-- **Attention.** Each agent has `attention: none | finished | failed | input`. Set by the triggers below; cleared when a client fetches that agent's snapshot or answers the dialog. The push payload carries the total count of agents needing attention for the badge.
+- **Attention.** Each agent has `attention: none | finished | failed | input`. Set by the triggers below; `POST /ack` (the web client acks the conversation on screen) clears `finished` and `failed`, but leaves `input` while a dialog or the trust prompt is pending; `input` clears when the last pending dialog is answered or times out, the trust prompt is answered, or pi exits. Fetching a snapshot leaves it unchanged. The push payload carries the total count of agents needing attention for the badge.
 - **Triggers:**
 
 | Trigger | Detection | Payload |
@@ -153,4 +164,4 @@ Serves `packages/web/dist` with long-cache hashed assets, `index.html` fallback 
 
 ## Shutdown
 
-SIGINT/SIGTERM → stop accepting requests → close every agent (end stdin, same escalation as `close`) in parallel → exit.
+SIGINT/SIGTERM → stop accepting requests, the session watcher and the idle sweep → close every agent (end stdin, same escalation as `close`) in parallel → close the branch watches and remaining connections → exit.

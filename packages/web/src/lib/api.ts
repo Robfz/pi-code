@@ -8,8 +8,8 @@ import type {
   AgentId,
   AgentInfo,
   AgentResponse,
-  AgentsResponse,
   AllowedRpcCommandType,
+  CursorList,
   DirSuggestion,
   DirsResponse,
   GitDiffResponse,
@@ -105,10 +105,6 @@ export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("GET", "/api/health");
 }
 
-export async function listAgents(): Promise<AgentInfo[]> {
-  return (await request<AgentsResponse>("GET", "/api/agents")).agents;
-}
-
 export async function openAgent(body: OpenAgentBody): Promise<AgentInfo> {
   return (await request<AgentResponse>("POST", "/api/agents", body)).agent;
 }
@@ -155,9 +151,10 @@ export async function getGitDiff(id: AgentId): Promise<GitFileDiff[]> {
   return (await request<GitDiffResponse>("GET", agentPath(id, "/git/diff"))).files;
 }
 
-/** SSE URL; `since` is the snapshot's `seq` on the first connect. */
-export function eventsUrl(id: AgentId, since: number): string {
-  return new URL(agentPath(id, `/events?since=${since}`), origin()).toString();
+/** `GET /api/stream` URL opening each conversation in `cursors` (status and catalog only when empty). */
+export function streamUrl(cursors: CursorList): string {
+  const query = cursors === "" ? "" : `?open=${encodeURIComponent(cursors)}`;
+  return new URL(`/api/stream${query}`, origin()).toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +168,12 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 export async function listSessions(cwd?: string): Promise<SessionSummary[]> {
   const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
   return (await request<SessionsResponse>("GET", `/api/sessions${query}`)).sessions;
+}
+
+/** Sessions of any age whose cwd path or name contains `q` (case-insensitive), most recent first. */
+export async function searchSessions(q: string): Promise<SessionSummary[]> {
+  return (await request<SessionsResponse>("GET", `/api/sessions?q=${encodeURIComponent(q)}`))
+    .sessions;
 }
 
 /** Directory autocomplete under `$HOME` (`prefix` may start with `~`). */

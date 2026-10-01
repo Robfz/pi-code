@@ -1,15 +1,19 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "next-themes";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { stubElementWidth, stubMatchMedia } from "@/test/dom-stubs";
 import { fixtureEditPatch } from "@/tools/testing";
-import { DiffViewer, WIDE_QUERY } from "./diff-viewer";
-import { loadedDiff, stubCanvas, stubMatchMedia } from "./testing";
+import { DiffViewer } from "./diff-viewer";
+import { loadedDiff, stubCanvas } from "./testing";
 
 const patch = fixtureEditPatch;
 
 beforeAll(stubCanvas);
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("DiffViewer", () => {
   it("renders the fixture patch unified on narrow screens", async () => {
@@ -22,11 +26,30 @@ describe("DiffViewer", () => {
     expect(container.querySelector('[data-theme="light"]')).not.toBeNull();
   });
 
-  it("switches to split view on wide screens", async () => {
-    stubMatchMedia((q) => q === WIDE_QUERY);
+  it("splits from 1024px of its own width, even on a narrow viewport", async () => {
+    stubMatchMedia(() => false);
+    stubElementWidth(1024);
     const { container } = render(<DiffViewer patch={patch()} />);
     expect(await loadedDiff()).toHaveAttribute("data-mode", "split");
     expect(container.querySelector(".split-diff-view")).not.toBeNull();
+  });
+
+  it("stays unified at 1023px of its own width, even on a wide viewport", async () => {
+    stubMatchMedia(() => true);
+    stubElementWidth(1023);
+    const { container } = render(<DiffViewer patch={patch()} />);
+    expect(await loadedDiff()).toHaveAttribute("data-mode", "unified");
+    expect(container.querySelector(".unified-diff-view")).not.toBeNull();
+  });
+
+  it("follows its width as it resizes", async () => {
+    const width = stubElementWidth(800);
+    render(<DiffViewer patch={patch()} />);
+    expect(await loadedDiff()).toHaveAttribute("data-mode", "unified");
+    act(() => width.resize(1200));
+    expect(await loadedDiff()).toHaveAttribute("data-mode", "split");
+    act(() => width.resize(1000));
+    expect(await loadedDiff()).toHaveAttribute("data-mode", "unified");
   });
 
   it("follows the dark theme", async () => {

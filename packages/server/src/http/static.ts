@@ -8,7 +8,7 @@ const NO_CACHE_FILES = new Set(["index.html", "sw.js", "manifest.webmanifest"]);
 const IMMUTABLE = "public, max-age=31536000, immutable";
 
 /** Cache policy for a file path relative to the dist dir (POSIX separators). */
-export function cacheControlFor(relPath: string): string {
+function cacheControlFor(relPath: string): string {
   if (relPath.startsWith("assets/")) return IMMUTABLE; // content-hashed by Vite
   if (NO_CACHE_FILES.has(relPath)) return "no-cache";
   return "public, max-age=3600";

@@ -3,8 +3,9 @@
  * trust, so the server decides before spawning pi whether to ask the user.
  */
 import { existsSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { canonicalize } from "../paths.ts";
 
 /**
  * Entries under `<cwd>/.pi` that make pi ask for project trust. Mirrors
@@ -20,16 +21,6 @@ export const TRUST_REQUIRING_PROJECT_RESOURCES = [
   "SYSTEM.md",
   "APPEND_SYSTEM.md",
 ] as const;
-
-/** pi's `canonicalizePath`: the realpath, or the path itself when it can't be resolved. */
-async function canonicalize(path: string): Promise<string> {
-  const resolved = resolve(path);
-  try {
-    return await realpath(resolved);
-  } catch {
-    return resolved;
-  }
-}
 
 /**
  * Whether `cwd` has project-local resources gated by project trust: an entry of
