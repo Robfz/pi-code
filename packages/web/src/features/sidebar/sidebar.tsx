@@ -292,7 +292,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
 
   return (
     <nav aria-label="Conversations" className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-col gap-2 border-b p-2">
+      <div className="flex flex-col gap-3 border-b p-4">
         <div className="flex items-center gap-1">
           {action}
           <Button className="flex-1" onClick={() => setPickerOpen(true)}>
@@ -334,7 +334,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
       </div>
       <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} onOpened={select} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {!loaded && (
           <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
             <LoaderIcon className="size-4 animate-spin" /> Loading…
@@ -422,7 +422,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
         </DialogContent>
       </Dialog>
 
-      <div className="flex items-center border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="flex items-center border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <Button variant="ghost" size="icon" asChild>
           <Link to="/settings" aria-label="Settings" onClick={select}>
             <SettingsIcon />

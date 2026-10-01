@@ -83,7 +83,8 @@ const itemButton =
 /**
  * Mirrors the TUI status bar: folder · branch + dirty dot · context bar · session name ·
  * model + thinking level · cost, then extension `setStatus` chips. Model, thinking and
- * context/cost open their pickers / the stats sheet.
+ * context/cost open their pickers / the stats sheet. On desktop the row doesn't wrap and context
+ * through cost sit on the right; visual order only, so focus order matches the DOM.
  */
 export function StatusBar() {
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
@@ -101,7 +102,7 @@ export function StatusBar() {
     <div className="flex flex-col gap-1">
       <div
         data-testid="status-bar"
-        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
+        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground lg:flex-nowrap"
       >
         <RunIndicator />
         {cwd !== "" && (
@@ -125,7 +126,7 @@ export function StatusBar() {
         )}
         <button
           type="button"
-          className={itemButton}
+          className={cn(itemButton, "shrink-0 lg:order-1 lg:ml-auto")}
           aria-label="Session stats"
           disabled={!ready}
           onClick={() => openSheet("stats")}
@@ -140,7 +141,7 @@ export function StatusBar() {
         {modelId && (
           <button
             type="button"
-            className={cn(itemButton, "font-mono")}
+            className={cn(itemButton, "font-mono lg:order-1")}
             aria-label={`Model: ${modelId}`}
             disabled={!ready}
             onClick={() => openSheet("model")}
@@ -151,7 +152,7 @@ export function StatusBar() {
         {thinking && (reasoning || thinking !== "off") && (
           <button
             type="button"
-            className={itemButton}
+            className={cn(itemButton, "shrink-0 lg:order-1")}
             aria-label={`Thinking: ${thinking}`}
             disabled={!ready}
             onClick={() => openSheet("thinking")}
@@ -162,7 +163,7 @@ export function StatusBar() {
         {cost !== undefined && (
           <button
             type="button"
-            className={cn(itemButton, "tabular-nums")}
+            className={cn(itemButton, "shrink-0 tabular-nums lg:order-1")}
             aria-label={`Cost ${formatCost(cost)}`}
             disabled={!ready}
             onClick={() => openSheet("stats")}

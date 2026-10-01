@@ -51,7 +51,7 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   return (
     <header
       inert={inert}
-      className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur"
+      className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur lg:px-32"
     >
       <div className="flex h-12 min-w-0 flex-1 items-center gap-1">
         <HomeBackButton />

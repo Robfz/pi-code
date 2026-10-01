@@ -41,7 +41,7 @@ export function ConversationScreen() {
         <div
           ref={contentRef}
           data-testid="transcript-column"
-          className={cn(column, "gap-4 px-3 py-4")}
+          className={cn(column, "gap-4 px-3 py-4 lg:px-32 lg:py-8")}
         >
           <Transcript />
           <LiveSection />
@@ -51,7 +51,10 @@ export function ConversationScreen() {
       <div
         data-testid="composer-column"
         inert={inert}
-        className={cn(column, "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]")}
+        className={cn(
+          column,
+          "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:px-32",
+        )}
       >
         <QueueDisplay />
         <Widgets placement="aboveEditor" />
