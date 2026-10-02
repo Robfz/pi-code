@@ -1,16 +1,22 @@
 /**
- * Sidebar rows and groups (`docs/design/05-desktop.md`, "Sidebar"): every agent in the registry
- * plus the sessions no agent holds, grouped by cwd, most recent first.
+ * Sidebar rows and groups (`docs/design/05-desktop.md`, "Sidebar"; `06-worktrees.md`): every agent
+ * in the registry plus the sessions no agent holds, grouped by `groupListing`, most recent first.
  */
 
-import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
-import { baseName } from "@/lib/content";
+import type { AgentInfo, RepoLayout, SessionSummary } from "@pi-code/protocol";
+import {
+  agentLayout,
+  epochMs,
+  groupListing,
+  type ListingGroup,
+} from "@/features/catalog/listing-groups";
 
 export interface SidebarRow {
   /** Agent id, or the session file for session rows. */
   key: string;
   title: string;
   cwd: string;
+  layout?: RepoLayout;
   /** Epoch ms: the session's `updatedAt`; for agents, the later of that and `startedAt`. */
   activity: number;
   /** Set on agent rows (exited agents included). */
@@ -19,14 +25,7 @@ export interface SidebarRow {
   sessionFile?: string;
 }
 
-export interface SidebarGroup {
-  cwd: string;
-  /** Folder basename, with the parent's basename prepended when another group shares it. */
-  label: string;
-  /** The folder's branch, shown only while it has a live agent. */
-  branch?: string;
-  rows: SidebarRow[];
-}
+export type SidebarGroup = ListingGroup<SidebarRow>;
 
 /** The pi process runs (exited agents aren't live). */
 export function isLive(agent: AgentInfo): boolean {
@@ -39,20 +38,20 @@ export function agentMatches(row: Pick<SidebarRow, "title" | "cwd">, query: stri
   return row.title.toLowerCase().includes(q) || row.cwd.toLowerCase().includes(q);
 }
 
-const time = (iso: string | undefined) => {
-  const ms = iso === undefined ? Number.NaN : Date.parse(iso);
-  return Number.isNaN(ms) ? 0 : ms;
-};
-
-function parentName(cwd: string): string {
-  const trimmed = cwd.replace(/\/+$/, "");
-  return baseName(trimmed.slice(0, trimmed.lastIndexOf("/")) || "/");
+/** The folder's branch, while one of its rows is a live agent. */
+export function liveBranch(
+  branches: Record<string, string>,
+  cwd: string,
+  rows: readonly SidebarRow[],
+): string | undefined {
+  return rows.some((row) => row.agent !== undefined && isLive(row.agent))
+    ? branches[cwd]
+    : undefined;
 }
 
 export function buildSidebarGroups({
   agents,
   sessions,
-  branches,
   known = sessions,
   query = "",
 }: {
@@ -60,8 +59,7 @@ export function buildSidebarGroups({
   agents: AgentInfo[];
   /** Session rows' source (the 7-day window, or search results). */
   sessions: SessionSummary[];
-  branches: Record<string, string>;
-  /** Sessions to take agent titles and activity from. */
+  /** Sessions to take agent titles, activity and layout from. */
   known?: SessionSummary[];
   /** When set, only agent rows that `agentMatches` it are shown. */
   query?: string;
@@ -72,11 +70,13 @@ export function buildSidebarGroups({
 
   const agentRows: SidebarRow[] = agents.map((agent) => {
     const session = agent.sessionFile ? byFile.get(agent.sessionFile) : undefined;
+    const layout = agentLayout(agent, byFile);
     return {
       key: agent.id,
       title: agent.sessionName ?? session?.name ?? session?.firstMessage ?? "New conversation",
       cwd: agent.cwd,
-      activity: Math.max(time(agent.startedAt), time(session?.updatedAt)),
+      ...(layout ? { layout } : {}),
+      activity: Math.max(epochMs(agent.startedAt), epochMs(session?.updatedAt)),
       agent,
       ...(agent.sessionFile ? { sessionFile: agent.sessionFile } : {}),
     };
@@ -88,33 +88,15 @@ export function buildSidebarGroups({
       key: session.file,
       title: session.name ?? session.firstMessage ?? "New conversation",
       cwd: session.cwd,
-      activity: time(session.updatedAt),
+      ...(session.layout ? { layout: session.layout } : {}),
+      activity: epochMs(session.updatedAt),
       sessionFile: session.file,
     });
   }
 
-  const byCwd = new Map<string, SidebarRow[]>();
-  for (const row of rows.sort((a, b) => b.activity - a.activity)) {
-    const group = byCwd.get(row.cwd);
-    if (group) group.push(row);
-    else byCwd.set(row.cwd, [row]);
-  }
-
-  const basenameCount = new Map<string, number>();
-  for (const cwd of byCwd.keys()) {
-    basenameCount.set(baseName(cwd), (basenameCount.get(baseName(cwd)) ?? 0) + 1);
-  }
-
-  // Map insertion order follows the rows' order: groups come most recent first.
-  return [...byCwd].map(([cwd, groupRows]) => {
-    const name = baseName(cwd);
-    const branch = branches[cwd];
-    const live = groupRows.some((row) => row.agent !== undefined && isLive(row.agent));
-    return {
-      cwd,
-      label: (basenameCount.get(name) ?? 0) > 1 ? `${parentName(cwd)}/${name}` : name,
-      ...(live && branch !== undefined ? { branch } : {}),
-      rows: groupRows,
-    };
+  return groupListing(rows, {
+    cwd: (row) => row.cwd,
+    layout: (row) => row.layout,
+    activity: (row) => row.activity,
   });
 }

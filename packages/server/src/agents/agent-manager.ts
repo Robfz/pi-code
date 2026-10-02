@@ -8,9 +8,11 @@ import type {
   AgentStatus,
   Attention,
   JsonAgentSessionEvent,
+  RepoLayout,
   RpcExtensionUIRequest,
   RpcSessionState,
 } from "@pi-code/protocol";
+import { layoutOf } from "../catalog/layout.ts";
 import { readSessionHeader } from "../catalog/sessions.ts";
 import { ApiError } from "../errors.ts";
 import { isInside } from "../paths.ts";
@@ -86,6 +88,8 @@ export function piCommand(piBin: string, extensionPath: string): (req: SpawnRequ
 export class Agent {
   readonly id: AgentId;
   readonly cwd: string;
+  /** The cwd's place in a `<repo>/main` layout, classified at creation. */
+  readonly layout: RepoLayout | undefined;
   /** Creation time, reset by `restart`: where the idle sweep's clock starts. */
   startedAt: string;
   status: AgentStatus = "starting";
@@ -107,6 +111,7 @@ export class Agent {
   ) {
     this.id = id;
     this.cwd = cwd;
+    this.layout = layoutOf(cwd);
     this.currentHost = host;
     this.startedAt = new Date().toISOString();
     this.pipeline = new AgentPipeline(this, pipelineOptions);
@@ -154,6 +159,7 @@ export class Agent {
       if (typeof exit?.code === "number") info.exitCode = exit.code;
       info.stderrTail = this.currentHost.stderrTail;
     }
+    if (this.layout !== undefined) info.layout = this.layout;
     return info;
   }
 }

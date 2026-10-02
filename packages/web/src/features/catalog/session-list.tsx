@@ -1,28 +1,32 @@
 import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
 import { CircleDotIcon, LoaderIcon, MessageSquareIcon } from "lucide-react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { baseName } from "@/lib/content";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { GroupedListing } from "./grouped-listing";
+import { epochMs, groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
+
+type OpenAgent = ReturnType<typeof useOpenAgent>;
 
 /**
  * Sessions as tappable rows: name (or first message), first message, project, last update,
- * "Open" when an agent already has it. Tapping resumes it through `POST /api/agents`.
+ * "Open" when an agent already has it. Tapping resumes it through `open`; a session whose folder
+ * is missing can't be resumed unless an agent still has it.
  */
-export function SessionList({
+function SessionRows({
   sessions,
-  showProject = true,
-  label = "Sessions",
-  onOpened,
+  open,
+  showProject,
+  label,
 }: {
   sessions: SessionSummary[];
-  showProject?: boolean;
+  open: OpenAgent;
+  showProject: boolean;
   label?: string;
-  /** Runs with the agent before navigating to it. */
-  onOpened?: (agent: AgentInfo) => void;
 }) {
-  const open = useOpenAgent(onOpened ? { onOpened } : {});
   const pendingFile = open.isPending ? (open.variables as { sessionFile?: string }) : undefined;
   return (
     <ul className="flex flex-col gap-2" aria-label={label}>
@@ -34,7 +38,9 @@ export function SessionList({
             <button
               type="button"
               data-testid="session-row"
-              disabled={open.isPending}
+              disabled={
+                (session.layout?.missing === true && session.ownedBy === undefined) || pending
+              }
               onClick={() => open.mutate({ sessionFile: session.file })}
               className="flex w-full min-w-0 items-start gap-3 rounded-xl border bg-card/40 px-3 py-2.5 text-left hover:bg-muted/50 disabled:opacity-70"
             >
@@ -83,5 +89,47 @@ export function SessionList({
         );
       })}
     </ul>
+  );
+}
+
+/** A flat list of sessions, each showing its project. */
+export function SessionList({
+  sessions,
+  label = "Sessions",
+  onOpened,
+}: {
+  sessions: SessionSummary[];
+  label?: string;
+  /** Runs with the agent before navigating to it. */
+  onOpened?: (agent: AgentInfo) => void;
+}) {
+  const open = useOpenAgent(onOpened ? { onOpened } : {});
+  return <SessionRows sessions={sessions} open={open} showProject label={label} />;
+}
+
+/** Sessions in `groupListing`'s groups, headed by their folder, repo or worktree. */
+export function GroupedSessionList({
+  sessions,
+  label = "Sessions",
+}: {
+  sessions: SessionSummary[];
+  label?: string;
+}) {
+  const open = useOpenAgent();
+  const groups = useMemo(
+    () =>
+      groupListing(sessions, {
+        cwd: (session) => session.cwd,
+        layout: (session) => session.layout,
+        activity: (session) => epochMs(session.updatedAt),
+      }),
+    [sessions],
+  );
+  return (
+    <GroupedListing
+      label={label}
+      groups={groups}
+      renderItems={(items) => <SessionRows sessions={items} open={open} showProject={false} />}
+    />
   );
 }

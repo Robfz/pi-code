@@ -8,8 +8,8 @@ src/
   http/              Hono app: middleware (host/origin guards), routes, the live stream, static SPA
   agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log, idle sweep
   live/              StreamHub: shared inputs of the live stream
-  catalog/           projects, sessions, path autocomplete, session watcher
-  git/               diff + status, folder branches
+  catalog/           projects, sessions, path autocomplete, session watcher, repo layouts, session deletion
+  git/               diff + status, folder branches, worktree create/remove
   push/              VAPID keys, subscriptions, triggers
   curator/           curator proxy listener
   store/             small JSON files in the data dir
@@ -24,7 +24,7 @@ src/
 | `PI_CODE_HOSTNAME` | required | Tailnet hostname, e.g. `mac.tail1234.ts.net`; used for the Host allowlist and origin checks |
 | `PI_CODE_PI_BIN` | `pi` on `PATH` | pi executable |
 | `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys, push subscriptions |
-| `PI_AGENT_DIR` | `~/.pi/agent` | Read-only: sessions, trust.json |
+| `PI_AGENT_DIR` | `~/.pi/agent` | Sessions, trust.json; read-only except worktree removal, which deletes the worktree's session files |
 
 Tailscale setup (documented in the README, not automated):
 
@@ -60,7 +60,8 @@ The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi 
 - `agents: Map<agentId, Agent>` and `owners: Map<sessionFile, agentId>`.
 - `open({ cwd })` → new agent, new session.
 - `open({ sessionFile })` → if already owned, return the existing agent; else spawn with `--session` and `cwd` read from the session header.
-- `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id` and the idle sweep).
+- `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id`, the idle sweep and worktree removal).
+- Each agent's cwd is classified once at creation (`layoutOf`); `AgentInfo.layout` carries it.
 - Emits `agent` on every `AgentInfo` change and `closed` when an agent is removed; the StreamHub turns them into frames.
 - After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
 - `cwd` must resolve inside `$HOME` (realpath), else `400`.
@@ -120,19 +121,27 @@ Dialog answers go through `POST /api/agents/:id/ui-responses`, written to pi as 
 
 ## Catalog
 
-Read-only over `~/.pi/agent/sessions`, parsing the documented session format.
+Read-only over `~/.pi/agent/sessions`, parsing the documented session format; worktree removal is the one write (see Worktrees).
 
 - **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached by `(path, mtime, size)`.
 - **Search** — `GET /api/sessions?q=`: case-insensitive substring match on the session's `cwd` path and name, over all sessions whatever their age.
 - **Projects** = distinct header `cwd`s, sorted by most recent session activity, with session counts. Directory names are not trusted (lossy); only header `cwd`s are used.
+- **Layout** (`catalog/layout.ts`, [`06-worktrees.md`](06-worktrees.md)): each scan classifies every distinct header `cwd` from files only (`layoutOf`: container, main checkout, linked or missing worktree of a `<repo>/main` layout) and sets `layout` on the session and project summaries.
 - **Path autocomplete** — `GET /api/fs/dirs?prefix=~/De`: expands `~`, lists directories only, requires the realpath to stay inside `$HOME`, hides dot-directories unless the typed segment starts with `.`, returns at most 50 entries, and flags which are git repos and which have pi sessions.
 
 ## Git
 
-Runs `git` with `cwd` = the agent's cwd, 10 s timeout, no shell.
+`runGit` (`git/git.ts`) runs `git` with no shell, `GIT_TERMINAL_PROMPT=0` and a 10 s timeout by default; diff and status run in the agent's cwd.
 
 - **Diff** (explicit action): `git diff HEAD --patch --no-color --no-ext-diff` plus untracked files from `git ls-files --others --exclude-standard`, each rendered as a new-file patch (`git diff --no-index /dev/null <file>`). Returns per-file `{ path, oldPath?, status, patch, binary }`. Files over 1 MB are listed without patch. Non-repo → `404 not_a_git_repo`. Empty repo (no HEAD) → diff against the empty tree.
 - **Status** (status bar): `git rev-parse --abbrev-ref HEAD` + `git status --porcelain=v1 -uno` → `{ branch, dirty }`.
+
+## Worktrees
+
+`POST` / `DELETE /api/worktrees` (`http/worktrees-routes.ts`, `git/worktrees.ts`; design in [`06-worktrees.md`](06-worktrees.md)) work only in `<repo>/main` layout repos, with paths canonicalized inside `$HOME` (`canonicalPath`, `paths.ts`).
+
+- **Create**: validate name, branch and base, refuse an existing folder or branch, `git fetch origin` (non-interactive ssh), `git worktree add -b <branch> <repo>/<name> <base>` (default `origin/main`, else `origin/master`), then `manager.open({ cwd })`. `fetch` and `worktree add` time out after 60 s.
+- **Remove**: without `force`, refuse uncommitted changes, untracked files or submodules (`worktree_dirty`); close the agents inside the worktree; `git worktree remove [--force]` from the main checkout (10 min timeout; a missing folder's record is pruned); delete the sessions whose header `cwd` is inside it (`trash`, else `unlink`; `catalog/session-files.ts`), the only write to pi's agent dir; refresh the catalog.
 
 ## Push
 

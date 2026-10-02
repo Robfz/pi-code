@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import type { StreamFrame } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/agent-manager.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
+import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import { StreamHub } from "./stream-hub.ts";
 
 const TEST_DATA = fileURLToPath(new URL("../../test-data", import.meta.url));
@@ -79,8 +80,8 @@ describe("StreamHub catalog refresh", () => {
     rmSync(agentDir, { recursive: true, force: true });
   });
 
-  function writeSession(id: string, updatedAt: string): void {
-    const header = { type: "session", version: 3, id, timestamp: updatedAt, cwd: "/p" };
+  function writeSession(id: string, updatedAt: string, cwd = "/p"): void {
+    const header = { type: "session", version: 3, id, timestamp: updatedAt, cwd };
     writeFileSync(
       join(agentDir, "sessions", "--p--", `${id}.jsonl`),
       `${JSON.stringify(header)}\n`,
@@ -118,6 +119,36 @@ describe("StreamHub catalog refresh", () => {
     await hub.refreshCatalog();
     expect(frames.at(-1)).toEqual({ type: "catalog", sessions: [hub.baseline().sessions[0]] });
     expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["b"]);
+    hub.close();
+  });
+
+  it("broadcasts catalog when a worktree turns missing", async () => {
+    vi.setSystemTime("2026-01-10T00:00:00.000Z");
+    const root = realpathSync(agentDir);
+    const { repo, main } = makeLayoutRepo(root, "r");
+    const wt = join(repo, "wt");
+    git(main, "worktree", "add", "-q", "-b", "wt", wt);
+    writeSession("w", "2026-01-09T00:00:00.000Z", wt);
+    const manager = new AgentManager({
+      home: root,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const hub = new StreamHub({ manager, catalog: new SessionCatalog({ agentDir }) });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+    expect(hub.baseline().sessions[0]?.layout).toEqual({ repo, role: "worktree" });
+
+    rmSync(wt, { recursive: true });
+    await hub.refreshCatalog();
+    expect(frames).toEqual([
+      {
+        type: "catalog",
+        sessions: [
+          expect.objectContaining({ id: "w", layout: { repo, role: "worktree", missing: true } }),
+        ],
+      },
+    ]);
     hub.close();
   });
 });

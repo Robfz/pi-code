@@ -40,7 +40,7 @@ export interface SessionWatcher {
 /**
  * Watches `sessionsDir` recursively and calls `onChange` through a trailing throttle on every
  * event, unfiltered. A missing dir logs a warning and returns `undefined`: pi-code never
- * creates it, since pi's agent dir is read-only to it.
+ * creates it, since pi's agent dir belongs to pi.
  */
 export function watchSessions(
   sessionsDir: string,

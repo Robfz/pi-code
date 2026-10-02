@@ -1,9 +1,20 @@
-import { type AgentInfo, initialLiveState, type SessionSummary } from "@pi-code/protocol";
-import { createMemoryHistory } from "@tanstack/react-router";
+import {
+  type AgentInfo,
+  initialLiveState,
+  type RepoLayout,
+  type SessionSummary,
+} from "@pi-code/protocol";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
+import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { createAppRouter } from "@/router";
@@ -11,7 +22,7 @@ import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendFrame } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
-import { RELATIVE_TIME_TICK_MS, SEARCH_DEBOUNCE_MS } from "./sidebar";
+import { RELATIVE_TIME_TICK_MS, SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
 
 function session(patch: Partial<SessionSummary> & { file: string }): SessionSummary {
   return {
@@ -502,5 +513,266 @@ describe("Sidebar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Sidebar with layout repos", () => {
+  const R = "/home/me/Dev/pi-code";
+  const layout = (role: RepoLayout["role"], missing = false): RepoLayout => ({
+    repo: R,
+    role,
+    ...(missing ? { missing: true as const } : {}),
+  });
+
+  /** A layout repo with every kind of folder, plus a plain clone. */
+  function layoutBaseline() {
+    baseline(
+      [
+        makeAgent({
+          id: "main-agent",
+          cwd: `${R}/main`,
+          sessionName: "Release checklist",
+          startedAt: recent(5),
+          layout: layout("main"),
+        }),
+        // A fresh worktree: no session file yet.
+        makeAgent({
+          id: "fresh-agent",
+          cwd: `${R}/fresh`,
+          startedAt: recent(1),
+          layout: layout("worktree"),
+        }),
+        makeAgent({
+          id: "gone-live",
+          cwd: `${R}/old-spike`,
+          sessionName: "Still running",
+          startedAt: recent(60 * 24 * 3),
+          layout: layout("worktree"),
+        }),
+        makeAgent({
+          id: "gone-exited",
+          cwd: `${R}/old-spike`,
+          sessionName: "Exited there",
+          status: "exited",
+          startedAt: recent(60 * 24 * 4),
+          layout: layout("worktree"),
+        }),
+      ],
+      [
+        session({
+          file: "c1",
+          cwd: R,
+          name: "Notes on the layout",
+          updatedAt: recent(60 * 24),
+          layout: layout("container"),
+        }),
+        session({
+          file: "w1",
+          cwd: `${R}/worktree-support`,
+          name: "Design worktrees",
+          updatedAt: recent(120),
+          layout: layout("worktree"),
+        }),
+        session({
+          file: "m1",
+          cwd: `${R}/old-spike`,
+          name: "Try the thing",
+          updatedAt: recent(60 * 24 * 3),
+          layout: layout("worktree", true),
+        }),
+        session({
+          file: "d1",
+          cwd: "/home/me/dotfiles",
+          name: "Dotfiles",
+          updatedAt: recent(60 * 24 * 5),
+        }),
+      ],
+      { [`${R}/main`]: "main", [`${R}/worktree-support`]: "wt", [`${R}/fresh`]: "fresh" },
+    );
+  }
+
+  const groupName = (group: HTMLElement) =>
+    document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent;
+  const repo = () => within(nav()).getByRole("group", { name: "pi-code" });
+  const worktree = (name: string) => within(repo()).getByRole("group", { name });
+  /** Rows directly in `group`, not in a group nested in it. */
+  const ownTitles = (group: HTMLElement) =>
+    within(group)
+      .getAllByTestId("sidebar-row")
+      .filter((li) => li.closest("[role=group]") === group)
+      .map((li) => within(li).getByTestId("sidebar-row-title").textContent);
+
+  it("nests checkouts in the repo group, the container's rows under its header", async () => {
+    await renderSidebar();
+    layoutBaseline();
+    await within(nav()).findByText("Release checklist");
+    const topLevel = within(nav())
+      .getAllByRole("group")
+      .filter((g) => g.parentElement?.closest("[role=group]") === null);
+    expect(topLevel.map(groupName)).toEqual(["pi-code", "dotfiles"]);
+    expect(within(repo()).getAllByRole("group").map(groupName)).toEqual([
+      "main",
+      "fresh",
+      "worktree-support",
+      "old-spike",
+    ]);
+    expect(ownTitles(repo())).toEqual(["Notes on the layout"]);
+    // The agent with no session yet is placed by its own layout.
+    expect(ownTitles(worktree("fresh"))).toEqual(["New conversation"]);
+    expect(ownTitles(worktree("old-spike"))).toEqual([
+      "Still running",
+      "Try the thing",
+      "Exited there",
+    ]);
+    // Branches show on checkouts with a live agent.
+    expect(within(worktree("main")).getByText("main", { selector: "span" })).toBeInTheDocument();
+    expect(within(worktree("fresh")).getByTitle("Branch")).toHaveTextContent("fresh");
+    expect(within(worktree("worktree-support")).queryByTitle("Branch")).toBeNull();
+  });
+
+  it("offers per-role header actions", async () => {
+    await renderSidebar();
+    layoutBaseline();
+    await within(nav()).findByText("Release checklist");
+    const buttons = (group: HTMLElement) =>
+      within(group)
+        .getAllByRole("button")
+        .filter((b) => b.closest("[role=group]") === group && b.closest("li") === null)
+        .map((b) => b.getAttribute("aria-label"));
+    expect(buttons(repo())).toEqual(["New worktree in pi-code", "New conversation in pi-code"]);
+    expect(buttons(worktree("main"))).toEqual(["New conversation in pi-code/main"]);
+    expect(buttons(worktree("worktree-support"))).toEqual([
+      "New conversation in pi-code/worktree-support",
+      "Remove worktree pi-code/worktree-support",
+    ]);
+    expect(buttons(worktree("old-spike"))).toEqual(["Remove worktree pi-code/old-spike"]);
+    expect(within(worktree("old-spike")).getByText("missing")).toBeInTheDocument();
+    const dotfiles = within(nav()).getByRole("group", { name: "dotfiles" });
+    expect(buttons(dotfiles)).toEqual(["New conversation in dotfiles"]);
+  });
+
+  it("disables session rows and exited agents in a missing worktree, not live agents", async () => {
+    await renderSidebar();
+    layoutBaseline();
+    await within(nav()).findByText("Try the thing");
+    expect(
+      within(row("Try the thing")).getByRole("button", { name: /Try the thing/ }),
+    ).toBeDisabled();
+    expect(
+      within(row("Exited there")).getByRole("button", { name: /Exited there/ }),
+    ).toBeDisabled();
+    expect(within(row("Still running")).getByRole("link")).toHaveAttribute(
+      "href",
+      "/agents/gone-live",
+    );
+    expect(
+      within(row("Design worktrees")).getByRole("button", { name: /Design worktrees/ }),
+    ).toBeEnabled();
+  });
+
+  it("starts conversations in the container from the repo's + and in a checkout from its own", async () => {
+    let n = 0;
+    const { router, calls } = await renderSidebar("/", (call) =>
+      call.url === "/api/agents" && call.method === "POST"
+        ? [201, { agent: makeAgent({ id: `n${++n}`, status: "starting" }) }]
+        : undefined,
+    );
+    layoutBaseline();
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "New conversation in pi-code" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/n1"));
+    await user.click(
+      within(nav()).getByRole("button", { name: "New conversation in pi-code/main" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/n2"));
+    expect(
+      calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body),
+    ).toEqual([{ cwd: R }, { cwd: `${R}/main` }]);
+  });
+
+  it("creates a worktree from the repo header and navigates to its conversation", async () => {
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/worktrees" && call.method === "POST"
+        ? [201, { agent: makeAgent({ id: "w1", status: "starting", cwd: `${R}/qa-wt` }) }]
+        : call.url === "/api/sessions"
+          ? [200, { sessions: [] }]
+          : undefined,
+    );
+    // The sidebar alone, to see `onSelect`.
+    const onSelect = vi.fn();
+    const rootRoute = createRootRoute({
+      component: () => (
+        <WorktreeActionsProvider>
+          <Sidebar onSelect={onSelect} />
+        </WorktreeActionsProvider>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([
+        createRoute({ getParentRoute: () => rootRoute, path: "$", component: () => null }),
+      ]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    render(<App router={router as never} queryClient={createQueryClient()} />);
+    await screen.findByRole("navigation", { name: "Conversations" });
+    layoutBaseline();
+    const user = userEvent.setup();
+    await user.click(await within(nav()).findByRole("button", { name: "New worktree in pi-code" }));
+    const sheet = await screen.findByTestId("new-worktree-sheet");
+    expect(onSelect).not.toHaveBeenCalled();
+    await user.type(within(sheet).getByLabelText("Name"), "qa-wt{Enter}");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/w1"));
+    expect(onSelect).toHaveBeenCalled();
+    expect(calls.find((c) => c.url === "/api/worktrees")?.body).toEqual({
+      repo: R,
+      name: "qa-wt",
+    });
+  });
+
+  it("removes a worktree from its header after confirming", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
+      call.url === "/api/worktrees" && call.method === "DELETE" ? [204, null] : undefined,
+    );
+    layoutBaseline();
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", {
+        name: "Remove worktree pi-code/worktree-support",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Remove worktree-support?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "DELETE")?.body).toEqual({
+        path: `${R}/worktree-support`,
+      }),
+    );
+  });
+
+  it("groups search results the same way", async () => {
+    await renderSidebar("/", (call) =>
+      call.url === "/api/sessions" && call.search !== ""
+        ? [
+            200,
+            {
+              sessions: [
+                session({
+                  file: "found",
+                  cwd: `${R}/worktree-support`,
+                  name: "Old worktree talk",
+                  layout: layout("worktree"),
+                }),
+              ],
+            },
+          ]
+        : undefined,
+    );
+    baseline([]);
+    await within(nav()).findByText("No conversations yet.");
+    await userEvent.setup().type(within(nav()).getByRole("searchbox"), "worktree");
+    expect(await within(nav()).findByText("Old worktree talk")).toBeInTheDocument();
+    expect(ownTitles(worktree("worktree-support"))).toEqual(["Old worktree talk"]);
   });
 });

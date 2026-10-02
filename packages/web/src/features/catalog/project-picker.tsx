@@ -1,14 +1,15 @@
-import type { AgentInfo, DirSuggestion } from "@pi-code/protocol";
+import type { AgentInfo, DirSuggestion, ProjectSummary } from "@pi-code/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
   FolderGit2Icon,
   FolderIcon,
+  GitForkIcon,
   HistoryIcon,
   LoaderIcon,
   PlusIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useId, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,11 +20,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  MissingMark,
+  NewWorktreeButton,
+  worktreeSubgroupGuideClass,
+} from "@/features/worktrees/worktree-actions";
 import { errorMessage, listDirs, listProjects } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { epochMs, groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
 
 /** Delay before the path field queries `/api/fs/dirs`. */
@@ -59,9 +66,41 @@ async function resolvePath(
   throw new Error(`Can't resolve ${path} — pick a folder from the suggestions.`);
 }
 
+/** A layout repo in the recent projects: header with "New worktree", then its folders' rows. */
+function RepoGroup({
+  label,
+  path,
+  onOpened,
+  children,
+}: {
+  label: string;
+  path: string;
+  /** Runs with the new worktree's agent. */
+  onOpened(agent: AgentInfo): void;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a repo's folders, not a form <fieldset>
+    <div role="group" aria-labelledby={headingId} className="flex flex-col">
+      <div className="flex min-w-0 items-center gap-2 px-2 pt-2 text-xs text-muted-foreground">
+        <FolderGit2Icon aria-hidden className="size-3.5 shrink-0" />
+        <h4 id={headingId} title={path} className="min-w-0 truncate font-medium text-foreground/80">
+          {label}
+        </h4>
+        <div className="ml-auto">
+          <NewWorktreeButton repo={{ path, label }} onOpened={onOpened} />
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /**
- * "New conversation": recent projects plus a path field with debounced autocomplete under
- * `$HOME`, then `POST /api/agents { cwd }` and navigate to the new agent.
+ * "New conversation": recent projects (in listing groups, with "New worktree" on layout repos)
+ * plus a path field with debounced autocomplete under `$HOME`, then `POST /api/agents { cwd }`,
+ * close and navigate to the new agent.
  */
 export function ProjectPicker({
   open,
@@ -76,7 +115,11 @@ export function ProjectPicker({
   onOpened?: (agent: AgentInfo) => void;
 }) {
   const queryClient = useQueryClient();
-  const openAgent = useOpenAgent({ toastErrors: false, ...(onOpened ? { onOpened } : {}) });
+  const opened = (agent: AgentInfo) => {
+    onOpened?.(agent);
+    onOpenChange(false);
+  };
+  const openAgent = useOpenAgent({ toastErrors: false, onOpened: opened });
   const [path, setPath] = useState("");
   const [resolveError, setResolveError] = useState<string | null>(null);
   const prefix = useDebouncedValue(
@@ -119,6 +162,45 @@ export function ProjectPicker({
 
   const busy = openAgent.isPending;
   const suggestions = dirs.data ?? [];
+  const groups = useMemo(
+    () =>
+      groupListing(projects.data ?? [], {
+        cwd: (project) => project.cwd,
+        layout: (project) => project.layout,
+        activity: (project) => epochMs(project.updatedAt),
+      }),
+    [projects.data],
+  );
+  const projectRow = (
+    project: ProjectSummary,
+    label: string,
+    { icon, missing = false }: { icon?: ReactNode; missing?: boolean } = {},
+  ) => (
+    <li key={project.cwd}>
+      <button
+        type="button"
+        disabled={busy || missing}
+        onClick={() => openAgent.mutate({ cwd: project.cwd })}
+        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:opacity-60"
+      >
+        {icon ??
+          (project.isGitRepo ? (
+            <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+          ))}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-medium">{label}</span>
+          <span className="truncate font-mono text-xs text-muted-foreground">{project.cwd}</span>
+        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {missing && <MissingMark />}
+          {missing && " · "}
+          {project.sessionCount} · {formatRelative(project.updatedAt)}
+        </span>
+      </button>
+    </li>
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -224,35 +306,38 @@ export function ProjectPicker({
             {projects.data?.length === 0 && (
               <p className="text-sm text-muted-foreground">No projects yet.</p>
             )}
-            {projects.data && projects.data.length > 0 && (
+            {groups.length > 0 && (
               <ul aria-label="Recent projects" className="flex flex-col">
-                {projects.data.map((project) => (
-                  <li key={project.cwd}>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => openAgent.mutate({ cwd: project.cwd })}
-                      className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/60"
-                    >
-                      {project.isGitRepo ? (
-                        <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-sm font-medium">
-                          {baseName(project.cwd)}
-                        </span>
-                        <span className="truncate font-mono text-xs text-muted-foreground">
-                          {project.cwd}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {project.sessionCount} · {formatRelative(project.updatedAt)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                {groups.map((group) =>
+                  group.kind === "folder" ? (
+                    group.items.map((project) => projectRow(project, group.label))
+                  ) : (
+                    <li key={`repo:${group.repo}`}>
+                      <RepoGroup label={group.label} path={group.repo} onOpened={opened}>
+                        <ul className="flex flex-col">
+                          {group.items.map((project) => projectRow(project, group.label))}
+                        </ul>
+                        {group.worktrees.some((w) => w.items.length > 0) && (
+                          <ul className={worktreeSubgroupGuideClass}>
+                            {group.worktrees.flatMap((worktree) =>
+                              worktree.items.map((project) =>
+                                projectRow(project, worktree.label, {
+                                  icon: (
+                                    <GitForkIcon
+                                      aria-hidden
+                                      className="size-4 shrink-0 text-muted-foreground"
+                                    />
+                                  ),
+                                  missing: worktree.missing,
+                                }),
+                              ),
+                            )}
+                          </ul>
+                        )}
+                      </RepoGroup>
+                    </li>
+                  ),
+                )}
               </ul>
             )}
           </section>

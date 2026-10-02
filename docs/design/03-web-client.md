@@ -1,6 +1,6 @@
 # Web client design
 
-React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md); this document summarizes them.
+React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), and listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md); this document summarizes them.
 
 | Concern | Choice |
 |---|---|
@@ -19,18 +19,18 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | Path | Screen |
 |---|---|
 | `/` | Phone: Home (open agents with attention badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
-| `/sessions` | All sessions, filterable by project (`?cwd=`) |
+| `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree |
 | `/agents/$agentId/diff` | Git diff of the project |
 | `/share` | Share-target landing (`?title&text&url`) |
 | `/settings` | Notifications permission, tool expansion default, about |
 
-"New conversation" opens the **project picker**: recent projects (`GET /api/projects`) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
+"New conversation" opens the **project picker**: recent projects (`GET /api/projects`, in listing groups) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
 
 ## Shell and sidebar
 
-`AppShell` wraps every route (offline banner, badge sync, service-worker messages) and switches on `(min-width: 1024px)` (`useIsDesktop`):
+`AppShell` wraps every route (offline banner, badge sync, service-worker messages, `WorktreeActionsProvider`) and switches on `(min-width: 1024px)` (`useIsDesktop`):
 
 | | Desktop (≥1024px) | Phone (<1024px) |
 |---|---|---|
@@ -42,10 +42,16 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 Tree and diff keep their "Back to conversation" chevron on both. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
-- **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), grouped by cwd; groups and rows most recent first. Group label: folder basename, with the parent's prepended when two groups share it; the branch from `live.branches` while the folder has a live agent.
+- **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), in listing groups (below); groups and rows most recent first. Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
 - **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; a compact attention icon (Home keeps text badges); relative activity time, refreshed every 60 s. The route's agent is highlighted.
-- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }`; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
+- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
 - **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once. A themed × button clears the field.
+
+### Listing groups and worktrees
+
+Every listing (sidebar, Home, `/sessions`, the picker's recent projects) goes through `groupListing` (`features/catalog/listing-groups.ts`): items without `layout` form folder groups by cwd; items of a `<repo>/main` layout repo form one repo group, with the container's own items under its header and one sub-group per checkout, `main` first. In a missing worktree, exited agents and the sessions no live agent holds are disabled.
+
+`WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`); header buttons reach it through `useWorktreeActions`.
 
 ## Live registry
 

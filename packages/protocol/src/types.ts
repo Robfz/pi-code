@@ -23,6 +23,15 @@ export type Attention = "none" | "finished" | "failed" | "input";
 
 export type AgentStatus = "awaiting_trust" | "starting" | "ready" | "exited";
 
+/** A folder's place in a `<repo>/main` layout (`docs/design/06-worktrees.md`). */
+export interface RepoLayout {
+  /** The container folder. */
+  repo: string;
+  role: "container" | "main" | "worktree";
+  /** The worktree folder is not on disk. */
+  missing?: true;
+}
+
 export interface AgentInfo {
   id: AgentId;
   cwd: string;
@@ -39,6 +48,8 @@ export interface AgentInfo {
   attention: Attention;
   /** ISO 8601. */
   startedAt: string;
+  /** Absent outside a layout repo. */
+  layout?: RepoLayout;
 }
 
 export interface SessionSummary {
@@ -54,6 +65,8 @@ export interface SessionSummary {
   parentSession?: string;
   /** Agent that has this session open in the web UI. */
   ownedBy?: AgentId;
+  /** Absent outside a layout repo. */
+  layout?: RepoLayout;
 }
 
 export interface ProjectSummary {
@@ -61,6 +74,8 @@ export interface ProjectSummary {
   sessionCount: number;
   updatedAt: string;
   isGitRepo: boolean;
+  /** Absent outside a layout repo. */
+  layout?: RepoLayout;
 }
 
 export interface GitStatus {
@@ -255,6 +270,28 @@ export interface GitDiffResponse {
 
 export interface GitStatusResponse {
   status: GitStatus | null;
+}
+
+// ---------------------------------------------------------------------------
+// Worktrees
+
+/** `POST /api/worktrees`: creates `<repo>/<name>` and opens an agent there (`AgentResponse`). */
+export interface CreateWorktreeBody {
+  /** The layout container, absolute. */
+  repo: string;
+  /** Folder name: one segment. */
+  name: string;
+  /** Default: `name`; may contain `/`. */
+  branch?: string;
+  /** Default: `origin/main`, else `origin/master`. */
+  base?: string;
+}
+
+/** `DELETE /api/worktrees`. */
+export interface RemoveWorktreeBody {
+  path: string;
+  /** Remove despite uncommitted changes or submodules. */
+  force?: boolean;
 }
 
 // ---------------------------------------------------------------------------

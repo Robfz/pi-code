@@ -2,17 +2,20 @@ import type { AgentInfo } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FolderIcon, HistoryIcon, LoaderIcon, PlusIcon, SettingsIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AttentionBadge } from "@/components/attention-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentsLoading } from "@/features/catalog/agents-loading";
+import { GroupedListing } from "@/features/catalog/grouped-listing";
+import { agentLayout, epochMs, groupListing } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
-import { SessionList } from "@/features/catalog/session-list";
+import { GroupedSessionList } from "@/features/catalog/session-list";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
-import { useLiveAgents } from "@/store/context";
+import { cn } from "@/lib/utils";
+import { useLive, useLiveAgents } from "@/store/context";
 
 function statusLabel(agent: AgentInfo): string | null {
   switch (agent.status) {
@@ -27,31 +30,72 @@ function statusLabel(agent: AgentInfo): string | null {
   }
 }
 
-function AgentRow({ agent }: { agent: AgentInfo }) {
+const agentRowClass = "flex min-w-0 items-center gap-3 rounded-xl border bg-card/40 px-3 py-2.5";
+
+/** `disabled`: an exited agent in a missing worktree, which can't be restarted. */
+function AgentRow({ agent, disabled }: { agent: AgentInfo; disabled: boolean }) {
   const status = statusLabel(agent);
+  const content = (
+    <>
+      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm font-medium">
+          {agent.sessionName ?? baseName(agent.cwd)}
+        </span>
+        <span className="truncate text-xs text-muted-foreground">{agent.cwd}</span>
+      </div>
+      <AttentionBadge attention={agent.attention} />
+      {status && (
+        <Badge variant="outline" className="gap-1">
+          {agent.isStreaming && <LoaderIcon className="animate-spin" />}
+          {status}
+        </Badge>
+      )}
+    </>
+  );
   return (
     <li>
-      <Link
-        to="/agents/$agentId"
-        params={{ agentId: agent.id }}
-        className="flex min-w-0 items-center gap-3 rounded-xl border bg-card/40 px-3 py-2.5 hover:bg-muted/50"
-      >
-        <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium">
-            {agent.sessionName ?? baseName(agent.cwd)}
-          </span>
-          <span className="truncate text-xs text-muted-foreground">{agent.cwd}</span>
-        </div>
-        <AttentionBadge attention={agent.attention} />
-        {status && (
-          <Badge variant="outline" className="gap-1">
-            {agent.isStreaming && <LoaderIcon className="animate-spin" />}
-            {status}
-          </Badge>
-        )}
-      </Link>
+      {disabled ? (
+        <div className={cn(agentRowClass, "opacity-70")}>{content}</div>
+      ) : (
+        <Link
+          to="/agents/$agentId"
+          params={{ agentId: agent.id }}
+          className={cn(agentRowClass, "hover:bg-muted/50")}
+        >
+          {content}
+        </Link>
+      )}
     </li>
+  );
+}
+
+function OpenConversations({ agents }: { agents: AgentInfo[] }) {
+  const sessions = useLive((s) => s.sessions);
+  const groups = useMemo(() => {
+    const byFile = new Map(sessions.map((session) => [session.file, session]));
+    return groupListing(agents, {
+      cwd: (agent) => agent.cwd,
+      layout: (agent) => agentLayout(agent, byFile),
+      activity: (agent) => epochMs(agent.startedAt),
+    });
+  }, [agents, sessions]);
+  return (
+    <GroupedListing
+      label="Open conversations"
+      groups={groups}
+      renderItems={(items, missing) => (
+        <ul className="flex flex-col gap-2">
+          {items.map((agent) => (
+            <AgentRow
+              key={agent.id}
+              agent={agent}
+              disabled={missing && agent.status === "exited"}
+            />
+          ))}
+        </ul>
+      )}
+    />
   );
 }
 
@@ -83,7 +127,10 @@ function RecentSessions() {
         </p>
       )}
       {sessions.data && sessions.data.length > 0 && (
-        <SessionList sessions={sessions.data.slice(0, RECENT_SESSIONS)} label="Recent sessions" />
+        <GroupedSessionList
+          sessions={sessions.data.slice(0, RECENT_SESSIONS)}
+          label="Recent sessions"
+        />
       )}
     </section>
   );
@@ -124,13 +171,7 @@ export function HomeScreen() {
             <p className="text-xs">Start a new one, or tap a session below to resume it.</p>
           </div>
         )}
-        {agents !== undefined && agents.length > 0 && (
-          <ul className="flex flex-col gap-2" aria-label="Open conversations">
-            {agents.map((agent) => (
-              <AgentRow key={agent.id} agent={agent} />
-            ))}
-          </ul>
-        )}
+        {agents !== undefined && agents.length > 0 && <OpenConversations agents={agents} />}
       </section>
 
       <RecentSessions />

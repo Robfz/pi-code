@@ -62,6 +62,8 @@ describe("API errors", () => {
       "outside_home",
       "command_not_allowed",
       "streaming_behavior_required",
+      "not_in_layout",
+      "not_a_worktree",
       "forbidden_origin",
       "forbidden_host",
       "agent_not_found",
@@ -71,7 +73,11 @@ describe("API errors", () => {
       "session_owned",
       "agent_exited",
       "agent_busy",
+      "worktree_exists",
+      "branch_exists",
+      "worktree_dirty",
       "pi_error",
+      "git_failed",
       "pi_timeout",
     ];
     expect(Object.keys(API_ERROR_STATUS).sort()).toEqual([...codes].sort());
@@ -81,6 +87,9 @@ describe("API errors", () => {
     expect(API_ERROR_STATUS.session_owned).toBe(409);
     expect(API_ERROR_STATUS.pi_error).toBe(502);
     expect(API_ERROR_STATUS.pi_timeout).toBe(504);
+    expect(API_ERROR_STATUS.not_a_worktree).toBe(400);
+    expect(API_ERROR_STATUS.worktree_dirty).toBe(409);
+    expect(API_ERROR_STATUS.git_failed).toBe(502);
   });
 
   it("recognizes error bodies", () => {

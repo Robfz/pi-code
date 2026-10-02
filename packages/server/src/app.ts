@@ -10,6 +10,7 @@ import { requestGuards } from "./http/guards.ts";
 import { pushRoutes } from "./http/push-routes.ts";
 import { spaHandler } from "./http/static.ts";
 import { type SseOptions, streamRoutes } from "./http/stream.ts";
+import { worktreesRoutes } from "./http/worktrees-routes.ts";
 import type { StreamHub } from "./live/stream-hub.ts";
 import type { PushService } from "./push/push-service.ts";
 
@@ -21,7 +22,7 @@ interface AppDeps {
   /** Built SPA directory. */
   staticDir: string;
   manager: AgentManager;
-  /** Sessions and projects (read-only over pi's sessions dir). */
+  /** Sessions and projects (read-only over pi's sessions dir, except worktree removal). */
   catalog: SessionCatalog;
   /** Shared inputs of `GET /api/stream`. */
   hub: StreamHub;
@@ -31,6 +32,8 @@ interface AppDeps {
   push?: PushService;
   /** SSE tuning (tests shorten the ping interval). */
   sse?: SseOptions;
+  /** Moves a session file to the Trash on worktree removal (default `trash`). */
+  trashCommand?: string;
 }
 
 /** The typed `/api` routes. Chained so `AppType` carries them for the web's `hc` client. */
@@ -40,6 +43,15 @@ function apiRoutes(deps: AppDeps) {
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/agents", agentsRoutes(deps.manager))
+    .route(
+      "/worktrees",
+      worktreesRoutes({
+        manager: deps.manager,
+        catalog: deps.catalog,
+        hub: deps.hub,
+        ...(deps.trashCommand !== undefined ? { trashCommand: deps.trashCommand } : {}),
+      }),
+    )
     .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))
     .route("/push", pushRoutes(deps.push));
 }

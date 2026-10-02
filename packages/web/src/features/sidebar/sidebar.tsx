@@ -18,13 +18,21 @@ import {
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
+import {
+  ListingGroupIcon,
+  type ListingGroupKind,
+  MissingMark,
+  NewWorktreeButton,
+  RemoveWorktreeButton,
+  worktreeSubgroupGuideClass,
+} from "@/features/worktrees/worktree-actions";
 import { closeAgent, errorMessage, restartAgent, searchSessions } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { useLive, useLiveRegistry } from "@/store/context";
-import { buildSidebarGroups, isLive, type SidebarGroup, type SidebarRow } from "./sidebar-model";
+import { buildSidebarGroups, isLive, liveBranch, type SidebarRow } from "./sidebar-model";
 
 /** Delay before the search text queries `GET /api/sessions?q=`. */
 export const SEARCH_DEBOUNCE_MS = 200;
@@ -161,58 +169,70 @@ function Row({
 }
 
 function Group({
-  group,
+  label,
+  path,
+  kind,
+  branch,
+  missing = false,
+  nested = false,
+  actions,
   children,
-  pending,
-  disabled,
-  onNew,
 }: {
-  group: SidebarGroup;
+  label: string;
+  /** Shown as the label's tooltip. */
+  path: string;
+  kind: ListingGroupKind;
+  branch?: string | undefined;
+  missing?: boolean;
+  /** A checkout inside a repo group. */
+  nested?: boolean;
+  actions: ReactNode;
   children: ReactNode;
-  pending: boolean;
-  disabled: boolean;
-  onNew(): void;
 }) {
   const headingId = useId();
+  const Heading = nested ? "h3" : "h2";
   return (
     // biome-ignore lint/a11y/useSemanticElements: a folder of links, not a form <fieldset>
     <div role="group" aria-labelledby={headingId} className="flex flex-col gap-0.5">
-      <div className="flex min-w-0 items-center gap-2 pt-3 pr-1 pb-0.5 pl-2 text-xs text-muted-foreground">
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-2 pr-1 pb-0.5 pl-2 text-xs text-muted-foreground",
+          nested ? "pt-1.5" : "pt-3",
+        )}
+      >
         {/* The label keeps its width (truncating only past the whole line); the branch gets the rest. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h2
+          <ListingGroupIcon kind={kind} />
+          <Heading
             id={headingId}
-            className="max-w-full shrink-0 truncate font-medium text-foreground/80"
-            title={group.cwd}
+            className={cn(
+              "max-w-full shrink-0 truncate text-foreground/80",
+              nested ? "font-normal" : "font-medium",
+            )}
+            title={path}
           >
-            {group.label}
-          </h2>
-          {group.branch !== undefined && (
+            {label}
+          </Heading>
+          {branch !== undefined && (
             <span className="flex min-w-0 items-center gap-0.5 overflow-hidden" title="Branch">
               <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-              <span className="truncate font-mono">{group.branch}</span>
+              <span className="truncate font-mono">{branch}</span>
             </span>
           )}
+          {missing && <MissingMark />}
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          disabled={disabled}
-          aria-label={`New conversation in ${group.label}`}
-          onClick={onNew}
-        >
-          {pending ? <LoaderIcon className="animate-spin" /> : <PlusIcon />}
-        </Button>
+        {actions}
       </div>
-      <ul className="flex flex-col gap-0.5">{children}</ul>
+      {children}
     </div>
   );
 }
 
 /**
- * Conversations grouped by folder, with New conversation, search, per-folder `+`, close on live
- * rows and settings in the footer. `action` goes before New conversation (the shell's toggle,
- * the sheet's close); `onSelect` runs whenever a row, `+` or a new conversation is picked.
+ * Conversations grouped by folder or repo (`groupListing`), with New conversation, search,
+ * per-folder `+`, New and Remove worktree on repo groups, close on live rows and settings in the
+ * footer. `action` goes before New conversation (the shell's toggle, the sheet's close);
+ * `onSelect` runs whenever a row, `+` or a new conversation is picked.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
   const registry = useLiveRegistry();
@@ -263,16 +283,15 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
 
   const groups = useMemo(() => {
     const allAgents = Object.values(agents);
-    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions, branches });
+    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions });
     const results = search.data ?? [];
     return buildSidebarGroups({
       agents: allAgents,
       sessions: results,
-      branches,
       known: [...sessions, ...results],
       query,
     });
-  }, [agents, sessions, branches, searching, query, search.data]);
+  }, [agents, sessions, searching, query, search.data]);
 
   async function close(agentId: string) {
     setClosing((ids) => new Set(ids).add(agentId));
@@ -289,6 +308,59 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
       });
     }
   }
+
+  /** `+`: a new conversation in `cwd`; `name` tells same-labelled folders apart. */
+  const newHere = (cwd: string, name: string) => (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      disabled={busy}
+      aria-label={`New conversation in ${name}`}
+      onClick={() => {
+        open.mutate({ cwd });
+        select();
+      }}
+    >
+      {pending !== undefined && "cwd" in pending && pending.cwd === cwd ? (
+        <LoaderIcon className="animate-spin" />
+      ) : (
+        <PlusIcon />
+      )}
+    </Button>
+  );
+
+  /** Rows of one folder; in a `missing` one only live agents stay usable. */
+  const rowList = (rows: SidebarRow[], folder: string, missing: boolean) => (
+    <ul className="flex flex-col gap-0.5">
+      {rows.map((row) => (
+        <Row
+          key={row.key}
+          row={row}
+          folder={folder}
+          now={now}
+          current={row.agent !== undefined && row.agent.id === currentId}
+          pending={
+            row.agent !== undefined
+              ? restart.isPending && restart.variables === row.agent.id
+              : pending !== undefined &&
+                "sessionFile" in pending &&
+                pending.sessionFile === row.sessionFile
+          }
+          disabled={busy || missing}
+          closing={row.agent !== undefined && closing.has(row.agent.id)}
+          onOpen={(sessionFile) => open.mutate({ sessionFile })}
+          onRestart={(agent) => restart.mutate(agent.id)}
+          onClose={(agent) => {
+            if (closeNeedsConfirm(agent)) {
+              setConfirmTarget({ agentId: agent.id, title: row.title });
+              setConfirmOpen(true);
+            } else void close(agent.id);
+          }}
+          onSelect={select}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <nav aria-label="Conversations" className="flex h-full min-h-0 flex-col">
@@ -355,46 +427,71 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             {searching ? "No matches." : "No conversations yet."}
           </p>
         )}
-        {groups.map((group) => (
-          <Group
-            key={group.cwd}
-            group={group}
-            disabled={busy}
-            pending={pending !== undefined && "cwd" in pending && pending.cwd === group.cwd}
-            onNew={() => {
-              open.mutate({ cwd: group.cwd });
-              select();
-            }}
-          >
-            {group.rows.map((row) => (
-              <Row
-                key={row.key}
-                row={row}
-                folder={group.label}
-                now={now}
-                current={row.agent !== undefined && row.agent.id === currentId}
-                pending={
-                  row.agent !== undefined
-                    ? restart.isPending && restart.variables === row.agent.id
-                    : pending !== undefined &&
-                      "sessionFile" in pending &&
-                      pending.sessionFile === row.sessionFile
-                }
-                disabled={busy}
-                closing={row.agent !== undefined && closing.has(row.agent.id)}
-                onOpen={(sessionFile) => open.mutate({ sessionFile })}
-                onRestart={(agent) => restart.mutate(agent.id)}
-                onClose={(agent) => {
-                  if (closeNeedsConfirm(agent)) {
-                    setConfirmTarget({ agentId: agent.id, title: row.title });
-                    setConfirmOpen(true);
-                  } else void close(agent.id);
-                }}
-                onSelect={select}
-              />
-            ))}
-          </Group>
-        ))}
+        {groups.map((group) =>
+          group.kind === "folder" ? (
+            <Group
+              key={`folder:${group.cwd}`}
+              kind="folder"
+              label={group.label}
+              path={group.cwd}
+              branch={liveBranch(branches, group.cwd, group.items)}
+              actions={newHere(group.cwd, group.label)}
+            >
+              {rowList(group.items, group.label, false)}
+            </Group>
+          ) : (
+            <Group
+              key={`repo:${group.repo}`}
+              kind="repo"
+              label={group.label}
+              path={group.repo}
+              actions={
+                <>
+                  <NewWorktreeButton
+                    compact
+                    repo={{ path: group.repo, label: group.label }}
+                    onOpened={select}
+                  />
+                  {newHere(group.repo, group.label)}
+                </>
+              }
+            >
+              {group.items.length > 0 && rowList(group.items, group.label, false)}
+              {group.worktrees.length > 0 && (
+                <div className={cn(worktreeSubgroupGuideClass, "gap-0.5")}>
+                  {group.worktrees.map((worktree) => {
+                    const name = `${group.label}/${worktree.label}`;
+                    return (
+                      <Group
+                        key={worktree.cwd}
+                        kind="worktree"
+                        nested
+                        label={worktree.label}
+                        path={worktree.cwd}
+                        branch={liveBranch(branches, worktree.cwd, worktree.items)}
+                        missing={worktree.missing}
+                        actions={
+                          <>
+                            {!worktree.missing && newHere(worktree.cwd, name)}
+                            {worktree.role === "worktree" && (
+                              <RemoveWorktreeButton
+                                compact
+                                target={{ path: worktree.cwd, label: worktree.label }}
+                                name={name}
+                              />
+                            )}
+                          </>
+                        }
+                      >
+                        {rowList(worktree.items, name, worktree.missing)}
+                      </Group>
+                    );
+                  })}
+                </div>
+              )}
+            </Group>
+          ),
+        )}
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

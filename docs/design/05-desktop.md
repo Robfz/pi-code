@@ -177,5 +177,5 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 - The opened set lives in the tab: after a reload only the conversation in the URL is opened; others are snapshotted when selected.
 - Opened conversation stores stay in memory, and in the stream, for the tab's lifetime unless their agent is closed; navigating away doesn't release them, a reload does.
 - The idle sweep closes a conversation with no new session entry for 7 days or more (counted from its start at the latest), even with a pending dialog; answering a dialog or trusting a folder writes no entry by itself. Committed entries stay in the session file.
-- Without `<agentDir>/sessions` at startup there is no watcher until a restart; the agent dir is read-only to pi-code, so it isn't created.
+- Without `<agentDir>/sessions` at startup there is no watcher until a restart; pi-code doesn't create pi's agent dir.
 - The Mac uses the tailnet URL like other laptops. `localhost:4180` works too (one stream per tab, F11) but is HTTP/1.1.

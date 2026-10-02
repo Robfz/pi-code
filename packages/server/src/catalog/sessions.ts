@@ -1,11 +1,13 @@
 /**
  * Session catalog: read-only over pi's sessions dir (`<agentDir>/sessions/--<cwd>--/*.jsonl`,
- * docs/session-format.md). Only header `cwd`s are trusted; directory names are lossy.
+ * docs/session-format.md); worktree removal deletes files through `session-files.ts`. Only header
+ * `cwd`s are trusted; directory names are lossy.
  */
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AgentId, ProjectSummary, SessionSummary } from "@pi-code/protocol";
+import type { AgentId, ProjectSummary, RepoLayout, SessionSummary } from "@pi-code/protocol";
 import { findGitDir } from "../git/branches.ts";
+import { layoutOf } from "./layout.ts";
 
 /** Longest `firstMessage`, in characters. */
 export const FIRST_MESSAGE_MAX = 200;
@@ -14,8 +16,11 @@ export const FIRST_MESSAGE_MAX = 200;
 const LIST_TTL_MS = 1_000;
 const PARSE_CONCURRENCY = 16;
 
-/** What the file itself says (everything but `ownedBy`). */
-type ParsedSession = Omit<SessionSummary, "ownedBy">;
+/** What the file itself says (everything but `ownedBy` and `layout`). */
+type ParsedSession = Omit<SessionSummary, "ownedBy" | "layout">;
+
+/** A parsed session with its cwd's layout as of the scan that listed it. */
+type ScannedSession = Omit<SessionSummary, "ownedBy">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -186,7 +191,7 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
 export class SessionCatalog {
   private readonly deps: SessionCatalogDeps;
   private readonly cache = new Map<string, CacheEntry>();
-  private listing: { at: number; sessions: Promise<ParsedSession[]> } | undefined;
+  private listing: { at: number; sessions: Promise<ScannedSession[]> } | undefined;
   private sessionsDir: Promise<string> | undefined;
 
   constructor(deps: SessionCatalogDeps) {
@@ -218,23 +223,31 @@ export class SessionCatalog {
 
   /** Distinct header cwds with session counts, most recent activity first. */
   async projects(): Promise<ProjectSummary[]> {
-    const byCwd = new Map<string, { count: number; updatedAt: string }>();
+    const byCwd = new Map<
+      string,
+      { count: number; updatedAt: string; layout: RepoLayout | undefined }
+    >();
     for (const s of await this.scan()) {
       if (s.cwd === "") continue;
       const p = byCwd.get(s.cwd);
-      if (p === undefined) byCwd.set(s.cwd, { count: 1, updatedAt: s.updatedAt });
-      else {
+      if (p === undefined) {
+        byCwd.set(s.cwd, { count: 1, updatedAt: s.updatedAt, layout: s.layout });
+      } else {
         p.count += 1;
         if (Date.parse(s.updatedAt) > Date.parse(p.updatedAt)) p.updatedAt = s.updatedAt;
       }
     }
     return [...byCwd.entries()]
-      .map(([cwd, p]) => ({
-        cwd,
-        sessionCount: p.count,
-        updatedAt: p.updatedAt,
-        isGitRepo: findGitDir(cwd) !== undefined,
-      }))
+      .map(([cwd, p]) => {
+        const project: ProjectSummary = {
+          cwd,
+          sessionCount: p.count,
+          updatedAt: p.updatedAt,
+          isGitRepo: findGitDir(cwd) !== undefined,
+        };
+        if (p.layout !== undefined) project.layout = p.layout;
+        return project;
+      })
       .sort(byRecency);
   }
 
@@ -248,7 +261,7 @@ export class SessionCatalog {
     this.listing = undefined;
   }
 
-  private scan(): Promise<ParsedSession[]> {
+  private scan(): Promise<ScannedSession[]> {
     const now = Date.now();
     if (this.listing === undefined || now - this.listing.at > LIST_TTL_MS) {
       const sessions = this.scanNow();
@@ -260,7 +273,11 @@ export class SessionCatalog {
     return this.listing.sessions;
   }
 
-  private async scanNow(): Promise<ParsedSession[]> {
+  /**
+   * Lists and parses the session files, attaching each cwd's layout. Layouts are recomputed on
+   * every scan: a folder's layout changes (e.g. a worktree deleted) without its files changing.
+   */
+  private async scanNow(): Promise<ScannedSession[]> {
     this.sessionsDir ??= realpath(join(this.deps.agentDir, "sessions")).catch(() =>
       join(this.deps.agentDir, "sessions"),
     );
@@ -294,8 +311,15 @@ export class SessionCatalog {
       const summary = await this.summarize(file);
       if (summary !== undefined) summaries.push(summary);
     });
+    const layouts = new Map<string, RepoLayout | undefined>();
+    for (const { cwd } of summaries) if (!layouts.has(cwd)) layouts.set(cwd, layoutOf(cwd));
     // Ties by file, so equal scans list sessions in the same order.
-    return summaries.sort((a, b) => byRecency(a, b) || a.file.localeCompare(b.file));
+    return summaries
+      .sort((a, b) => byRecency(a, b) || a.file.localeCompare(b.file))
+      .map((s) => {
+        const layout = layouts.get(s.cwd);
+        return layout === undefined ? s : { ...s, layout };
+      });
   }
 
   private async summarize(file: string): Promise<ParsedSession | undefined> {

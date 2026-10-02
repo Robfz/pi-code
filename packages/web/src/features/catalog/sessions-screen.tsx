@@ -7,9 +7,9 @@ import { errorMessage, listProjects, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { ScreenHeader } from "@/routes/placeholder";
-import { SessionList } from "./session-list";
+import { GroupedSessionList } from "./session-list";
 
-/** `/sessions`: all sessions, filterable by project (`?cwd=`). */
+/** `/sessions`: all sessions, filterable by project (`?cwd=`), in listing groups. */
 export function SessionsScreen({ cwd }: { cwd?: string }) {
   const navigate = useNavigate();
   const projects = useQuery({ queryKey: queryKeys.projects, queryFn: listProjects });
@@ -67,7 +67,7 @@ export function SessionsScreen({ cwd }: { cwd?: string }) {
           </p>
         )}
         {sessions.data && sessions.data.length > 0 && (
-          <SessionList sessions={sessions.data} showProject={!cwd} />
+          <GroupedSessionList sessions={sessions.data} />
         )}
       </div>
     </div>

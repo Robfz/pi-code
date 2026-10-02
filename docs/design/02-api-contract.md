@@ -13,11 +13,11 @@ Both sides share these types; the client calls the API through a small typed `fe
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required` |
+| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree` |
 | 403 | `forbidden_origin`, `forbidden_host` |
 | 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found` |
-| 409 | `session_owned`, `agent_exited`, `agent_busy` |
-| 502 | `pi_error` (pi answered `success: false`; message is pi's error) |
+| 409 | `session_owned`, `agent_exited`, `agent_busy`, `worktree_exists`, `branch_exists`, `worktree_dirty` |
+| 502 | `pi_error` (pi answered `success: false`; message is pi's error), `git_failed` (message: the git command and its stderr) |
 | 504 | `pi_timeout` (no response within 60 s; `prompt`-family commands only wait for acceptance) |
 
 ## Shared types
@@ -25,6 +25,13 @@ Both sides share these types; the client calls the API through a small typed `fe
 ```ts
 type AgentId = string;          // server-generated, URL-safe
 type Attention = "none" | "finished" | "failed" | "input";
+
+/** A folder's place in a `<repo>/main` layout (06-worktrees.md). */
+interface RepoLayout {
+  repo: string;                  // the container folder
+  role: "container" | "main" | "worktree";
+  missing?: true;                // worktree folder not on disk
+}
 
 interface AgentInfo {
   id: AgentId;
@@ -39,6 +46,7 @@ interface AgentInfo {
   isStreaming: boolean;
   attention: Attention;
   startedAt: string;             // ISO 8601
+  layout?: RepoLayout;           // absent outside a layout repo; classified at creation
 }
 
 interface SessionSummary {
@@ -51,6 +59,7 @@ interface SessionSummary {
   updatedAt: string;             // last entry timestamp
   parentSession?: string;
   ownedBy?: AgentId;             // open in the web UI
+  layout?: RepoLayout;           // absent outside a layout repo; as of the latest scan
 }
 
 interface ProjectSummary {
@@ -58,6 +67,7 @@ interface ProjectSummary {
   sessionCount: number;
   updatedAt: string;
   isGitRepo: boolean;
+  layout?: RepoLayout;
 }
 
 interface GitStatus { branch: string | null; dirty: boolean }
@@ -179,7 +189,7 @@ type StreamFrame =
 - `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session whose `updatedAt` is within the last 7 days, most recent first, without `ownedBy` (clients match agents by `sessionFile`). `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
-- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included) or the hourly tick changes the window; `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included) or the hourly tick changes the window (a session's `layout` included); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
 
 ## Events
 
@@ -253,6 +263,32 @@ interface NavigateBody {
 }
 ```
 → `200 { cancelled: boolean }` (`cancelled` when the leaf didn't move), after the resulting `transcript_reset` is published; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
+
+## Worktrees
+
+Linked worktrees of `<repo>/main` layout repos ([`06-worktrees.md`](06-worktrees.md)). Paths are canonicalized (realpath, or for a missing path its nearest existing ancestor's plus the rest) and must be inside `$HOME`, else `400 outside_home`.
+
+### `POST /api/worktrees`
+Fetches `origin`, adds the worktree `<repo>/<name>` on a new branch, and opens a conversation there.
+```ts
+interface CreateWorktreeBody {
+  repo: string;      // the layout container, absolute
+  name: string;      // folder name: one segment, no control characters, not starting with "."
+  branch?: string;   // default: name; may contain "/"
+  base?: string;     // default: origin/main, else origin/master
+}
+```
+→ `201 { agent: AgentInfo }`, as `POST /api/agents { cwd }`. Errors: `400 not_in_layout` (`repo` isn't a layout container), `400 invalid_body` (body, name, branch or base invalid, or no default base), `409 worktree_exists`, `409 branch_exists`, `502 git_failed` (fetch or `worktree add`). If the conversation fails to open, the error is the open's, its message naming the created worktree.
+
+### `DELETE /api/worktrees`
+Removes a linked or missing worktree: closes the agents inside it, runs `git worktree remove` (keeping the branch) and deletes the session files whose header `cwd` is inside it (to the Trash, else unlinked).
+```ts
+interface RemoveWorktreeBody {
+  path: string;      // absolute
+  force?: boolean;   // remove despite uncommitted changes or submodules
+}
+```
+→ `204`, also for an already pruned missing worktree. Errors: `400 not_a_worktree` (also the main checkout and the container), `409 worktree_dirty` (without `force`: uncommitted changes, untracked files or submodules; checked before any agent is closed, and returned when git refuses the plain remove), `502 git_failed`, `500 internal` naming session files that couldn't be deleted.
 
 ## Git
 
