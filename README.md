@@ -33,7 +33,7 @@ tailscale serve --bg --https=443  http://127.0.0.1:4180   # the app and API
 tailscale serve --bg --https=8443 http://127.0.0.1:4181   # the web-search curator proxy
 ```
 
-Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder, with search), and one tab follows all of them at once.
+Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder or repo, with search), and one tab follows all of them at once.
 
 Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
 
@@ -46,7 +46,7 @@ Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes ev
 | `PI_CODE_CURATOR_PORT` | `4181` | Curator proxy listener (`127.0.0.1` only) |
 | `PI_CODE_PI_BIN` | `pi` | pi executable |
 | `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys (`vapid.json`) and push subscriptions (`push-subscriptions.json`) |
-| `PI_AGENT_DIR` | `~/.pi/agent` | pi's agent dir, read-only: sessions, `trust.json` |
+| `PI_AGENT_DIR` | `~/.pi/agent` | pi's agent dir: sessions, `trust.json`. Read-only, except that removing a worktree deletes its session files |
 
 ## Installing the PWA on Android
 
@@ -82,10 +82,13 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 - MCP Apps and MCP URL elicitation don't work from the web (deferred).
 - Opening a web-owned session in the TUI at the same time corrupts the branch structure (pi has no session locking).
 - A conversation with no new session entry for 7 days is closed automatically, pending dialogs included; its session file stays and can be resumed.
+- Worktrees are created and removed only in repos laid out as `<repo>/main` (or `master`) whose parent folder isn't inside a git repo; plain clones stay flat folder groups. A repo with no session and no open conversation appears nowhere: the picker and `/sessions` list only session-derived entries. See [`docs/design/06-worktrees.md`](docs/design/06-worktrees.md) for the rest.
+- A new worktree whose conversation closes before any message drops out of every listing; the folder stays, reachable through the picker's path field.
+- Removing a worktree doesn't stop a TUI pi running in it: its next write recreates its session file, listed under a missing worktree.
 
 ## Documentation
 
 - [`maps/`](maps/) — decision maps and their rationale
-- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md)
+- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md), [worktrees](docs/design/06-worktrees.md)
 - [`docs/plan/`](docs/plan/) — implementation plan
 - [`docs/spikes/`](docs/spikes/) — protocol spike findings

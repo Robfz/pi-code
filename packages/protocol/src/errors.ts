@@ -4,6 +4,8 @@ export const API_ERROR_STATUS = {
   outside_home: 400,
   command_not_allowed: 400,
   streaming_behavior_required: 400,
+  not_in_layout: 400,
+  not_a_worktree: 400,
   forbidden_origin: 403,
   forbidden_host: 403,
   agent_not_found: 404,
@@ -13,7 +15,11 @@ export const API_ERROR_STATUS = {
   session_owned: 409,
   agent_exited: 409,
   agent_busy: 409,
+  worktree_exists: 409,
+  branch_exists: 409,
+  worktree_dirty: 409,
   pi_error: 502,
+  git_failed: 502,
   pi_timeout: 504,
 } as const;
 

@@ -2,6 +2,7 @@ import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sidebar } from "@/features/sidebar/sidebar";
+import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useBadgeSync } from "./badge";
@@ -13,7 +14,8 @@ const SIDEBAR_ID = "app-sidebar";
 /**
  * Root layout: offline banner, badge sync and service-worker messages around every screen. On
  * desktop (≥1024px) the sidebar is docked on the left, shown on load and toggled from the shell
- * for the rest of the tab's life; below, it opens as a sheet from the conversation header.
+ * for the rest of the tab's life; below, it opens as a sheet from the conversation header. Hosts
+ * the worktree dialogs and sheet (`WorktreeActionsProvider`).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   useServiceWorkerMessages();
@@ -46,24 +48,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     </Button>
   );
   return (
-    <div className="flex min-h-dvh overflow-x-clip bg-background text-foreground">
-      {desktop && (
-        <aside
-          id={SIDEBAR_ID}
-          className={cn(
-            "sticky top-0 flex h-dvh shrink-0 flex-col border-r",
-            sidebarOpen
-              ? "w-[280px] pt-[env(safe-area-inset-top)]"
-              : "px-1 pt-[max(0.5rem,env(safe-area-inset-top))]",
-          )}
-        >
-          {sidebarOpen ? <Sidebar action={toggle} /> : toggle}
-        </aside>
-      )}
-      <div className="min-w-0 flex-1">
-        <OfflineBanner />
-        {children}
+    <WorktreeActionsProvider>
+      <div className="flex min-h-dvh overflow-x-clip bg-background text-foreground">
+        {desktop && (
+          <aside
+            id={SIDEBAR_ID}
+            className={cn(
+              "sticky top-0 flex h-dvh shrink-0 flex-col border-r",
+              sidebarOpen
+                ? "w-[280px] pt-[env(safe-area-inset-top)]"
+                : "px-1 pt-[max(0.5rem,env(safe-area-inset-top))]",
+            )}
+          >
+            {sidebarOpen ? <Sidebar action={toggle} /> : toggle}
+          </aside>
+        )}
+        <div className="min-w-0 flex-1">
+          <OfflineBanner />
+          {children}
+        </div>
       </div>
-    </div>
+    </WorktreeActionsProvider>
   );
 }

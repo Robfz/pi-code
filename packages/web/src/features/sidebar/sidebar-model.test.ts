@@ -1,7 +1,8 @@
 import type { SessionSummary } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
+import { groupPath } from "@/features/catalog/listing-groups";
 import { makeAgent } from "@/test/fixtures";
-import { agentMatches, buildSidebarGroups } from "./sidebar-model";
+import { agentMatches, buildSidebarGroups, liveBranch } from "./sidebar-model";
 
 function session(patch: Partial<SessionSummary> & { file: string }): SessionSummary {
   return {
@@ -25,13 +26,12 @@ describe("buildSidebarGroups", () => {
         session({ file: "s2", cwd: "/home/me/alpha", updatedAt: at(4), name: "Newer" }),
         session({ file: "s3", cwd: "/home/me/beta", updatedAt: at(1), firstMessage: "hi" }),
       ],
-      branches: {},
     });
-    expect(groups.map((g) => g.cwd)).toEqual(["/home/me/beta", "/home/me/alpha"]);
-    expect(groups[0]?.rows.map((r) => r.key)).toEqual(["s1", "s3"]);
-    expect(groups[1]?.rows.map((r) => r.key)).toEqual(["s2", "a1"]);
-    expect(groups[0]?.rows.map((r) => r.title)).toEqual(["New conversation", "hi"]);
-    expect(groups[1]?.rows[0]?.title).toBe("Newer");
+    expect(groups.map(groupPath)).toEqual(["/home/me/beta", "/home/me/alpha"]);
+    expect(groups[0]?.items.map((r) => r.key)).toEqual(["s1", "s3"]);
+    expect(groups[1]?.items.map((r) => r.key)).toEqual(["s2", "a1"]);
+    expect(groups[0]?.items.map((r) => r.title)).toEqual(["New conversation", "hi"]);
+    expect(groups[1]?.items[0]?.title).toBe("Newer");
   });
 
   it("takes an agent's activity as the later of its start and its session's update", () => {
@@ -47,9 +47,8 @@ describe("buildSidebarGroups", () => {
         session({ file: "f-busy", updatedAt: at(10) }),
         session({ file: "f-free", updatedAt: at(5) }),
       ],
-      branches: {},
     });
-    const rows = groups[0]?.rows ?? [];
+    const rows = groups[0]?.items ?? [];
     expect(rows.map((r) => r.key)).toEqual(["busy", "old", "f-free"]);
     expect(rows[0]?.activity).toBe(Date.parse(at(10)));
     expect(rows[1]?.activity).toBe(Date.parse(at(9)));
@@ -68,9 +67,8 @@ describe("buildSidebarGroups", () => {
         session({ file: "gone", name: "Exited one" }),
         session({ file: "free", name: "On disk" }),
       ],
-      branches: {},
     });
-    const rows = groups.flatMap((g) => g.rows);
+    const rows = groups.flatMap((g) => g.items);
     expect(rows.map((r) => r.key).sort()).toEqual(["a1", "a2", "a3", "free"]);
     const title = (key: string) => rows.find((r) => r.key === key)?.title;
     expect(title("a1")).toBe("Fix the flaky test");
@@ -82,9 +80,8 @@ describe("buildSidebarGroups", () => {
     const [group] = buildSidebarGroups({
       agents: [makeAgent({ id: "a1" })],
       sessions: [],
-      branches: {},
     });
-    expect(group?.rows[0]?.title).toBe("New conversation");
+    expect(group?.items[0]?.title).toBe("New conversation");
   });
 
   it("prepends the parent's basename when displayed groups share a basename", () => {
@@ -95,7 +92,6 @@ describe("buildSidebarGroups", () => {
         session({ file: "2", cwd: "/home/me/phoenix/phoenix", updatedAt: at(2) }),
         session({ file: "3", cwd: "/home/me/pi-code/", updatedAt: at(1) }),
       ],
-      branches: {},
     });
     expect(groups.map((g) => g.label)).toEqual(["Kepi/phoenix", "phoenix/phoenix", "pi-code"]);
   });
@@ -109,20 +105,58 @@ describe("buildSidebarGroups", () => {
         makeAgent({ id: "exited", cwd: "/r/exited", status: "exited" }),
       ],
       sessions: [session({ file: "s", cwd: "/r/disk" })],
-      branches: {
-        "/r/ready": "main",
-        "/r/starting": "dev",
-        "/r/trust": "wip",
-        "/r/exited": "old",
-        "/r/disk": "stale",
-      },
     });
-    const branch = (cwd: string) => groups.find((g) => g.cwd === cwd)?.branch;
+    const branches = {
+      "/r/ready": "main",
+      "/r/starting": "dev",
+      "/r/trust": "wip",
+      "/r/exited": "old",
+      "/r/disk": "stale",
+    };
+    const branch = (cwd: string) =>
+      liveBranch(branches, cwd, groups.find((g) => groupPath(g) === cwd)?.items ?? []);
     expect(branch("/r/ready")).toBe("main");
     expect(branch("/r/starting")).toBe("dev");
     expect(branch("/r/trust")).toBe("wip");
     expect(branch("/r/exited")).toBeUndefined();
     expect(branch("/r/disk")).toBeUndefined();
+  });
+
+  it("places rows by layout, an agent's from its session's latest scan", () => {
+    const repo = "/home/me/pi-code";
+    const groups = buildSidebarGroups({
+      agents: [
+        // Opened before the folder was deleted; its session's scan says it's gone.
+        makeAgent({
+          id: "a1",
+          cwd: `${repo}/spike`,
+          sessionFile: "f1",
+          layout: { repo, role: "worktree" },
+        }),
+        // A fresh worktree: no session file yet.
+        makeAgent({
+          id: "a2",
+          cwd: `${repo}/fresh`,
+          startedAt: at(9),
+          layout: { repo, role: "worktree" },
+        }),
+      ],
+      sessions: [
+        session({
+          file: "f1",
+          cwd: `${repo}/spike`,
+          layout: { repo, role: "worktree", missing: true },
+        }),
+      ],
+    });
+    expect(groups).toHaveLength(1);
+    const [group] = groups;
+    if (group?.kind !== "repo") throw new Error("expected a repo group");
+    expect(group.worktrees.map((w) => [w.label, w.missing])).toEqual([
+      ["fresh", false],
+      ["spike", true],
+    ]);
+    expect(group.worktrees[1]?.items[0]?.layout?.missing).toBe(true);
   });
 });
 
@@ -145,17 +179,15 @@ describe("buildSidebarGroups with a query", () => {
       ],
       sessions: [],
       known: [session({ file: "f1", firstMessage: "Fix the design" })],
-      branches: {},
       query: "design",
     });
-    expect(groups.flatMap((g) => g.rows.map((r) => r.key))).toEqual(["a1"]);
+    expect(groups.flatMap((g) => g.items.map((r) => r.key))).toEqual(["a1"]);
   });
 
   it("never shows a session held by an agent the query hides", () => {
     const groups = buildSidebarGroups({
       agents: [makeAgent({ id: "a1", cwd: "/x", sessionName: "Unrelated", sessionFile: "held" })],
       sessions: [session({ file: "held", name: "Phoenix match" })],
-      branches: {},
       query: "phoenix",
     });
     expect(groups).toEqual([]);

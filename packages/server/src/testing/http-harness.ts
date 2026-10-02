@@ -57,6 +57,8 @@ export interface HarnessOptions {
   curator?: boolean;
   /** Watches `<agentDir>/sessions` and feeds rescans to the hub, as the server does. */
   watchSessions?: boolean;
+  /** Trash command for session files (default `rm`, keeping test files out of the real Trash). */
+  trashCommand?: string;
 }
 
 /** A push message the harness's fake sender received. */
@@ -394,6 +396,7 @@ export class Harness {
       piVersion: async () => "test",
       ...(this.push !== undefined ? { push: this.push } : {}),
       ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
+      trashCommand: opts.trashCommand ?? "rm",
     });
   }
 

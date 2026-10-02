@@ -154,6 +154,34 @@ describe("Share target", () => {
     expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue(EXPECTED);
   });
 
+  it("disables recent sessions whose folder is missing", async () => {
+    const recent = (folder: string, name: string, missing: boolean) => ({
+      file: `/s/${folder}.jsonl`,
+      id: folder,
+      cwd: `/home/me/repo/${folder}`,
+      name,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      layout: { repo: "/home/me/repo", role: "worktree", ...(missing ? { missing } : {}) },
+    });
+    stubApi((call) =>
+      call.url === "/api/sessions"
+        ? [
+            200,
+            {
+              sessions: [recent("gone", "Gone talk", true), recent("here", "Here talk", false)],
+            },
+          ]
+        : undefined,
+    );
+    renderAt(SHARED);
+    await screen.findByText("Gone talk");
+    const row = (name: string) =>
+      screen.getAllByTestId("session-row").find((r) => r.textContent?.includes(name));
+    expect(row("Gone talk")).toBeDisabled();
+    expect(row("Here talk")).toBeEnabled();
+  });
+
   it("starts a new conversation in a folder with the draft", async () => {
     const { calls } = stubApi((call) =>
       call.url === "/api/agents" && call.method === "POST"

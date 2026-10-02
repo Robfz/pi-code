@@ -1,8 +1,17 @@
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import {
   FIRST_MESSAGE_MAX,
   parseSessionFile,
@@ -243,5 +252,49 @@ describe("SessionCatalog cache", () => {
       [join(repo, "sub"), true],
       [tmp, false],
     ]);
+  });
+});
+
+describe("SessionCatalog layout", () => {
+  it("attaches each cwd's layout to sessions and projects, recomputed per scan", async () => {
+    const root = realpathSync(tmp);
+    const { repo, main } = makeLayoutRepo(root, "r");
+    const wt = join(repo, "wt");
+    git(main, "worktree", "add", "-q", "-b", "wt", wt);
+    const plain = join(root, "plain");
+    git(root, "clone", "-q", join(root, "r.git"), plain);
+    const dir = join(root, "agent", "sessions", "--x--");
+    mkdirSync(dir, { recursive: true });
+    const cwds = { container: repo, main, wt, plain };
+    Object.entries(cwds).forEach(([id, cwd], i) => {
+      writeFileSync(
+        join(dir, `${id}.jsonl`),
+        `${JSON.stringify({ type: "session", id, timestamp: `2026-01-0${i + 1}T00:00:00.000Z`, cwd })}\n`,
+      );
+    });
+    const catalog = new SessionCatalog({ agentDir: join(root, "agent") });
+
+    const layouts = Object.fromEntries((await catalog.sessions()).map((s) => [s.id, s.layout]));
+    expect(layouts).toEqual({
+      container: { repo, role: "container" },
+      main: { repo, role: "main" },
+      wt: { repo, role: "worktree" },
+      plain: undefined,
+    });
+    expect((await catalog.sessions())[0]).not.toHaveProperty("layout");
+    expect((await catalog.projects()).map((p) => [p.cwd, p.layout])).toEqual([
+      [plain, undefined],
+      [wt, { repo, role: "worktree" }],
+      [main, { repo, role: "main" }],
+      [repo, { repo, role: "container" }],
+    ]);
+
+    rmSync(wt, { recursive: true });
+    catalog.invalidate();
+    expect((await catalog.sessions()).find((s) => s.id === "wt")?.layout).toEqual({
+      repo,
+      role: "worktree",
+      missing: true,
+    });
   });
 });

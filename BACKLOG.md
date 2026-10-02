@@ -6,5 +6,4 @@
 - Dialogs instead of bottom sheets on desktop
 
 ## General
-- Git worktree support
 - Render flickering

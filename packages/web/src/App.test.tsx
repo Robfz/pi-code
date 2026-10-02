@@ -29,7 +29,8 @@ describe("App", () => {
       makeAgent({ id: "a1", cwd: "/home/me/alpha", attention: "finished" }),
       makeAgent({ id: "a2", cwd: "/home/me/beta", sessionName: "Refactor", isStreaming: true }),
     ]);
-    expect(await screen.findByText("alpha")).toBeInTheDocument();
+    // The folder's header and its agent's row (titled by the folder until it has a name).
+    expect(await screen.findAllByText("alpha")).toHaveLength(2);
     expect(screen.getByText("Refactor")).toBeInTheDocument();
     expect(screen.getByText("Finished")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();

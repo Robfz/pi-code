@@ -1,6 +1,6 @@
 /**
- * Git diff and status for an agent's cwd (design/01-server.md, "Git"). Runs `git` directly
- * (no shell) with a 10 s timeout.
+ * Git diff and status for an agent's cwd (design/01-server.md, "Git"), and `runGit`, which runs
+ * `git` directly (no shell) with a timeout (10 s by default).
  */
 import { spawn } from "node:child_process";
 import { lstat } from "node:fs/promises";
@@ -14,12 +14,12 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /** Files larger than this are listed without a patch. */
 export const MAX_PATCH_BYTES = 1024 * 1024;
 
-const GIT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 /** Concurrent `git diff --no-index` runs for untracked files. */
 const UNTRACKED_CONCURRENCY = 8;
 
-class GitError extends Error {
+export class GitError extends Error {
   override name = "GitError";
   constructor(
     message: string,
@@ -36,14 +36,23 @@ interface GitResult {
   stderr: string;
 }
 
+export interface RunGitOptions {
+  /** Exit codes that resolve (default `[0]`). */
+  okCodes?: readonly number[];
+  /** Default 10 s. */
+  timeoutMs?: number;
+  /** Added to the server's environment. */
+  env?: Record<string, string>;
+}
+
 /**
- * Runs `git args` in `cwd`. Resolves for exit codes in `okCodes` (default `[0]`), rejects with
- * `GitError` otherwise, on timeout, or when the output exceeds `MAX_OUTPUT_BYTES`.
+ * Runs `git args` in `cwd`. Resolves for exit codes in `okCodes`, rejects with `GitError`
+ * otherwise, after `timeoutMs`, or when the output exceeds `MAX_OUTPUT_BYTES`.
  */
-function runGit(
+export function runGit(
   cwd: string,
   args: readonly string[],
-  opts: { okCodes?: readonly number[] } = {},
+  opts: RunGitOptions = {},
 ): Promise<GitResult> {
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
@@ -51,6 +60,7 @@ function runGit(
       cwd,
       env: {
         ...process.env,
+        ...opts.env,
         GIT_OPTIONAL_LOCKS: "0",
         GIT_TERMINAL_PROMPT: "0",
         GIT_PAGER: "cat",
@@ -66,7 +76,10 @@ function runGit(
       failure ??= new GitError(message, null, "");
       child.kill("SIGKILL");
     };
-    const timer = setTimeout(() => fail(`git ${args[0]} timed out`), GIT_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => fail(`git ${args[0]} timed out`),
+      opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_OUTPUT_BYTES) fail(`git ${args[0]} output too large`);

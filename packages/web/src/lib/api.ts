@@ -9,6 +9,7 @@ import type {
   AgentInfo,
   AgentResponse,
   AllowedRpcCommandType,
+  CreateWorktreeBody,
   CursorList,
   DirSuggestion,
   DirsResponse,
@@ -20,6 +21,7 @@ import type {
   OpenAgentBody,
   ProjectSummary,
   ProjectsResponse,
+  RemoveWorktreeBody,
   RpcCommandBody,
   RpcCommandResult,
   SessionSummary,
@@ -184,6 +186,20 @@ export async function listDirs(prefix: string): Promise<DirSuggestion[]> {
 
 export function navigateTree(id: AgentId, body: NavigateBody): Promise<NavigateResponse> {
   return request<NavigateResponse>("POST", agentPath(id, "/tree/navigate"), body);
+}
+
+// ---------------------------------------------------------------------------
+// Worktrees
+
+/** Creates `<repo>/<name>` (after a fetch) and opens a conversation there. */
+export async function createWorktree(body: CreateWorktreeBody): Promise<AgentInfo> {
+  return (await request<AgentResponse>("POST", "/api/worktrees", body)).agent;
+}
+
+/** Removes a linked or missing worktree, its conversations and its session files. */
+export function removeWorktree(path: string, force = false): Promise<void> {
+  const body: RemoveWorktreeBody = force ? { path, force } : { path };
+  return request<void>("DELETE", "/api/worktrees", body);
 }
 
 // ---------------------------------------------------------------------------
