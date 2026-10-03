@@ -210,7 +210,7 @@ On phone, dialogs and the trust sheet are modal bottom sheets; outside taps don'
 
 ### Status bar
 
-Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · context bar (5 cells from `stats.contextUsage.percent`) · session name · model + thinking level · cost. Extension `setStatus` chips follow. Run state (running / compacting / retrying n/m) shows as a leading indicator.
+Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · context bar (5 cells from `stats.contextUsage.percent`) · session name · model + thinking level · cost, with `(sa $x)` once the conversation has a `subagent` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools`. Extension `setStatus` chips follow. Run state (running / compacting / retrying n/m) shows as a leading indicator.
 
 ## Tree screen
 

@@ -108,9 +108,29 @@ describe("StatusBar", () => {
     expect(within(bar).getByTestId("status-name")).toHaveTextContent("Refactor auth");
     expect(within(bar).getByRole("button", { name: "Model: claude-sonnet-4-5" })).toBeVisible();
     expect(within(bar).getByRole("button", { name: "Thinking: medium" })).toBeVisible();
-    expect(within(bar).getByRole("button", { name: "Cost $0.457" })).toBeVisible();
+    expect(within(bar).getByRole("button", { name: "Cost $0.457" })).toHaveTextContent(
+      /^\$0\.457$/,
+    );
     expect(screen.getByTestId("status-chips")).toHaveTextContent("MCP: 2 servers");
     expect(screen.queryByTestId("run-indicator")).toBeNull();
+  });
+
+  it("shows subagent spend next to the cost once a subagent call exists", async () => {
+    stubFetch();
+    const live: LiveState = {
+      ...initialLiveState(),
+      tools: {
+        t1: {
+          toolName: "subagent",
+          args: {},
+          status: "running",
+          partialResult: { details: { mode: "single", results: [{ usage: { cost: 0.12 } }] } },
+        },
+      },
+    };
+    await renderWithStore(<StatusBar />, hydratedStore({ state: state(), stats: stats(), live }));
+    const cost = screen.getByRole("button", { name: "Cost $0.457, subagents $0.120" });
+    expect(cost).toHaveTextContent("$0.457 (sa $0.120)");
   });
 
   it("is null-safe before state and stats arrive, and without a repo", async () => {
