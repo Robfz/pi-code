@@ -27,6 +27,7 @@ export function useStickToBottom(
       if (pinned.current) scroller.scrollTop = scroller.scrollHeight;
     });
     observer.observe(content);
+    observer.observe(scroller);
     return () => {
       scroller.removeEventListener("scroll", onScroll);
       observer.disconnect();
