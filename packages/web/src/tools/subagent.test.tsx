@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { agentStatus, formatUsage, type SubagentResult } from "./subagent";
+import type { SubagentResult } from "@/lib/subagent-details";
+import { agentStatus, formatUsage } from "./subagent";
 import { fixtureToolCall, propsAt } from "./testing";
 import { ToolCallView } from "./tool-call-view";
 

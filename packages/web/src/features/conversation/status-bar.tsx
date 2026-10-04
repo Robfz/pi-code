@@ -3,7 +3,7 @@ import { baseName } from "@/lib/content";
 import { formatCost } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
-import { selectSessionName } from "@/store/selectors";
+import { selectSessionName, selectSubagentSpend } from "@/store/selectors";
 import { useOpenSheet } from "./action-sheets";
 import { StatusChips } from "./extension-ui";
 
@@ -82,9 +82,10 @@ const itemButton =
 
 /**
  * Mirrors the TUI status bar: folder · branch + dirty dot · context bar · session name ·
- * model + thinking level · cost, then extension `setStatus` chips. Model, thinking and
- * context/cost open their pickers / the stats sheet. On desktop the row doesn't wrap and context
- * through cost sit on the right; visual order only, so focus order matches the DOM.
+ * model + thinking level · cost (with `(sa $x)` subagent spend once the conversation has a
+ * `subagent` call), then extension `setStatus` chips. Model, thinking and context/cost open
+ * their pickers / the stats sheet. On desktop the row doesn't wrap and context through cost sit
+ * on the right; visual order only, so focus order matches the DOM.
  */
 export function StatusBar() {
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
@@ -92,6 +93,7 @@ export function StatusBar() {
   const git = useConversation((s) => s.gitStatus);
   const percent = useConversation((s) => s.stats?.contextUsage?.percent);
   const cost = useConversation((s) => s.stats?.cost);
+  const subagentSpend = useConversation(selectSubagentSpend);
   const name = useConversation(selectSessionName);
   const modelId = useConversation((s) => s.state?.model?.id);
   const reasoning = useConversation((s) => s.state?.model?.reasoning === true);
@@ -164,11 +166,12 @@ export function StatusBar() {
           <button
             type="button"
             className={cn(itemButton, "shrink-0 tabular-nums lg:order-1")}
-            aria-label={`Cost ${formatCost(cost)}`}
+            aria-label={`Cost ${formatCost(cost)}${subagentSpend === undefined ? "" : `, subagents ${formatCost(subagentSpend)}`}`}
             disabled={!ready}
             onClick={() => openSheet("stats")}
           >
             {formatCost(cost)}
+            {subagentSpend !== undefined && ` (sa ${formatCost(subagentSpend)})`}
           </button>
         )}
       </div>

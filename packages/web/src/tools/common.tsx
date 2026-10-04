@@ -6,27 +6,12 @@ import type { ReactNode } from "react";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { contentImages, imageSrc, toolResultText } from "@/lib/content";
+import { asRecord, str } from "@/lib/record";
 import { cn } from "@/lib/utils";
 import { OutputBlock } from "./generic";
 import type { ToolRendererProps } from "./registry";
 
-export type Rec = Record<string, unknown>;
-
-export function asRecord(value: unknown): Rec | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Rec)
-    : undefined;
-}
-
-export function str(value: unknown, key: string): string | undefined {
-  const v = asRecord(value)?.[key];
-  return typeof v === "string" ? v : undefined;
-}
-
-export function num(value: unknown, key: string): number | undefined {
-  const v = asRecord(value)?.[key];
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
+export { asRecord, num, type Rec, str } from "@/lib/record";
 
 export function strList(value: unknown, key: string): string[] {
   const v = asRecord(value)?.[key];

@@ -85,6 +85,7 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 - Worktrees are created and removed only in repos laid out as `<repo>/main` (or `master`) whose parent folder isn't inside a git repo; plain clones stay flat folder groups. A repo with no session and no open conversation appears nowhere: the picker and `/sessions` list only session-derived entries. See [`docs/design/06-worktrees.md`](docs/design/06-worktrees.md) for the rest.
 - A new worktree whose conversation closes before any message drops out of every listing; the folder stays, reachable through the picker's path field.
 - Removing a worktree doesn't stop a TUI pi running in it: its next write recreates its session file, listed under a missing worktree.
+- The status bar's subagent spend `(sa $x)` counts calls that throw (Stop/abort, server shutdown) and cursor-runner calls as $0: their spend never reaches the session file.
 
 ## Documentation
 

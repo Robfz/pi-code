@@ -11,6 +11,7 @@ import {
   type ToolResultMessage,
   type Transcript,
 } from "@pi-code/protocol";
+import { subagentCost } from "@/lib/subagent-details";
 import type { ConversationState } from "./conversation-store";
 
 function memoByIdentity<K extends object, V>(compute: (key: K) => V): (key: K) => V {
@@ -92,6 +93,35 @@ const toolCallIdsOf = memoByIdentity((branch: SessionEntry[]) => {
 /** Ids of tool calls in committed assistant messages on the active branch. */
 export const selectBranchToolCallIds = (s: ConversationState): Set<string> =>
   toolCallIdsOf(selectActiveBranch(s));
+
+const committedSubagentSpendOf = memoByIdentity((entries: SessionEntry[]) => {
+  let cost = 0;
+  let hasCall = false;
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role !== "toolResult" || message.toolName !== "subagent") continue;
+    cost += subagentCost(message);
+    hasCall = true;
+  }
+  return { cost, hasCall };
+});
+
+/**
+ * Cumulative `subagent` tool cost: committed results on all branches (like pi's session cost)
+ * plus calls not committed yet, from their result or latest partial result. Undefined when the
+ * conversation has no subagent call.
+ */
+export const selectSubagentSpend = (s: ConversationState): number | undefined => {
+  const committed = committedSubagentSpendOf(s.transcript.entries);
+  let spend = committed.hasCall ? committed.cost : undefined;
+  // `live.tools` drops a call in the same update that appends its result entry, so no overlap.
+  for (const run of Object.values(s.live.tools)) {
+    if (run.toolName !== "subagent") continue;
+    spend = (spend ?? 0) + subagentCost(run.result ?? run.partialResult);
+  }
+  return spend;
+};
 
 /** Session name: pi's state once known (it tracks renames and session switches), else the agent's. */
 export const selectSessionName = (s: ConversationState): string | undefined =>
