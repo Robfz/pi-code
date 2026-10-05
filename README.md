@@ -54,7 +54,17 @@ Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes ev
 2. Chrome menu → **Add to Home screen** → **Install**.
 3. Open pi-code from the home screen, go to **Settings** and tap **Enable notifications**; allow the permission prompt.
 
-You get a notification when a run finishes, fails, or waits for your input (dialogs, project trust); tapping it opens that conversation. The app icon badge shows how many agents need attention. The same flow works in desktop Chrome.
+You get a notification when a run finishes, fails, or waits for your input (dialogs, project trust); tapping it opens that conversation. The app icon badge shows how many agents need attention.
+
+## Installing the PWA on the desktop
+
+1. Open `https://<mac>.<tailnet>.ts.net` in Chrome or Edge (Tailscale connected).
+2. Click the install icon in the address bar (or browser menu → **Install pi-code**). The app gets its own window and Dock icon; right-click the Dock icon for **New conversation**.
+3. Go to **Settings** and click **Enable notifications**; allow the permission prompt. If no prompt appears, check the address bar for a blocked-notifications icon.
+
+The browser must be running to receive notifications. A notification is shown only when no pi-code window is focused; a focused window shows a toast instead.
+
+On macOS, notifications come from the browser (its name and icon) unless you enable `chrome://flags/#enable-mac-pwas-notification-attribution` (`edge://flags/…` in Edge) and restart the browser. pi-code then shows up in System Settings → Notifications as its own app: allow it there or at its first prompt, and keep **Badge app icon** on for the Dock badge.
 
 ## Development
 

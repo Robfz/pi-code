@@ -102,6 +102,10 @@ describe("notificationFor", () => {
     });
   });
 
+  it("leaves the icon out on macOS, where the app icon already shows", () => {
+    expect(notificationFor(payload, true).options).not.toHaveProperty("icon");
+  });
+
   it("reads the URL back from notification data", () => {
     expect(notificationUrl({ url: "/agents/a1" })).toBe("/agents/a1");
     expect(notificationUrl({ url: "https://evil.example" })).toBe("/");

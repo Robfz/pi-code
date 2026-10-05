@@ -1,6 +1,6 @@
 import type { AgentInfo } from "@pi-code/protocol";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
@@ -49,6 +49,27 @@ describe("desktop shell (≥1024px)", () => {
       .setup()
       .click(within(main as HTMLElement).getByRole("button", { name: "New conversation" }));
     expect(await screen.findByTestId("project-picker")).toBeInTheDocument();
+  });
+
+  it("opens the project picker at /?new and strips the param", async () => {
+    const router = renderApp("/?new=1", { desktop: true });
+    expect(await screen.findByTestId("project-picker")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.searchStr).toBe(""));
+    expect(router.state.location.pathname).toBe("/");
+    // Replaced, not pushed: Back doesn't reopen the picker.
+    expect(router.history.length).toBe(1);
+    expect(
+      screen.getByRole("heading", { name: /Pick a conversation/, hidden: true }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the project picker when /?new is pushed onto an open /", async () => {
+    const router = renderApp("/", { desktop: true });
+    await screen.findByRole("heading", { name: /Pick a conversation/ });
+    expect(screen.queryByTestId("project-picker")).toBeNull();
+    act(() => router.history.push("/?new=1"));
+    expect(await screen.findByTestId("project-picker")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.searchStr).toBe(""));
   });
 
   it("toggles the sidebar on a conversation route; the header has no back chevron", async () => {
@@ -149,6 +170,14 @@ describe("phone shell (<1024px)", () => {
     expect(await screen.findByRole("heading", { name: "pi-code" })).toBeInTheDocument();
     expect(sidebar()).toBeNull();
     expect(screen.queryByRole("button", { name: "Toggle sidebar" })).toBeNull();
+  });
+
+  it("opens the project picker at /?new and strips the param", async () => {
+    const router = renderApp("/?new=1", { desktop: false });
+    expect(await screen.findByTestId("project-picker")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.searchStr).toBe(""));
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.getByRole("heading", { name: "pi-code", hidden: true })).toBeInTheDocument();
   });
 
   it("has no sidebar toggle on other routes", async () => {

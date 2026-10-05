@@ -27,7 +27,7 @@ export default defineConfig({
         id: "/",
         name: "pi-code",
         short_name: "pi-code",
-        description: "Drive the pi coding agent on your Mac from your phone.",
+        description: "A client for the pi coding agent running on your Mac.",
         start_url: "/",
         scope: "/",
         display: "standalone",
@@ -51,6 +51,15 @@ export default defineConfig({
             purpose: "maskable",
           },
           { src: "/favicon.svg", sizes: "any", type: "image/svg+xml" },
+        ],
+        launch_handler: { client_mode: "focus-existing" },
+        shortcuts: [
+          {
+            name: "New conversation",
+            short_name: "New",
+            url: "/?new=1",
+            icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+          },
         ],
         share_target: {
           action: "/share",

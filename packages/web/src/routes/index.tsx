@@ -1,13 +1,13 @@
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ProjectPicker } from "@/features/catalog/project-picker";
+import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { HomeScreen } from "./home";
 
 /** Desktop `/`: the sidebar lists the conversations, the content area invites to pick one. */
 function PickConversationScreen() {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useNewConversationPicker();
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-sm text-muted-foreground">Pick a conversation or start a new one</h1>

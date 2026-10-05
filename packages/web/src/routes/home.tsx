@@ -2,7 +2,7 @@ import type { AgentInfo } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FolderIcon, HistoryIcon, LoaderIcon, PlusIcon, SettingsIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AttentionBadge } from "@/components/attention-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { GroupedListing } from "@/features/catalog/grouped-listing";
 import { agentLayout, epochMs, groupListing } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { GroupedSessionList } from "@/features/catalog/session-list";
+import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
@@ -137,7 +138,7 @@ function RecentSessions() {
 }
 
 export function HomeScreen() {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useNewConversationPicker();
   const agents = useLiveAgents();
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
