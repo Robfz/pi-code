@@ -76,7 +76,8 @@ self.addEventListener("push", (event) => {
       const clients = await windowClients();
       for (const client of clients) post(client, { type: SW_MESSAGE.push, payload });
       if (hasFocusedClient(clients)) return;
-      const { title, options } = notificationFor(payload);
+      const mac = self.navigator.userAgent.includes("Macintosh");
+      const { title, options } = notificationFor(payload, mac);
       await self.registration.showNotification(title, options);
     })(),
   );

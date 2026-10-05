@@ -238,7 +238,7 @@ Disabled while a run is active.
 **Service worker** (`src/sw.ts`, injectManifest):
 
 - Precaches the app shell; API requests always go to the network.
-- `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, renotify: true, data: { url } })`.
+- `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, renotify: true, data: { url }, icon, badge })`, without `icon` on macOS, which shows it as an attachment next to the app icon (pi-code's own with the browser's notification attribution).
 - `notificationclick`: focus an existing window and navigate it to `url`, else `openWindow(url)`.
 
 While the app is visible and the stream is live, `useBadgeSync` keeps the badge equal to the agents in `live` needing attention, minus the one on screen.

@@ -109,12 +109,16 @@ export interface NotificationSpec {
     /** …and still alerts (sound / vibration) instead of replacing it silently. */
     renotify: true;
     data: { url: string };
-    icon: string;
+    icon?: string;
     badge: string;
   };
 }
 
-export function notificationFor(payload: PushPayload): NotificationSpec {
+/**
+ * `mac`: macOS shows `icon` as an attachment beside the app icon, which is pi-code's own once
+ * the browser attributes notifications to the installed app, so it's left out there.
+ */
+export function notificationFor(payload: PushPayload, mac = false): NotificationSpec {
   return {
     title: payload.title,
     options: {
@@ -122,7 +126,7 @@ export function notificationFor(payload: PushPayload): NotificationSpec {
       tag: payload.agentId,
       renotify: true,
       data: { url: payload.url },
-      icon: NOTIFICATION_ICON,
+      ...(mac ? {} : { icon: NOTIFICATION_ICON }),
       badge: NOTIFICATION_BADGE,
     },
   };
