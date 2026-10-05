@@ -6,20 +6,22 @@ import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useBadgeSync } from "./badge";
+import { useLaunchQueue } from "./launch-queue";
 import { OfflineBanner } from "./offline-banner";
 import { useServiceWorkerMessages } from "./sw-messages";
 
 const SIDEBAR_ID = "app-sidebar";
 
 /**
- * Root layout: offline banner, badge sync and service-worker messages around every screen. On
- * desktop (≥1024px) the sidebar is docked on the left, shown on load and toggled from the shell
- * for the rest of the tab's life; below, it opens as a sheet from the conversation header. Hosts
- * the worktree dialogs and sheet (`WorktreeActionsProvider`).
+ * Root layout: offline banner, badge sync, service-worker messages and launch-queue routing around
+ * every screen. On desktop (≥1024px) the sidebar is docked on the left, shown on load and toggled
+ * from the shell for the rest of the tab's life; below, it opens as a sheet from the conversation
+ * header. Hosts the worktree dialogs and sheet (`WorktreeActionsProvider`).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   useServiceWorkerMessages();
   useBadgeSync();
+  useLaunchQueue();
   const desktop = useIsDesktop();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // The toggle lives in the sidebar while open and in the rail while hidden, so it remounts on

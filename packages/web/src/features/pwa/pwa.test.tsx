@@ -28,6 +28,7 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, "onLine");
   Reflect.deleteProperty(navigator, "setAppBadge");
   Reflect.deleteProperty(navigator, "clearAppBadge");
+  Reflect.deleteProperty(window, "launchQueue");
 });
 
 describe("offline banner", () => {
@@ -135,5 +136,57 @@ describe("service worker messages", () => {
     expect(screen.getByText("Allow network?")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Open" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/sessions"));
+  });
+});
+
+describe("launch queue", () => {
+  /** A fake `window.launchQueue`; `launch(url)` delivers params to the consumer. */
+  function installLaunchQueue() {
+    let consumer: ((params: { targetURL?: string }) => void) | undefined;
+    Object.defineProperty(window, "launchQueue", {
+      configurable: true,
+      value: { setConsumer: (next: typeof consumer) => (consumer = next) },
+    });
+    return {
+      launch(targetURL: string) {
+        if (!consumer) throw new Error("no launch consumer");
+        consumer({ targetURL });
+      },
+    };
+  }
+
+  it("routes a same-origin launch in-app and ignores other origins", async () => {
+    const queue = installLaunchQueue();
+    stubFetch();
+    const router = renderAt("/settings");
+    await screen.findByRole("heading", { name: "Settings" });
+    act(() => queue.launch(`${window.location.origin}/sessions?cwd=%2Fhome#top`));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/sessions"));
+    expect(router.state.location.search).toEqual({ cwd: "/home" });
+    expect(router.state.location.hash).toBe("top");
+
+    act(() => queue.launch("https://evil.example/settings"));
+    await screen.findByRole("heading", { name: "Sessions" });
+    expect(router.state.location.pathname).toBe("/sessions");
+  });
+
+  it("ignores the initial launch's params, already handled by the router", async () => {
+    const queue = installLaunchQueue();
+    stubFetch();
+    const router = renderAt("/settings");
+    await screen.findByRole("heading", { name: "Settings" });
+    // The document's URL (jsdom's, as the router runs on a memory history here).
+    act(() => queue.launch(window.location.href));
+    expect(router.state.location.pathname).toBe("/settings");
+    // Later launches to the same URL route.
+    act(() => queue.launch(window.location.href));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+  });
+
+  it("does nothing without the Launch Handler API", async () => {
+    stubFetch();
+    const router = renderAt("/settings");
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
   });
 });
