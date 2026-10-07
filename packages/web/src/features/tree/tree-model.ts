@@ -6,8 +6,8 @@
  * at one depth; each branch point indents its children.
  */
 
-import type { SessionEntry } from "@pi-code/protocol";
-import { contentText } from "@/lib/content";
+import { type SessionEntry, splitFileBlocks } from "@pi-code/protocol";
+import { baseName, contentText } from "@/lib/content";
 import { formatTokens } from "@/lib/time";
 
 export type TreeRowKind = "user" | "assistant" | "compaction" | "branch_summary";
@@ -31,12 +31,20 @@ export interface TreeModel {
   activePath: Set<string>;
 }
 
+/** A user message's typed text, else its attached file names, else "(image)". */
+function userText(text: string): string {
+  const { files, body } = splitFileBlocks(text);
+  if (body.trim() !== "") return body.trim();
+  if (files.length > 0) return `(file: ${files.map((f) => baseName(f.name)).join(", ")})`;
+  return "(image)";
+}
+
 function describe(entry: SessionEntry): { kind: TreeRowKind; text: string } | null {
   switch (entry.type) {
     case "message": {
       const message = entry.message;
       if (message.role === "user") {
-        return { kind: "user", text: contentText(message.content).trim() || "(image)" };
+        return { kind: "user", text: userText(contentText(message.content)) };
       }
       if (message.role === "assistant") {
         const text = contentText(message.content).trim();

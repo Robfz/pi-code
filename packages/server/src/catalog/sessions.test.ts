@@ -173,6 +173,19 @@ describe("parseSessionFile", () => {
     });
   });
 
+  it("leaves attached text files out of the first message", () => {
+    const files =
+      '<file name="a.ts">\nconst a = 1;\n</file>\n<file name="/x/b.md">\n# B\n</file>\n';
+    const withText = parseSessionFile(
+      "/f.jsonl",
+      `${header}\n${user([{ type: "text", text: `${files}review these` }])}\n`,
+      "x",
+    );
+    expect(withText?.firstMessage).toBe("review these");
+    const filesOnly = parseSessionFile("/f.jsonl", `${header}\n${user(files)}\n`, "x");
+    expect(filesOnly?.firstMessage).toBe("(file: a.ts, b.md)");
+  });
+
   it("rejects content whose first record isn't a header", () => {
     expect(parseSessionFile("/f", "", "x")).toBeUndefined();
     expect(parseSessionFile("/f", `${user("x")}\n${header}\n`, "x")).toBeUndefined();

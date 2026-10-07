@@ -159,6 +159,21 @@ describe("tree model", () => {
     expect(flattenTree(model, new Set(["a1"])).map((r) => r.item.id)).toEqual(["u1", "a1"]);
   });
 
+  it("shows user text without attached file blocks", () => {
+    const block = '<file name="a.ts">\nx\n</file>\n';
+    const entries = [
+      user("u1", null, `${block}explain`),
+      user("u2", "u1", block),
+      user("u3", "u2", ""),
+    ];
+    const model = buildTreeModel(entries, "u3");
+    expect(["u1", "u2", "u3"].map((id) => model.items.get(id)?.text)).toEqual([
+      "explain",
+      "(file: a.ts)",
+      "(image)",
+    ]);
+  });
+
   it("maps a hidden leaf to its nearest shown ancestor", () => {
     const { entries } = sampleTree();
     expect(buildTreeModel(entries, "tr").currentId).toBe("u2");

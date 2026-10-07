@@ -4,7 +4,7 @@ import {
   type RpcSessionState,
   type ServerEvent,
 } from "@pi-code/protocol";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -487,9 +487,12 @@ describe("bash prefixes", () => {
   });
 });
 
-describe("image attach", () => {
+describe("file attach", () => {
   const png = () =>
     new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" });
+  const txt = (name: string, content: BlobPart = "x", type = "") =>
+    new File([content], name, { type });
+  const fileInput = () => screen.getByTestId("file-input") as HTMLInputElement;
 
   // jsdom can't decode images: report a small bitmap.
   beforeEach(() => {
@@ -499,23 +502,16 @@ describe("image attach", () => {
     );
   });
 
-  it("is hidden when the model doesn't accept images", async () => {
-    await setup(["text"]);
-    expect(screen.queryByRole("button", { name: "Attach image" })).toBeNull();
-    expect(screen.queryByTestId("image-input")).toBeNull();
-  });
-
   it("attaches images as thumbnails, removes them, and sends base64 ImageContent", async () => {
     const { user, calls } = await setup(["text", "image"]);
-    expect(screen.getByRole("button", { name: "Attach image" })).toBeInTheDocument();
-    const input = screen.getByTestId("image-input") as HTMLInputElement;
-    expect(input).toHaveAttribute("accept", "image/*");
-    await user.upload(input, [png(), png()]);
-    const thumbs = await screen.findByRole("list", { name: "Attached images" });
-    await waitFor(() => expect(within(thumbs).getAllByRole("img")).toHaveLength(2));
-    await user.click(screen.getByRole("button", { name: "Remove image 2" }));
-    expect(within(thumbs).getAllByRole("img")).toHaveLength(1);
-    // Images alone can be sent.
+    expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
+    expect(fileInput()).not.toHaveAttribute("accept");
+    await user.upload(fileInput(), [png(), png()]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    await waitFor(() => expect(within(list).getAllByRole("img")).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Remove attachment 2" }));
+    expect(within(list).getAllByRole("img")).toHaveLength(1);
+    // Attachments alone can be sent.
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     await user.type(box(), "what is this?");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -528,41 +524,94 @@ describe("image attach", () => {
         },
       ]),
     );
-    expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
   });
 
-  it("drops attachments when the model switches to one without image input", async () => {
+  it("inlines text files as <file> blocks ahead of the typed text", async () => {
+    const { user, calls } = await setup(["text", "image"]);
+    await user.upload(fileInput(), [
+      txt("a.ts", "const a = 1;\n", "video/mp2t"),
+      png(),
+      txt("notes", "todo"),
+    ]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(3));
+    expect(within(list).getByText("a.ts")).toBeInTheDocument();
+    expect(within(list).getByText("notes")).toBeInTheDocument();
+    // With attachments, `!cmd` is a prompt, not a bash command.
+    await user.type(box(), "!explain");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(rpcBodies(calls)).toEqual([
+        {
+          type: "prompt",
+          message:
+            '<file name="a.ts" length="13">\nconst a = 1;\n\n</file>\n<file name="notes" length="4">\ntodo\n</file>\n!explain',
+          images: [{ type: "image", data: "iVBORw==", mimeType: "image/png" }],
+        },
+      ]),
+    );
+  });
+
+  it("attaches text files when the model doesn't accept images, and rejects images", async () => {
+    const { user, calls } = await setup(["text"]);
+    await user.upload(fileInput(), [png(), txt("a.md", "# A")]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).queryByRole("img")).toBeNull();
+    expect(toast.error).toHaveBeenCalledWith("The current model doesn't accept images (shot.png)");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(rpcBodies(calls)).toEqual([
+        { type: "prompt", message: '<file name="a.md" length="3">\n# A\n</file>\n' },
+      ]),
+    );
+  });
+
+  it("rejects binary and empty files", async () => {
+    const { user } = await setup(["text"]);
+    await user.upload(fileInput(), [
+      txt("app.bin", new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 0])),
+      txt("empty.txt", ""),
+    ]);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("app.bin isn't a text file"));
+    expect(toast.error).toHaveBeenCalledWith("empty.txt is empty");
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
+  });
+
+  it("drops only images when the model switches to one without image input", async () => {
     const { user, store } = await setup(["text", "image"]);
-    await user.upload(screen.getByTestId("image-input") as HTMLInputElement, png());
-    await screen.findByRole("list", { name: "Attached images" });
+    await user.upload(fileInput(), [png(), txt("a.ts")]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
     act(() => {
       store.getState().apply({ type: "state", state: state(["text"]) }, 1);
     });
-    expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Attach image" })).toBeNull();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).queryByRole("img")).toBeNull();
+    expect(within(list).getByText("a.ts")).toBeInTheDocument();
+  });
+
+  it("restores the typed text and attachments when sending fails", async () => {
+    const { user } = await setup(["text"]);
+    await user.upload(fileInput(), txt("a.ts"));
+    await screen.findByRole("list", { name: "Attachments" });
+    await user.type(box(), "review");
+    stubFetch(() => [409, { error: { code: "agent_busy", message: "busy" } }]);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(box()).toHaveValue("review");
+    expect(
+      within(screen.getByRole("list", { name: "Attachments" })).getByText("a.ts"),
+    ).toBeInTheDocument();
   });
 
   it("toasts images that can't be read, and keeps the others", async () => {
     const { user } = await setup(["text", "image"]);
     vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error("undecodable"));
-    await user.upload(screen.getByTestId("image-input") as HTMLInputElement, [png(), png()]);
-    const thumbs = await screen.findByRole("list", { name: "Attached images" });
-    expect(within(thumbs).getAllByRole("img")).toHaveLength(1);
+    await user.upload(fileInput(), [png(), png()]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    expect(within(list).getAllByRole("img")).toHaveLength(1);
     expect(toast.error).toHaveBeenCalledWith("Couldn't read shot.png");
-  });
-
-  it("ignores non-image files", async () => {
-    await setup(["text", "image"]);
-    const input = screen.getByTestId("image-input") as HTMLInputElement;
-    fireEvent.change(input, {
-      target: {
-        files: [
-          new File(["x"], "notes.txt", { type: "text/plain" }),
-          new File(["x"], "mystery", { type: "" }),
-        ],
-      },
-    });
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
   });
 });
