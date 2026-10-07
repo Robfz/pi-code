@@ -306,7 +306,7 @@ const scenarios: Record<string, Scenario> = {
     answerUi: (req) => (req.method === "confirm" ? { confirmed: true } : { cancelled: true }),
     steps: [
       prompt(
-        'Call the subagent tool once with agent "tiny", agentScope "project", and task "Read a.txt and reply with its contents". Then relay its answer in one line.',
+        'Call the spawn tool once with agent "tiny", agentScope "project", and task "Read a.txt and reply with its contents". Then relay its answer in one line.',
       ),
       settled,
     ],

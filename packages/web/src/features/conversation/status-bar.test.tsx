@@ -121,7 +121,7 @@ describe("StatusBar", () => {
       ...initialLiveState(),
       tools: {
         t1: {
-          toolName: "subagent",
+          toolName: "spawn",
           args: {},
           status: "running",
           partialResult: { details: { mode: "single", results: [{ usage: { cost: 0.12 } }] } },

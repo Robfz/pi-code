@@ -83,7 +83,7 @@ const itemButton =
 /**
  * Mirrors the TUI status bar: folder · branch + dirty dot · context bar · session name ·
  * model + thinking level · cost (with `(sa $x)` subagent spend once the conversation has a
- * `subagent` call), then extension `setStatus` chips. Model, thinking and context/cost open
+ * `spawn` call), then extension `setStatus` chips. Model, thinking and context/cost open
  * their pickers / the stats sheet. On desktop the row doesn't wrap and context through cost sit
  * on the right; visual order only, so focus order matches the DOM.
  */

@@ -1,9 +1,12 @@
 /**
- * `SubagentDetails` from the pi-extensions `subagent` tool, read defensively from a result,
+ * `SubagentDetails` from the pi-extensions `spawn` tool, read defensively from a result,
  * partial result or committed `toolResult` message (anything with a `details` field).
  */
 
 import { asRecord, num, type Rec, str } from "@/lib/record";
+
+/** Not "subagent": that name belongs to the pi-subagents package, whose details differ. */
+export const SPAWN_TOOL_NAME = "spawn";
 
 export interface SubagentUsage {
   input: number;

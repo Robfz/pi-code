@@ -20,6 +20,8 @@ The recorder behaves like the pi-code server. After every `message_end` and `ent
 
 User-installed extensions and packages load in RPC mode, and they were active while recording: `pi-web-access`, `pi-mcp-adapter`, and `~/.pi/agent/extensions` (label, subagent, status-bar, …). So the fixtures contain their startup noise: a `setStatus` request for `mcp` whose text includes ANSI escapes, a stderr warning from pi-web-access, and extra tools in the system message. The system message also includes the user's `APPEND_SYSTEM.md` and skill list.
 
+`subagent` was recorded with pi v1.0.4, where MCP is built into pi rather than provided by `pi-mcp-adapter`. It has no `mcp` status chip and no stderr warning. Instead it gets a `notify` warning listing MCP servers that need sign-in.
+
 | Fixture | Scenario |
 |---|---|
 | `plain-answer` | One short question, answered with thinking + text |
@@ -32,7 +34,7 @@ User-installed extensions and packages load in RPC mode, and they were active wh
 | `extension-dialog` | Throwaway extension: notify/setStatus/setWidget/setTitle/set_editor_text, then select/confirm/input/editor answered, plus a select left to time out |
 | `slash-commands` | `/name foo` and `/compact` sent via `prompt`: both go to the LLM as plain text |
 | `entry-types` | set_session_name, set_model ×2, set_thinking_level, `/label` (user extension), custom entry + custom message + label (throwaway extension), branch summary via `ctx.navigateTree`, get_tree, fork, clone, new_session |
-| `subagent` | User subagent extension runs a project-local haiku agent; its `confirm` dialog arrives mid-tool |
+| `subagent` | User subagent extension's `spawn` tool runs a project-local haiku agent; its `confirm` dialog arrives mid-tool |
 | `web-search` | pi-web-access `web_search` (curator off); emits `entry_appended` (custom `web-search-results`) |
 
 Re-record with (costs a few cents with haiku):

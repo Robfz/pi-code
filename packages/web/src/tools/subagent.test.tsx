@@ -9,7 +9,7 @@ import { ToolCallView } from "./tool-call-view";
 const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
 
 describe("subagent (subagent fixture)", () => {
-  const call = fixtureToolCall("subagent", "subagent");
+  const call = fixtureToolCall("subagent", "spawn");
 
   it("has five live updates and a final result", () => {
     expect(call.updates).toHaveLength(5);
@@ -38,7 +38,7 @@ describe("subagent (subagent fixture)", () => {
     expect(card()).toHaveAttribute("data-status", "running");
     const tools = within(card()).getByTestId("subagent-tools");
     expect(tools).toHaveTextContent("→ read a.txt");
-    expect(card()).toHaveTextContent("1 turn ↑1.9k ↓174 $0.0028 ctx:2.1k");
+    expect(card()).toHaveTextContent("1 turn ↑1.9k ↓171 $0.0028 ctx:2.1k");
 
     // Update 4: the answer streams in, still no duration.
     rerender(<ToolCallView {...propsAt(call, { update: 4 })} />);
@@ -54,8 +54,8 @@ describe("subagent (subagent fixture)", () => {
     const card = screen.getByTestId("subagent-card");
     expect(card).toHaveAttribute("data-status", "done");
     expect(within(card).getByLabelText("Done")).toBeInTheDocument();
-    expect(within(card).getByText("18.3s")).toBeInTheDocument();
-    expect(card).toHaveTextContent("2 turns ↑4.0k ↓218 $0.0051 ctx:2.1k · claude-haiku-4-5");
+    expect(within(card).getByText("19.5s")).toBeInTheDocument();
+    expect(card).toHaveTextContent("2 turns ↑4.1k ↓224 $0.0052 ctx:2.2k · claude-haiku-4-5");
     expect(within(card).getByTestId("subagent-tools")).toHaveTextContent("read a.txt");
     expect(await within(card).findByText(/alpha: the first file/)).toBeInTheDocument();
   });
@@ -92,7 +92,7 @@ describe("subagent modes", () => {
     render(
       <ToolCallView
         toolCallId="p1"
-        toolName="subagent"
+        toolName="spawn"
         args={{
           tasks: [
             { agent: "scout", task: "a" },
@@ -131,7 +131,7 @@ describe("subagent modes", () => {
     render(
       <ToolCallView
         toolCallId="c1"
-        toolName="subagent"
+        toolName="spawn"
         args={{
           chain: [
             { agent: "planner", task: "plan" },
@@ -162,7 +162,7 @@ describe("subagent modes", () => {
     render(
       <ToolCallView
         toolCallId="x"
-        toolName="subagent"
+        toolName="spawn"
         args={{}}
         status="done"
         isError={false}
