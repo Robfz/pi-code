@@ -19,6 +19,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  sheetCenteredOnDesktop,
 } from "@/components/ui/sheet";
 import {
   MissingMark,
@@ -30,6 +31,7 @@ import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { cn } from "@/lib/utils";
 import { epochMs, groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
 
@@ -207,7 +209,10 @@ export function ProjectPicker({
       <SheetContent
         side="bottom"
         data-testid="project-picker"
-        className="max-h-[90dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
+        className={cn(
+          "max-h-[90dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)] lg:max-w-2xl",
+          sheetCenteredOnDesktop,
+        )}
       >
         <SheetHeader className="pr-12">
           <SheetTitle>{title}</SheetTitle>

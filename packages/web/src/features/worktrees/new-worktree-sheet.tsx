@@ -10,9 +10,11 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  sheetCenteredOnDesktop,
 } from "@/components/ui/sheet";
 import { useShowOpenedAgent } from "@/features/catalog/use-open-agent";
 import { createWorktree, errorMessage } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /** A layout repo: its container folder and its listing label. */
 export interface RepoTarget {
@@ -171,7 +173,10 @@ export function NewWorktreeSheet({
       <SheetContent
         side="bottom"
         data-testid="new-worktree-sheet"
-        className="max-h-[90dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
+        className={cn(
+          "max-h-[90dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)] lg:max-w-lg",
+          sheetCenteredOnDesktop,
+        )}
       >
         <SheetHeader className="pr-12">
           <SheetTitle>New worktree{repo ? ` in ${repo.label}` : ""}</SheetTitle>
