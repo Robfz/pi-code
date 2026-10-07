@@ -37,6 +37,13 @@ function SheetOverlay({
   );
 }
 
+/**
+ * Turns a bottom sheet into a centered card at `lg`. The `data-[side=bottom]` prefix matches the
+ * specificity of the base bottom-side positioning so these win. Pair with an `lg:max-w-*`.
+ */
+const sheetCenteredOnDesktop =
+  "lg:data-[side=bottom]:top-1/2 lg:data-[side=bottom]:right-auto lg:data-[side=bottom]:bottom-auto lg:data-[side=bottom]:left-1/2 lg:data-[side=bottom]:w-full lg:data-[side=bottom]:max-h-[80dvh] lg:data-[side=bottom]:-translate-x-1/2 lg:data-[side=bottom]:-translate-y-1/2 lg:data-[side=bottom]:rounded-xl lg:data-[side=bottom]:border lg:data-[side=bottom]:pb-0";
+
 function SheetContent({
   className,
   children,
@@ -154,4 +161,5 @@ export {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
+  sheetCenteredOnDesktop,
 };
