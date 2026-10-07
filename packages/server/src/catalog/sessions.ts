@@ -5,7 +5,13 @@
  */
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AgentId, ProjectSummary, RepoLayout, SessionSummary } from "@pi-code/protocol";
+import {
+  type AgentId,
+  type ProjectSummary,
+  type RepoLayout,
+  type SessionSummary,
+  splitFileBlocks,
+} from "@pi-code/protocol";
 import { findGitDir } from "../git/branches.ts";
 import { layoutOf } from "./layout.ts";
 
@@ -51,7 +57,7 @@ function contentText(content: unknown): string {
         ? [block.text]
         : [],
     )
-    .join(" ");
+    .join("\n");
 }
 
 /** Collapses whitespace and cuts to `FIRST_MESSAGE_MAX` characters (code points). */
@@ -101,7 +107,14 @@ export function parseSessionFile(
       isRecord(record.message) &&
       record.message.role === "user"
     ) {
-      firstMessage = preview(contentText(record.message.content));
+      // Leading `<file>` blocks (attached text files) are left out; a message with nothing but
+      // files shows their names.
+      const { files, body } = splitFileBlocks(contentText(record.message.content));
+      firstMessage =
+        preview(body) ??
+        (files.length > 0
+          ? preview(`(file: ${files.map((f) => basename(f.name)).join(", ")})`)
+          : undefined);
     }
   }
   if (header === undefined) return undefined;

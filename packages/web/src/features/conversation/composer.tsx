@@ -1,10 +1,11 @@
-import type { ImageContent } from "@pi-code/protocol";
+import { formatFileBlock, type ImageContent } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpIcon,
-  ImagePlusIcon,
+  FileTextIcon,
   ListPlusIcon,
   NavigationIcon,
+  PaperclipIcon,
   SquareIcon,
   UndoIcon,
   XIcon,
@@ -17,6 +18,7 @@ import { errorMessage, rpc } from "@/lib/api";
 import { imageSrc } from "@/lib/content";
 import { prepareImage } from "@/lib/image-resize";
 import { queryKeys } from "@/lib/query-client";
+import { readTextFile } from "@/lib/text-file";
 import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
@@ -44,13 +46,22 @@ function joinTexts(texts: readonly string[]): string {
   return texts.filter((t) => t.trim() !== "").join("\n\n");
 }
 
-interface Attachment {
-  key: string;
-  name: string;
-  image: ImageContent;
-}
+type Attachment = { key: string; name: string } & (
+  | { kind: "image"; image: ImageContent }
+  | { kind: "text"; text: string }
+);
 
 let attachmentKey = 0;
+
+/** Images go through `prepareImage` (only when the model takes images); anything else is text. */
+async function prepareAttachment(file: File, supportsImages: boolean): Promise<Attachment> {
+  const key = `att-${++attachmentKey}`;
+  if (file.type.startsWith("image/")) {
+    if (!supportsImages) throw new Error(`The current model doesn't accept images (${file.name})`);
+    return { key, name: file.name, kind: "image", image: await prepareImage(file) };
+  }
+  return { key, name: file.name, kind: "text", text: await readTextFile(file) };
+}
 
 /** Last `set_editor_text` nonce applied per conversation store (outlives remounts). */
 const seenEditorNonce = new WeakMap<ConversationStore, number>();
@@ -128,8 +139,9 @@ function SlashMenu({
  * - Desktop keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter newline.
  * - `/` autocompletes built-in and pi commands; built-ins run in the client.
  * - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
- * - Images (camera or gallery) go into `prompt.images` when the model accepts images, downscaled
- *   to 2048 px / re-encoded as JPEG when large (`prepareImage`).
+ * - Attached images go into `prompt.images` when the model accepts images, downscaled to
+ *   2048 px / re-encoded as JPEG when large (`prepareImage`). Other files are read as text
+ *   (`readTextFile`) and prepended to the message as `<file>` blocks (pi's CLI convention).
  * - `set_editor_text` requests and fork drafts replace the text.
  */
 export function Composer() {
@@ -180,9 +192,12 @@ export function Composer() {
     }
   }, [draft, agentId]);
 
-  // Attachments can't be sent to a model without image input.
+  // Images can't be sent to a model without image input.
   useEffect(() => {
-    if (!supportsImages) setAttachments((current) => (current.length === 0 ? current : []));
+    if (supportsImages) return;
+    setAttachments((current) =>
+      current.some((a) => a.kind === "image") ? current.filter((a) => a.kind !== "image") : current,
+    );
   }, [supportsImages]);
 
   // Autosize where `field-sizing: content` is unsupported (Safari, Firefox).
@@ -240,17 +255,17 @@ export function Composer() {
   }
 
   async function send(behavior?: "steer" | "followUp") {
-    const message = text.trim();
-    if (!ready || (message === "" && attachments.length === 0)) return;
+    const typed = text.trim();
+    if (!ready || (typed === "" && attachments.length === 0)) return;
 
     if (attachments.length === 0) {
-      const bash = parseBash(message);
+      const bash = parseBash(typed);
       if (bash) {
-        await runBash(message, bash.command, bash.excludeFromContext);
+        await runBash(typed, bash.command, bash.excludeFromContext);
         return;
       }
       // Other slash commands (extension, skill, template) go to pi as a prompt.
-      const slash = parseSlash(message);
+      const slash = parseSlash(typed);
       if (slash && findBuiltin(slash.name)) {
         setText("");
         await runBuiltin(slash.name, slash.args);
@@ -258,7 +273,13 @@ export function Composer() {
       }
     }
 
-    const images = attachments.map((a) => a.image);
+    const images: ImageContent[] = [];
+    let message = "";
+    for (const attachment of attachments) {
+      if (attachment.kind === "image") images.push(attachment.image);
+      else message += formatFileBlock({ name: attachment.name, text: attachment.text });
+    }
+    message += typed;
     setText("");
     setAttachments([]);
     const base = images.length > 0 ? { message, images } : { message };
@@ -270,7 +291,7 @@ export function Composer() {
           : { type: "prompt", ...base },
       );
     } catch (error) {
-      setText((current) => (current === "" ? message : current));
+      setText((current) => (current === "" ? typed : current));
       setAttachments((current) => (current.length === 0 ? attachments : current));
       toast.error(errorMessage(error));
     }
@@ -315,17 +336,14 @@ export function Composer() {
 
   async function addFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const images = [...files].filter((f) => f.type.startsWith("image/"));
-    const results = await Promise.allSettled(images.map((file) => prepareImage(file)));
+    const results = await Promise.allSettled(
+      [...files].map((file) => prepareAttachment(file, supportsImages)),
+    );
     const added: Attachment[] = [];
-    results.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        const name = images[index]?.name ?? "";
-        added.push({ key: `img-${++attachmentKey}`, name, image: result.value });
-      } else {
-        toast.error(errorMessage(result.reason));
-      }
-    });
+    for (const result of results) {
+      if (result.status === "fulfilled") added.push(result.value);
+      else toast.error(errorMessage(result.reason));
+    }
     if (added.length > 0) setAttachments((current) => [...current, ...added]);
   }
 
@@ -369,17 +387,27 @@ export function Composer() {
       )}
       <div className="rounded-2xl border bg-card/60 focus-within:border-ring">
         {attachments.length > 0 && (
-          <ul aria-label="Attached images" className="flex gap-2 overflow-x-auto px-3 pt-3">
+          <ul aria-label="Attachments" className="flex gap-2 overflow-x-auto px-3 pt-3">
             {attachments.map((attachment, index) => (
               <li key={attachment.key} className="relative shrink-0">
-                <img
-                  src={imageSrc(attachment.image)}
-                  alt={attachment.name || `Image ${index + 1}`}
-                  className="size-16 rounded-lg border object-cover"
-                />
+                {attachment.kind === "image" ? (
+                  <img
+                    src={imageSrc(attachment.image)}
+                    alt={attachment.name || `Image ${index + 1}`}
+                    className="size-16 rounded-lg border object-cover"
+                  />
+                ) : (
+                  <div
+                    title={attachment.name}
+                    className="flex h-16 max-w-40 items-center gap-1.5 rounded-lg border bg-muted/40 px-2.5 text-xs"
+                  >
+                    <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{attachment.name}</span>
+                  </div>
+                )}
                 <button
                   type="button"
-                  aria-label={`Remove image ${index + 1}`}
+                  aria-label={`Remove attachment ${index + 1}`}
                   onClick={() =>
                     setAttachments((current) => current.filter((a) => a.key !== attachment.key))
                   }
@@ -409,33 +437,28 @@ export function Composer() {
           className="field-sizing-content block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
         />
         <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
-          {supportsImages && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                data-testid="image-input"
-                onChange={(event) => {
-                  void addFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Attach image"
-                className="mr-auto"
-                disabled={!ready}
-                onClick={() => fileRef.current?.click()}
-              >
-                <ImagePlusIcon />
-              </Button>
-            </>
-          )}
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            data-testid="file-input"
+            onChange={(event) => {
+              void addFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Attach file"
+            className="mr-auto"
+            disabled={!ready}
+            onClick={() => fileRef.current?.click()}
+          >
+            <PaperclipIcon />
+          </Button>
           {running ? (
             <>
               {hasQueue && (

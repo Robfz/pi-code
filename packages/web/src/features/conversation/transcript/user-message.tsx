@@ -1,9 +1,13 @@
-import type { UserMessage } from "@pi-code/protocol";
+import { splitFileBlocks, type UserMessage } from "@pi-code/protocol";
+import { FileTextIcon } from "lucide-react";
 import { useState } from "react";
-import { contentImages, contentText, imageSrc } from "@/lib/content";
+import { baseName, contentImages, contentText, imageSrc } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
-/** User text + image thumbnails (content may be a string or a content array). */
+/**
+ * User text + image thumbnails (content may be a string or a content array). Leading `<file>`
+ * blocks (attached text files) render as collapsed chips that expand to the file's content.
+ */
 export function UserMessageView({
   message,
   pending = false,
@@ -11,7 +15,7 @@ export function UserMessageView({
   message: Pick<UserMessage, "content">;
   pending?: boolean;
 }) {
-  const text = contentText(message.content);
+  const { files, body } = splitFileBlocks(contentText(message.content));
   const images = contentImages(message.content);
   const [zoomed, setZoomed] = useState<number | null>(null);
   return (
@@ -44,7 +48,26 @@ export function UserMessageView({
           ))}
         </div>
       )}
-      {text !== "" && <div className="whitespace-pre-wrap break-words">{text}</div>}
+      {files.map((file, index) => (
+        <details
+          // biome-ignore lint/suspicious/noArrayIndexKey: file blocks have no id
+          key={index}
+          data-testid="file-attachment"
+          className="min-w-0 rounded-md border bg-background/50"
+        >
+          <summary
+            title={file.name}
+            className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-xs select-none"
+          >
+            <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate font-mono">{baseName(file.name)}</span>
+          </summary>
+          <pre className="max-h-64 overflow-auto border-t px-2 py-1.5 font-mono text-xs">
+            {file.text}
+          </pre>
+        </details>
+      ))}
+      {body !== "" && <div className="whitespace-pre-wrap break-words">{body}</div>}
     </div>
   );
 }

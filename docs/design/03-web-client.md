@@ -132,7 +132,7 @@ Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, n
 
 | Entry / role | Rendering |
 |---|---|
-| `user` message | Text + image thumbnails |
+| `user` message | Text + image thumbnails; leading `<file>` blocks (attached text files) as collapsed chips that expand to the content |
 | `assistant` message | Text (Streamdown), thinking (collapsed, expandable), each tool call paired with its `toolResult` by `toolCallId` → tool renderer |
 | `bashExecution` | Command, output (collapsed if long), exit code; muted when `excludeFromContext` (`!!`) |
 | `custom` message (`display: true`) | Markdown of `content`; known `customType`s from pi-web-access / pi-mcp-adapter get small cards; others generic |
@@ -168,7 +168,7 @@ A registry keyed by `toolName`. Each renderer receives `{ args, status, partialR
 - Enter/Send: idle → `prompt`. While running, two actions: **Steer** (`streamingBehavior: "steer"`) and **Queue** (`"followUp"`). **Stop** → `abort`. **Stop & edit** → `clear_queue` then `abort`, restoring queued text into the composer.
 - Queue display (from `live.queue`) above the composer.
 - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
-- Image attach (camera or gallery, `accept="image/*"`, non-image files ignored), sent as `prompt.images`; hidden when the current model's `input` lacks `"image"`. Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
+- File attach (any file type). Images are sent as `prompt.images` and rejected with a toast when the current model's `input` lacks `"image"` (attached images are dropped when the model changes to one without it). Other files are read as UTF-8 text (max 512 KB each; binary — a NUL byte or invalid UTF-8 — and empty files are rejected with a toast) and prepended to `message` as `<file name="…" length="…">\n…\n</file>\n` blocks (pi's CLI convention for `@file` arguments, plus a content length; see the API contract). Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
 - `set_editor_text` UI requests replace the composer text.
 - Slash autocomplete: built-in commands implemented by the client (below) + `get_commands` (extension, skill, template), excluding pi-code's own extension commands.
 

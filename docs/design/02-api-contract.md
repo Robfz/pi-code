@@ -54,7 +54,7 @@ interface SessionSummary {
   id: string;
   cwd: string;
   name?: string;
-  firstMessage?: string;         // first user message, ≤200 chars
+  firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks
   createdAt: string;
   updatedAt: string;             // last entry timestamp
   parentSession?: string;
@@ -236,7 +236,7 @@ Allowlist:
 
 Rules:
 - `prompt` while `isStreaming` requires `streamingBehavior: "steer" | "followUp"` → else `400 streaming_behavior_required`.
-- `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB.
+- `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB. pi's `prompt` has no file field: the web client inlines attached text files into `message` as leading `<file name="…" length="…">\n…\n</file>\n` blocks: pi's CLI convention plus `length` (content UTF-16 length) so a `</file>` line in the content can't end a block early. The name is escaped (`&amp;`, `&quot;`, `&lt;`, `&#10;`).
 - `switch_session`: `sessionPath` is validated like `POST /api/agents { sessionFile }` (`400 invalid_body | outside_home`, `404 session_not_found`) and its realpath is sent to pi; a session owned by another agent → `409 session_owned`.
 - `bash` returns `202 { data: { id } }` immediately; output streams as `bash_output` events and completion arrives as `bash_done`. Its `bashExecution` entry is committed like any other entry.
 - Commands on an `exited` agent → `409 agent_exited`.
