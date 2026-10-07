@@ -1,5 +1,5 @@
 /**
- * `subagent` tool (pi-extensions `subagent`): a progress widget from `SubagentDetails` in the
+ * `spawn` tool (pi-extensions subagent extension): a progress widget from `SubagentDetails` in the
  * latest `partialResult` / final result — single, parallel or chain; one card per agent with
  * agent, task, status, duration, usage, nested tool calls and markdown output.
  */
@@ -9,6 +9,7 @@ import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { toolResultText } from "@/lib/content";
 import {
+  SPAWN_TOOL_NAME,
   type SubagentDetails,
   type SubagentResult,
   type SubagentUsage,
@@ -335,4 +336,4 @@ export const subagentRenderer: ToolRenderer = {
   expandWhileRunning: true,
 };
 
-registerToolRenderer("subagent", subagentRenderer);
+registerToolRenderer(SPAWN_TOOL_NAME, subagentRenderer);

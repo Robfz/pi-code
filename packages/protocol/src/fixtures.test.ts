@@ -129,7 +129,14 @@ describe.each(names)("fixture %s", (name) => {
     expect(state.bash).toEqual({});
     expect(state.dialogs).toEqual([]);
     expect(state.queue).toEqual({ steering: [], followUp: [] });
-    expect(state.statuses.mcp).toContain("MCP");
+    // pi-mcp-adapter's startup chip; fixtures recorded after MCP moved into pi don't have it.
+    const setsMcpStatus = events.some(
+      (e) =>
+        e.type === "ui_request" &&
+        e.request.method === "setStatus" &&
+        e.request.statusKey === "mcp",
+    );
+    if (setsMcpStatus) expect(state.statuses.mcp).toContain("MCP");
   });
 
   it("snapshot at any event index + the rest equals the full reduction", () => {

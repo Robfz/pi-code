@@ -34,7 +34,7 @@ function toolResult(
 }
 
 function run(patch: Partial<ToolRun> = {}): ToolRun {
-  return { toolName: "subagent", args: {}, status: "running", ...patch };
+  return { toolName: "spawn", args: {}, status: "running", ...patch };
 }
 
 function spend(entries: SessionEntry[], tools: Record<string, ToolRun> = {}, leafId?: string) {
@@ -60,16 +60,16 @@ describe("selectSubagentSpend", () => {
 
   it("sums committed calls on all branches", () => {
     const entries = [
-      toolResult("e1", null, "subagent", "t1", details(0.1, 0.2)),
-      toolResult("e2", "e1", "subagent", "t2", details(0.25)),
-      toolResult("e3", "e1", "subagent", "t3", details(0.05)),
+      toolResult("e1", null, "spawn", "t1", details(0.1, 0.2)),
+      toolResult("e2", "e1", "spawn", "t2", details(0.25)),
+      toolResult("e3", "e1", "spawn", "t3", details(0.05)),
       toolResult("e4", "e1", "bash", "t4", details(9)),
     ];
     expect(spend(entries, {}, "e2")).toBeCloseTo(0.6);
   });
 
   it("adds in-flight calls from their partial result", () => {
-    const committed = [toolResult("e1", null, "subagent", "t1", details(0.5))];
+    const committed = [toolResult("e1", null, "spawn", "t1", details(0.5))];
     expect(spend([], { t2: run() })).toBe(0);
     expect(spend(committed, { t2: run({ partialResult: { details: details(0.1) } }) })).toBeCloseTo(
       0.6,
@@ -83,7 +83,7 @@ describe("selectSubagentSpend", () => {
   });
 
   it("counts an aborted call as 0 but still reports it", () => {
-    expect(spend([toolResult("e1", null, "subagent", "t1", {})])).toBe(0);
+    expect(spend([toolResult("e1", null, "spawn", "t1", {})])).toBe(0);
     expect(spend([], { t1: run({ status: "error", result: { details: {} } }) })).toBe(0);
   });
 });

@@ -157,7 +157,7 @@ A registry keyed by `toolName`. Each renderer receives `{ args, status, partialR
 | `edit` | path, `+n −m` | `details.patch` in the diff viewer |
 | `write` | path, line count | content (new files as an all-added diff) |
 | `grep` / `find` / `ls` | pattern / path, match count | result list |
-| `subagent` | mode, agents, status | progress widget from `SubagentDetails`: per-agent cards (agent, task, status, duration, usage), markdown output, nested tool calls |
+| `spawn` | mode, agents, status | progress widget from `SubagentDetails`: per-agent cards (agent, task, status, duration, usage), markdown output, nested tool calls |
 | `web_search` / `source_check` | queries, result count | results with links, summary; **Review in curator** button when a `curator` event exists for the call |
 | `fetch_content` / `get_search_content` | URL(s) | extracted content (markdown) |
 | `mcp` and MCP namespace tools | server · tool | arguments, result content |
@@ -210,7 +210,7 @@ On phone, dialogs and the trust sheet are modal bottom sheets; outside taps don'
 
 ### Status bar
 
-Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · context bar (5 cells from `stats.contextUsage.percent`) · session name · model + thinking level · cost, with `(sa $x)` once the conversation has a `subagent` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools`. Extension `setStatus` chips follow. Run state (running / compacting / retrying n/m) shows as a leading indicator.
+Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · context bar (5 cells from `stats.contextUsage.percent`) · session name · model + thinking level · cost, with `(sa $x)` once the conversation has a `spawn` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools`. Extension `setStatus` chips follow. Run state (running / compacting / retrying n/m) shows as a leading indicator.
 
 ## Tree screen
 
