@@ -1,13 +1,14 @@
 # Web client design
 
-React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), and listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md); this document summarizes them.
+React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md), and the review panel, draft store and line references in [`07-code-review.md`](07-code-review.md); this document summarizes them.
 
 | Concern | Choice |
 |---|---|
 | Build | Vite, TypeScript |
 | Routing | TanStack Router (code-based route tree) |
-| Server data | TanStack Query (catalog, session search, models, commands, git diff, health) |
+| Server data | TanStack Query (catalog, session search, models, commands, git diff, branches, file search and content, health) |
 | Live state | `LiveRegistry`: one `GET /api/stream` EventSource per tab feeding a Zustand overview and one Zustand store per opened conversation, through the shared reducer |
+| Client state | Zustand: composer drafts per conversation (`store/drafts.ts`), review state per conversation (`features/review/review-state.ts`), UI preferences |
 | UI | Tailwind v4 + shadcn/ui |
 | Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand; grammars and themes are lazy chunks outside the precache) |
 | Diffs | `@git-diff-view/react` (split when the viewer is ≥1024px wide, unified otherwise) |
@@ -22,7 +23,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree |
-| `/agents/$agentId/diff` | Git diff of the project |
+| `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
 | `/settings` | Notifications permission, tool expansion default, about |
 
@@ -38,9 +39,10 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/` | "Pick a conversation or start a new one" | Home: agents from `live`, recent sessions from `GET /api/sessions` |
 | Back chevron to Home | Hidden (conversation header, settings, sessions, "Conversation closed" and other placeholder screens) | Shown |
 | Settings | Sidebar footer | Home header, sidebar sheet footer |
-| Conversation column | Full content width | Capped at `max-w-3xl` |
+| Conversation column | Full content width; half of it beside the review pane while that is open | Capped at `max-w-3xl` |
+| Review panel | Pane beside the conversation, toggled from the header or `/diff` | `/agents/$agentId/diff` page, from the header menu's Diff or `/diff` |
 
-Tree and diff keep their "Back to conversation" chevron on both. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
+The tree screen (on both) and the phone review page keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
 - **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), in listing groups (below); groups and rows most recent first. Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
 - **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; a compact attention icon (Home keeps text badges); relative activity time, refreshed every 60 s. The route's agent is highlighted.
@@ -117,7 +119,7 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 ## Conversation screen
 
 ```
-┌ header: session name · project · ⋮ (tree, diff, fork, clone, compact, rename, close) ┐
+┌ header: session name · project · changes (desktop) · ⋮ (tree, diff on phone, fork…) ┐
 │ transcript (active branch, committed)                                               │
 │ live: pending user message, streaming assistant message, running tools, bash output │
 │ widgets (aboveEditor)                                                               │
@@ -126,14 +128,14 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 └ status bar ─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI).
+Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop, the header's "Show changes" button (`aria-pressed`) and `/diff` toggle the review pane, which takes the right half of the content area ([`07-code-review.md`](07-code-review.md), "Desktop pane"); the header menu's Diff item exists only on phone.
 
 ### Transcript rendering
 
 | Entry / role | Rendering |
 |---|---|
-| `user` message | Text + image thumbnails; leading `<file>` blocks (attached text files) as collapsed chips that expand to the content |
-| `assistant` message | Text (Streamdown), thinking (collapsed, expandable), each tool call paired with its `toolResult` by `toolCallId` → tool renderer |
+| `user` message | Text with clickable line references + image thumbnails; leading `<file>` blocks (attached text files) as collapsed chips that expand to the content |
+| `assistant` message | Text (Streamdown, with clickable line references), thinking (collapsed, expandable), each tool call paired with its `toolResult` by `toolCallId` → tool renderer |
 | `bashExecution` | Command, output (collapsed if long), exit code; muted when `excludeFromContext` (`!!`) |
 | `custom` message (`display: true`) | Markdown of `content`; known `customType`s from pi-web-access / pi-mcp-adapter get small cards; others generic |
 | `compactionSummary` / `compaction` | Divider "Context compacted (N tokens)", expandable summary |
@@ -143,6 +145,8 @@ Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, n
 | `custom` entries (extension state), `session_info`, `usage` | Not shown |
 
 Assistant errors (`stopReason: error`) show the error message; `aborted` shows "Stopped".
+
+**Line references.** `@path:N`, `@path:N-M`, `@"quoted path":N` and the version-named `@<sha>:./path:N` (syntax in [`07-code-review.md`](07-code-review.md), "References"; parsed by `findCodeRefs` from `@pi-code/protocol`) render blue and clickable in user messages (`CodeRefText`, inline code included) and in assistant text blocks (the `rehypeCodeRefs` plugin, skipping code blocks and links). The pi-code extension asks the model to write them. A click or Enter opens the Files tab at those lines (`useOpenReference`): the pane on desktop, the review page on phone; a version-named reference opens the current file with a toast.
 
 Markdown is untrusted (model output, fetched pages, extension messages), so it never loads remote resources on its own: `https:` images render as a placeholder (alt text + host) that loads the image on tap, inline `data:image/…` images render directly, and other image URLs never load. Raw HTML goes through Streamdown's sanitizer with `<picture>` / `<source>` removed, so `<img>` is the only resource-loading element left. Links rendered from tool or extension data are links only for `http(s)://` URLs (opened with `rel="noopener noreferrer"`), plain text otherwise.
 
@@ -154,8 +158,8 @@ A registry keyed by `toolName`. Each renderer receives `{ args, status, partialR
 |---|---|---|
 | `read` | path, line range | highlighted content |
 | `bash` | command, exit code | output (streams from `partialResult`) |
-| `edit` | path, `+n −m` | `details.patch` in the diff viewer |
-| `write` | path, line count | content (new files as an all-added diff) |
+| `edit` | path, `+n −m` | `details.patch` in a selectable diff viewer (line numbers insert references) |
+| `write` | path, line count | content (new files as an all-added, selectable diff) |
 | `grep` / `find` / `ls` | pattern / path, match count | result list |
 | `spawn` | mode, agents, status | progress widget from `SubagentDetails`: per-agent cards (agent, task, status, duration, usage), markdown output, nested tool calls |
 | `web_search` / `source_check` | queries, result count | results with links, summary; **Review in curator** button when a `curator` event exists for the call |
@@ -165,11 +169,13 @@ A registry keyed by `toolName`. Each renderer receives `{ args, status, partialR
 
 ### Composer
 
+- Text, caret and attachments live in the draft store (`store/drafts.ts`), one draft per conversation, so they survive navigation (tree, review page, other conversations) but not a reload. Sending clears the draft; a failed send restores it only into a still-empty draft.
+- `ComposerInput` lays the textarea over a mirror that colors line references blue. A deletion that touches a reference without covering it removes the whole reference; typing inside one turns it plain. References selected in a diff or the file viewer are inserted at the saved caret (`insertReference`) and focus the composer ([`07-code-review.md`](07-code-review.md), "Composer").
 - Enter/Send: idle → `prompt`. While running, two actions: **Steer** (`streamingBehavior: "steer"`) and **Queue** (`"followUp"`). **Stop** → `abort`. **Stop & edit** → `clear_queue` then `abort`, restoring queued text into the composer.
 - Queue display (from `live.queue`) above the composer.
 - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
 - File attach (any file type). Images are sent as `prompt.images` and rejected with a toast when the current model's `input` lacks `"image"` (attached images are dropped when the model changes to one without it). Other files are read as UTF-8 text (max 512 KB each; binary — a NUL byte or invalid UTF-8 — and empty files are rejected with a toast) and prepended to `message` as `<file name="…" length="…">\n…\n</file>\n` blocks (pi's CLI convention for `@file` arguments, plus a content length; see the API contract). Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
-- `set_editor_text` UI requests replace the composer text.
+- `set_editor_text` UI requests, fork and share replace the draft text.
 - Slash autocomplete: built-in commands implemented by the client (below) + `get_commands` (extension, skill, template), excluding pi-code's own extension commands.
 
 Built-in commands:
@@ -187,7 +193,7 @@ Built-in commands:
 | `/clone` | `clone` |
 | `/session` | stats sheet (`get_session_stats`) |
 | `/copy` | copy last assistant text |
-| `/diff` | diff screen |
+| `/diff` | toggle the review pane (desktop); review page (phone) |
 | `/settings`, `/login`, `/logout`, `/trust`, `/export`, `/share`, `/import`, `/reload`, `/scoped-models`, `/hotkeys`, `/quit` … | "Use the TUI for this" |
 
 ### Extension UI
@@ -221,9 +227,14 @@ The store's transcript (all branches) and labels rendered as an indented tree of
 
 Disabled while a run is active.
 
-## Diff screen
+## Review panel
 
-`GET /git/diff` on open and on refresh. File list with status and `+/−` counts; tapping a file shows its patch in the diff viewer. Handles `binary`, `tooLarge`, and `not_a_git_repo`.
+Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has two tabs, Refresh and the active tab, and renders as the desktop pane beside the conversation or as the phone's `/agents/$agentId/diff` page:
+
+- **Changes**: `GET /git/diff` in uncommitted or branch mode (base from `GET /git/branches`, optional uncommitted changes). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
+- **Files**: fuzzy search (`GET /files?q=`) and a file viewer (`GET /files/content`) with selectable lines.
+- Selecting lines inserts a reference into the composer: on desktop on mouse release, on phone through the Add to chat bar, which returns to the conversation.
+- Every `git_status` event and snapshot hydration invalidates the agent's review queries, so the diff and open file refresh after each turn.
 
 `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and renders split at ≥1024px, unified below, whatever the viewport.
 

@@ -2,7 +2,9 @@
 
 A small pi extension loaded **only** into server-spawned pi processes (`pi --mode rpc --extension <path>`). The TUI never loads it. Source: `packages/pi-extension/src/index.ts` (pi loads TypeScript directly).
 
-It fills two gaps in pi's RPC mode using documented extension APIs. Behavior verified in `docs/spikes/e1-e2.md`.
+It fills two gaps in pi's RPC mode and adds one prompt guideline, using documented extension APIs. Trust and tree navigation were verified in `docs/spikes/e1-e2.md`.
+
+It is typed against `@earendil-works/pi-coding-agent` `1.1.0` (dev dependency, type-only imports), the installed pi's version, for `BeforeAgentStartEvent.systemPromptOptions` (section 3). The protocol package keeps its own pin.
 
 ## 1. Project trust decision
 
@@ -38,6 +40,31 @@ Handler:
 3. If the target entry is a user message, `ctx.ui.setEditorText(<its text>)` (the TUI puts it back into the editor for re-editing).
 
 The server resolves `POST /tree/navigate` on the prompt response and reports `cancelled` when the leaf did not move. Before sending, it checks that `pi-code-tree` appears in `get_commands` — otherwise the text would go to the model as a normal prompt. It hides `pi-code-*` commands from `get_commands` results given to clients.
+
+## 3. Line-reference guideline
+
+**Problem.** The web client links `@path:N` and `@path:N-M` references in assistant replies ([`07-code-review.md`](07-code-review.md), "References"), but the model writes them only when asked. The TUI's `APPEND_SYSTEM.md` belongs to the user and must keep working unchanged.
+
+**Mechanism.** A `before_agent_start` handler adds `REFERENCE_GUIDELINE` to the run's structured prompt options and returns nothing, so pi still builds the prompt from its sections:
+
+```ts
+export const REFERENCE_GUIDELINE =
+  'When you point to specific lines of code, write the reference as `@path:N` for one line or `@path:N-M` for a range, with the path relative to the working directory. Quote paths that contain spaces: `@"dir name/file.ts":N`. The user can click these references to open those lines.';
+
+pi.on("before_agent_start", (event) => {
+  const options = event.systemPromptOptions;
+  if (options.customPrompt) {
+    if (!options.appendSystemPrompt.includes(REFERENCE_GUIDELINE))
+      options.appendSystemPrompt = [options.appendSystemPrompt, REFERENCE_GUIDELINE].filter(Boolean).join("\n\n");
+  } else if (!options.promptGuidelines.includes(REFERENCE_GUIDELINE)) {
+    options.promptGuidelines.push(REFERENCE_GUIDELINE);
+  }
+});
+```
+
+- pi renders `promptGuidelines` only without a custom prompt (a user's `SYSTEM.md`); with one, the guideline joins `appendSystemPrompt`, after the loaded `APPEND_SYSTEM.md`.
+- The guideline is added at most once per run.
+- Since only server-spawned pi loads the extension, TUI sessions never get the guideline.
 
 ## Non-goals
 

@@ -133,7 +133,7 @@ interface LiveRegistry {
 | Back chevron to Home | Hidden on the conversation header, settings, `/sessions`, "Conversation closed" and other placeholder screens | Shown |
 | Settings | Icon in the sidebar footer | Home header, sheet footer |
 
-Tree, diff, share, settings and `/sessions` are routes rendered in the content area on desktop (tree and diff keep their back-to-conversation chevron); desktop reaches older sessions through sidebar search.
+Tree, share, settings and `/sessions` are routes rendered in the content area on desktop (tree keeps its back-to-conversation chevron); desktop reaches older sessions through sidebar search. The review panel (Changes, Files) is a pane beside the conversation instead of a route: `/agents/$agentId/diff` opens the pane and replaces itself with `/agents/$agentId` ([`07-code-review.md`](07-code-review.md), "Desktop pane").
 
 ### Sidebar
 
@@ -158,6 +158,7 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 ### Layout
 
 - **Transcript width.** At ≥1024px the conversation column (transcript and composer area) uses the full content width with the standard padding; below 1024px it is capped at `max-w-3xl`.
+- **Review pane.** At ≥1024px, with the pane open for the conversation (persisted per conversation), the conversation column and `ReviewPane` split the content width in halves, each `h-dvh` with its own scroll, and the conversation's header, transcript and composer drop from `lg:px-32` to `lg:px-6`. The header's "Show changes" / "Hide changes" button and `/diff` toggle it; the tree route shows no pane. Below 1024px the pane isn't rendered and the review panel is the `/agents/$agentId/diff` page. Details in [`07-code-review.md`](07-code-review.md).
 - **Diff split.** `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
 - **Conversation sheets.** On desktop, extension dialogs (`DialogHost`) and the trust prompt (`TrustSheet`) are non-modal bottom sheets portalled into the conversation column (their `container` prop) with a `ScopedOverlay` dimming only that column, so the sidebar and the rest of the page stay usable. Clicks outside the sheet don't answer it, and neither does Escape pressed outside it; Tab can leave the sheet (`SheetContent loopFocus={false}`), skipping the covered column, which is `inert` while it's open. Inside a dialog, Escape, Cancel and × answer `cancelled`; the trust prompt answers only through its buttons. User-initiated action sheets (rename, model, thinking, stats) stay page-modal. On phone, dialogs and the trust prompt are modal bottom sheets, and outside taps don't cancel them.
 

@@ -13,6 +13,7 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 | `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) |
 | `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout |
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees |
+| [`07-code-review.md`](07-code-review.md) | Code review: the project's changes and files beside the conversation, `@path:N` line references in the composer and transcript |
 
 ## Goals
 
@@ -51,10 +52,10 @@ MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call appr
 
 | Component | Package | Responsibility |
 |---|---|---|
-| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; creates and removes git worktrees; closes agents idle for 7 days (idle sweep). |
+| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; serves the agent's git diff, branches and project files for review; creates and removes git worktrees; closes agents idle for 7 days (idle sweep). |
 | Protocol | `packages/protocol` | Shared TypeScript: API/SSE types and the **live-state reducer** used by both server (snapshots) and client (live UI). |
-| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px. |
-| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command. |
+| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px; review pane beside the conversation (`07-code-review.md`). |
+| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command, the line-reference guideline in every run's system prompt. |
 
 ## Core concepts
 
