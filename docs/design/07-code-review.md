@@ -206,6 +206,7 @@ interface DiffViewerProps {
   selection?: LineSelection | null;            // lines to mark; null clears; undefined leaves the library's own mark
   scrollTo?: { line: number; nonce: number };  // new-side line to center
   unified?: boolean;                           // force unified (file viewer)
+  content?: string;                            // the full text of both sides (file viewer)
 }
 ```
 
@@ -264,7 +265,7 @@ interface ReviewState {
 `FilesView` (`features/review/files-view.tsx`) shows the search, or the viewer once a file is open:
 
 - **Search**: the cmdk `Command` with `shouldFilter={false}`. The input is debounced 250 ms (`useDebouncedValue`), as the project picker's path field, and queries `GET files?q=` (`["agent", id, "files", q]`). It shows up to 10 results, the basename in front and the directory muted, picked with the arrow keys and Enter or a tap. An empty query shows "Type to search files". The query is kept in the review state.
-- **Viewer** (`features/review/file-viewer.tsx`): a header with the path and a back button to the search, then `GET files/content` (`["agent", id, "review", "file", path]`). Text renders through `SelectableDiff` with `unified` and a synthetic all-context patch, `fileAsPatch(path, content)` (`parse-patch.ts`): `--- path` / `+++ path` / `@@ -1,N +1,N @@` and every line prefixed with a space. The old-number column is hidden with CSS on the viewer's wrapper. `DiffViewer`'s existing guard ("Show anyway" past 1500 lines or 400k characters) applies. `binary`, `tooLarge` (1 MB), an empty file, `file_not_found` ("This file no longer exists") and `not_a_git_repo` get messages. A `target` passes as `highlight` (marked and scrolled to once the rows render, after "Show anyway" included); a target past the file's last line opens the file without a highlight and a toast "<path> has only N lines".
+- **Viewer** (`features/review/file-viewer.tsx`): a header with the path and a back button to the search, then `GET files/content` (`["agent", id, "review", "file", path]`). Text renders through `SelectableDiff` with `unified` and a synthetic all-context patch, `fileAsPatch(path, content)` (`parse-patch.ts`): `--- path` / `+++ path` / `@@ -1,N +1,N @@` and every line prefixed with a space. The content also goes to `DiffViewer` as `content`, the library's file text for both sides: from a patch without changes alone, the library composes no lines. The old-number column is hidden with CSS on the viewer's wrapper. `DiffViewer`'s existing guard ("Show anyway" past 1500 lines or 400k characters) applies. `binary`, `tooLarge` (1 MB), an empty file, `file_not_found` ("This file no longer exists") and `not_a_git_repo` get messages. A `target` passes as `highlight` (marked and scrolled to once the rows render, after "Show anyway" included); a target past the file's last line opens the file without a highlight and a toast "<path> has only N lines".
 - References from the viewer are `@path:N-M` (always the new side).
 
 Outside a git work tree both tabs show "This project isn't a git repository."

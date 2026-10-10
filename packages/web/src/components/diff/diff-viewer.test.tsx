@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { stubElementWidth, stubMatchMedia } from "@/test/dom-stubs";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffViewer, type LineSelection } from "./diff-viewer";
+import { fileAsPatch } from "./parse-patch";
 import { loadedDiff, stubCanvas } from "./testing";
 
 const patch = fixtureEditPatch;
@@ -25,6 +26,15 @@ describe("DiffViewer", () => {
     expect(container.textContent).toContain("I like apple pie.");
     expect(container.textContent).toContain("I like banana bread.");
     expect(container.querySelector('[data-theme="light"]')).not.toBeNull();
+  });
+
+  it("renders a whole file from an all-context patch and its content", async () => {
+    const content = "one\ntwo\nthree\n";
+    const { container } = render(
+      <DiffViewer patch={fileAsPatch("a.ts", content)} content={content} unified />,
+    );
+    await waitFor(() => expect(container.querySelectorAll("[data-line-new-num]")).toHaveLength(3));
+    expect(container.textContent).toContain("three");
   });
 
   it("splits from 1024px of its own width, even on a narrow viewport", async () => {

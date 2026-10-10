@@ -49,6 +49,9 @@ describe("review state", () => {
     expect(review("a1").files.target?.nonce).not.toBe(first);
     openFile("a1", "src/b.ts");
     expect(review("a1").files).toEqual({ query: "gitts", path: "src/b.ts" });
+    useReviewStore.getState().closeFile("a1");
+    expect(review("a1")).toMatchObject({ tab: "files", files: { query: "gitts" } });
+    expect(review("a1").files.path).toBeUndefined();
 
     expect(review("a2")).toBe(DEFAULT_REVIEW);
   });

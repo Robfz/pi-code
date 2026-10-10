@@ -48,6 +48,8 @@ interface ReviewStore {
   setDiffMode(agentId: string, diff: Partial<DiffMode>): void;
   /** Shows `path` in the Files tab, with `target` lines highlighted. */
   openFile(agentId: string, path: string, target?: Omit<FileTarget, "nonce">): void;
+  /** Back from the open file to the Files search. */
+  closeFile(agentId: string): void;
   setFilesQuery(agentId: string, query: string): void;
 }
 
@@ -78,6 +80,8 @@ export const useReviewStore = create<ReviewStore>()(
               ...(target && { target: { ...target, nonce: nextNonce++ } }),
             },
           })),
+        closeFile: (agentId) =>
+          update(agentId, (review) => ({ files: { query: review.files.query } })),
         setFilesQuery: (agentId, query) =>
           update(agentId, (review) => ({ files: { ...review.files, query } })),
       };

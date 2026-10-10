@@ -80,6 +80,11 @@ export interface DiffViewerProps {
   scrollTo?: { line: number; nonce: number };
   /** Unified whatever the width. */
   unified?: boolean;
+  /**
+   * The file's full text, the same on both sides: the library composes no lines from a patch
+   * without changes, so an all-context patch (`fileAsPatch`) needs it.
+   */
+  content?: string;
 }
 
 export const DiffViewer = memo(function DiffViewer({
@@ -91,6 +96,7 @@ export const DiffViewer = memo(function DiffViewer({
   selection,
   scrollTo,
   unified = false,
+  content,
 }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
   const [widthRef, wide] = useWidthAtLeast<HTMLDivElement>(SPLIT_MIN_WIDTH);
@@ -141,6 +147,7 @@ export const DiffViewer = memo(function DiffViewer({
             onSelectLines={onSelectLines}
             selection={selection}
             scrollTo={scrollTo}
+            content={content}
           />
         </Suspense>
       </DiffErrorBoundary>

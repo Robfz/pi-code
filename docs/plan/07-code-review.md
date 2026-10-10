@@ -79,7 +79,7 @@ Every task reads the design for exact behavior. Each task's "Done when" includes
 
 ### C11 — Files tab
 - `features/review/files-view.tsx` (new): cmdk search (`shouldFilter={false}`, 250 ms debounce, top 10, basename-first rows, "Type to search files"), query kept in the review state; picking a file calls `openFile`.
-- `features/review/file-viewer.tsx` (new): header with path and back to search; `getFileContent`; `SelectableDiff` with `unified`, `fileAsPatch`, the old-number column hidden; `highlight` from `target`; messages for binary, too large, empty, `file_not_found`, `not_a_git_repo`; the past-the-end toast.
+- `features/review/file-viewer.tsx` (new): header with path and back to search; `getFileContent`; `SelectableDiff` with `unified`, `fileAsPatch` and the text as `content` (a new `DiffViewer` prop passed to the library for both sides), the old-number column hidden; `closeFile` in the review state for going back; `highlight` from `target`; messages for binary, too large, empty, `file_not_found`, `not_a_git_repo`; the past-the-end toast.
 - Done when: component tests cover a debounced search (one request after typing), keyboard picking, opening and going back with the query kept, a reference `@src/a.ts:3-4` from the viewer, a target highlighted and scrolled to, a target past the end (toast, no highlight), each message, and the "Show anyway" guard on a 2000-line file with a target highlighted after "Show anyway".
 
 ### C12 — Desktop pane and phone page

@@ -37,7 +37,7 @@ const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; cla
   };
 
 /** Client errors (an unknown base, not a repo) won't change on a retry. */
-const retry = (count: number, error: unknown) =>
+export const retryServerErrors = (count: number, error: unknown) =>
   !(error instanceof ApiRequestError && error.status < 500) && count < 1;
 
 /**
@@ -161,7 +161,7 @@ function Totals({ files }: { files: GitFileDiff[] }) {
   );
 }
 
-function NotARepo() {
+export function NotARepo() {
   return (
     <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
       <FileIcon className="size-6" />
@@ -190,7 +190,7 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     queryFn: () => getGitBranches(agentId),
     enabled: branchMode,
     refetchOnWindowFocus: false,
-    retry,
+    retry: retryServerErrors,
   });
   const base = mode.base ?? branches.data?.defaultBranch ?? undefined;
   const diff = useQuery({
@@ -201,7 +201,7 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     enabled: !branchMode || base !== undefined,
     staleTime: 0,
     refetchOnWindowFocus: false,
-    retry,
+    retry: retryServerErrors,
   });
 
   const update = (change: Partial<DiffMode>) =>

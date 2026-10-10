@@ -57,6 +57,8 @@ export interface DiffViewImplProps {
   onSelectLines?: (selection: LineSelection) => void;
   selection?: LineSelection | null;
   scrollTo?: { line: number; nonce: number };
+  /** Both sides' full text, for an all-context patch. */
+  content?: string | undefined;
 }
 
 export default function DiffViewImpl({
@@ -68,6 +70,7 @@ export default function DiffViewImpl({
   onSelectLines,
   selection,
   scrollTo,
+  content,
 }: DiffViewImplProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<DiffViewWithMultiSelectRef>(null);
@@ -76,9 +79,13 @@ export default function DiffViewImpl({
   const view = useMemo(
     () => ({
       key: nextViewKey++,
-      data: { oldFile: { fileName: oldName }, newFile: { fileName: newName }, hunks },
+      data: {
+        oldFile: { fileName: oldName, content: content ?? null },
+        newFile: { fileName: newName, content: content ?? null },
+        hunks,
+      },
     }),
-    [oldName, newName, hunks],
+    [oldName, newName, hunks, content],
   );
 
   // Applied in an effect: on mouseup the library marks the line just selected after calling
