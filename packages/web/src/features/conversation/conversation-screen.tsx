@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { ReviewPane } from "@/features/review/review-pane";
+import { useReview } from "@/features/review/review-state";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
@@ -15,13 +17,18 @@ import { LiveSection } from "./transcript/live-section";
 import { Transcript } from "./transcript/transcript";
 import { useStickToBottom } from "./use-stick-to-bottom";
 
-/** `/agents/$agentId`: header, transcript + live part, composer area, dialogs. */
+/**
+ * `/agents/$agentId`: header, transcript + live part, composer area, dialogs; on desktop, the
+ * review pane beside them when open.
+ */
 export function ConversationScreen() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   useStickToBottom(scrollRef, contentRef);
   const exited = useConversation((s) => s.agent.status === "exited");
   const desktop = useIsDesktop();
+  const agentId = useConversation((s) => s.agentId);
+  const pane = useReview(agentId).paneOpen && desktop;
   // Where desktop scopes the dialog and trust sheets, clear of the sidebar.
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   // What such a sheet's overlay covers is inert while it's open: focus skips to the sidebar.
@@ -29,46 +36,51 @@ export function ConversationScreen() {
   const inert = covered || undefined;
   // Full content width on desktop; capped below.
   const column = cn("flex w-full flex-col", !desktop && "mx-auto max-w-3xl");
+  const padding = pane ? "lg:px-6" : "lg:px-32";
 
   return (
-    <div ref={setRoot} className="relative flex h-dvh flex-col">
-      <ConversationHeader inert={inert} />
-      <div
-        ref={scrollRef}
-        inert={inert}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-      >
+    <div className="flex h-dvh">
+      <div ref={setRoot} className="relative flex h-dvh min-w-0 flex-1 flex-col">
+        <ConversationHeader inert={inert} />
         <div
-          ref={contentRef}
-          data-testid="transcript-column"
-          className={cn(column, "gap-4 px-3 py-4 lg:px-32 lg:py-8")}
+          ref={scrollRef}
+          inert={inert}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
-          <Transcript />
-          <LiveSection />
-          <AgentStatePanel />
+          <div
+            ref={contentRef}
+            data-testid="transcript-column"
+            className={cn(column, "gap-4 px-3 py-4 lg:py-8", padding)}
+          >
+            <Transcript />
+            <LiveSection />
+            <AgentStatePanel />
+          </div>
         </div>
+        <div
+          data-testid="composer-column"
+          inert={inert}
+          className={cn(
+            column,
+            "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]",
+            padding,
+          )}
+        >
+          <QueueDisplay />
+          <Widgets placement="aboveEditor" />
+          {!exited && <Composer />}
+          <Widgets placement="belowEditor" />
+          <StatusBar />
+        </div>
+        <ScopedCoverProvider value={cover}>
+          <DialogHost container={desktop ? root : undefined} />
+          <TrustSheet container={desktop ? root : undefined} />
+        </ScopedCoverProvider>
+        <ActionSheets />
+        <NoticeToaster />
+        <DocumentTitle />
       </div>
-      <div
-        data-testid="composer-column"
-        inert={inert}
-        className={cn(
-          column,
-          "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:px-32",
-        )}
-      >
-        <QueueDisplay />
-        <Widgets placement="aboveEditor" />
-        {!exited && <Composer />}
-        <Widgets placement="belowEditor" />
-        <StatusBar />
-      </div>
-      <ScopedCoverProvider value={cover}>
-        <DialogHost container={desktop ? root : undefined} />
-        <TrustSheet container={desktop ? root : undefined} />
-      </ScopedCoverProvider>
-      <ActionSheets />
-      <NoticeToaster />
-      <DocumentTitle />
+      {pane && <ReviewPane agentId={agentId} />}
     </div>
   );
 }

@@ -21,9 +21,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useReview, useReviewStore } from "@/features/review/review-state";
 import { SidebarSheet } from "@/features/sidebar/sidebar-sheet";
 import { baseName } from "@/lib/content";
 import { useIsDesktop } from "@/lib/use-media-query";
+import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { selectSessionName } from "@/store/selectors";
 import { useUiPrefs } from "@/store/ui-prefs";
@@ -33,8 +35,9 @@ import { useSessionActions } from "./session-actions";
 
 /**
  * Back to Home and the conversations sheet (below the desktop breakpoint only) · session name ·
- * project · connection · tool expansion toggle · menu (tree, diff, fork, clone, compact, rename,
- * new session, close). Session commands need a ready agent. `inert` while a scoped sheet covers it.
+ * project · connection · review pane toggle (desktop) · tool expansion toggle · menu (tree, diff
+ * below the desktop breakpoint, fork, clone, compact, rename, new session, close). Session commands
+ * need a ready agent. `inert` while a scoped sheet covers it.
  */
 export function ConversationHeader({ inert }: { inert?: boolean }) {
   const agentId = useConversation((s) => s.agentId);
@@ -47,11 +50,15 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   const openSheet = useOpenSheet();
   const folder = cwd ? baseName(cwd) : "";
   const desktop = useIsDesktop();
+  const paneOpen = useReview(agentId).paneOpen && desktop;
 
   return (
     <header
       inert={inert}
-      className="flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur lg:px-32"
+      className={cn(
+        "flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur",
+        paneOpen ? "lg:px-6" : "lg:px-32",
+      )}
     >
       <div className="flex h-12 min-w-0 flex-1 items-center gap-1">
         <HomeBackButton />
@@ -63,6 +70,17 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
           )}
         </div>
         <ConnectionIndicator />
+        {desktop && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={paneOpen ? "Hide changes" : "Show changes"}
+            aria-pressed={paneOpen}
+            onClick={() => useReviewStore.getState().togglePane(agentId)}
+          >
+            <FileDiffIcon />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -84,11 +102,13 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
                 <GitBranchIcon /> Tree
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/agents/$agentId/diff" params={{ agentId }}>
-                <FileDiffIcon /> Diff
-              </Link>
-            </DropdownMenuItem>
+            {!desktop && (
+              <DropdownMenuItem asChild>
+                <Link to="/agents/$agentId/diff" params={{ agentId }}>
+                  <FileDiffIcon /> Diff
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("fork")}>
               <GitForkIcon /> Fork…

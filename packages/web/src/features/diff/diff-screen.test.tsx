@@ -10,8 +10,10 @@ import {
 } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadedDiff, stubCanvas } from "@/components/diff/testing";
+import { useReviewStore } from "@/features/review/review-state";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { ConversationStoreProvider } from "@/store/context";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { makeAgent } from "@/test/fixtures";
@@ -65,11 +67,22 @@ const file = (patch: Partial<GitFileDiff>): GitFileDiff => ({
 });
 
 beforeAll(stubCanvas);
+beforeEach(() => {
+  stubMatchMedia(() => false);
+  // cmdk's list measures itself; jsdom has no ResizeObserver.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DiffScreen", () => {
   it("lists files with status and counts; tapping a file shows its patch", async () => {
-    stubMatchMedia(() => false);
     const { calls } = stubFetch(() => [
       200,
       {
@@ -161,5 +174,29 @@ describe("DiffScreen", () => {
     expect(await screen.findByText(/No changes/)).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "Back to conversation" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a9"));
+  });
+
+  it("switches between the Changes and Files tabs", async () => {
+    stubFetch(() => [200, { files: [] }]);
+    await renderScreen();
+    const user = userEvent.setup();
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Files" }));
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "Search files" })).toBeInTheDocument();
+    expect(useReviewStore.getState().reviews.a1?.tab).toBe("files");
+    await user.click(screen.getByRole("tab", { name: "Changes" }));
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+  });
+
+  it("on desktop opens the review pane and replaces itself with the conversation", async () => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    const { calls } = stubFetch(() => [200, { files: [] }]);
+    const router = await renderScreen("a3");
+    expect(await screen.findByText("conversation")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/agents/a3");
+    expect(router.history.length).toBe(1);
+    expect(useReviewStore.getState().reviews.a3?.paneOpen).toBe(true);
+    expect(calls).toEqual([]);
   });
 });

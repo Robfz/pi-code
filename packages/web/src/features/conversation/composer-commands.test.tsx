@@ -390,7 +390,7 @@ describe("built-in commands", () => {
     expect(rpcBodies(calls)).toEqual([{ type: "get_last_assistant_text" }]);
   });
 
-  it("/diff → diff screen", async () => {
+  it("/diff → diff screen on phones", async () => {
     const { user, router } = await setup();
     await run(user, "/diff");
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1/diff"));
