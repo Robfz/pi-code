@@ -10,20 +10,27 @@ import {
   UndoIcon,
   XIcon,
 } from "lucide-react";
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type SyntheticEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage, rpc } from "@/lib/api";
 import { imageSrc } from "@/lib/content";
-import { prepareImage } from "@/lib/image-resize";
 import { queryKeys } from "@/lib/query-client";
-import { readTextFile } from "@/lib/text-file";
 import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
+import { EMPTY_DRAFT, useDrafts } from "@/store/drafts";
 import { selectEditorText, selectIsRunning, selectQueue } from "@/store/selectors";
-import { useConversationUi } from "./conversation-ui";
+import { type Attachment, prepareAttachment } from "./attachments";
 import {
   BUILTIN_COMMANDS,
   commandItems,
@@ -46,25 +53,12 @@ function joinTexts(texts: readonly string[]): string {
   return texts.filter((t) => t.trim() !== "").join("\n\n");
 }
 
-type Attachment = { key: string; name: string } & (
-  | { kind: "image"; image: ImageContent }
-  | { kind: "text"; text: string }
-);
-
-let attachmentKey = 0;
-
-/** Images go through `prepareImage` (only when the model takes images); anything else is text. */
-async function prepareAttachment(file: File, supportsImages: boolean): Promise<Attachment> {
-  const key = `att-${++attachmentKey}`;
-  if (file.type.startsWith("image/")) {
-    if (!supportsImages) throw new Error(`The current model doesn't accept images (${file.name})`);
-    return { key, name: file.name, kind: "image", image: await prepareImage(file) };
-  }
-  return { key, name: file.name, kind: "text", text: await readTextFile(file) };
-}
-
 /** Last `set_editor_text` nonce applied per conversation store (outlives remounts). */
 const seenEditorNonce = new WeakMap<ConversationStore, number>();
+/** Last draft `external` applied per conversation store (outlives remounts). */
+const seenExternal = new WeakMap<ConversationStore, number>();
+
+const caretAt = (offset: number) => ({ start: offset, end: offset });
 
 /** Slash-command suggestions above the composer. */
 function SlashMenu({
@@ -142,7 +136,10 @@ function SlashMenu({
  * - Attached images go into `prompt.images` when the model accepts images, downscaled to
  *   2048 px / re-encoded as JPEG when large (`prepareImage`). Other files are read as text
  *   (`readTextFile`) and prepended to the message as `<file>` blocks (pi's CLI convention).
- * - `set_editor_text` requests and fork drafts replace the text.
+ * - Text, selection and attachments are the conversation's draft (`store/drafts.ts`), so they
+ *   survive navigation. `set_editor_text` requests and Stop & edit replace the text; a draft
+ *   changed outside the composer (fork, share, an inserted reference) focuses the textarea at
+ *   the draft's selection, now or on the next mount.
  */
 export function Composer() {
   const store = useConversationStore();
@@ -153,10 +150,9 @@ export function Composer() {
   const queue = useConversation(selectQueue);
   const editorText = useConversation(selectEditorText);
   const supportsImages = useConversation((s) => s.state?.model?.input.includes("image") === true);
-  const draft = useConversationUi((s) => s.draft);
+  const draft = useDrafts((s) => s.drafts[agentId] ?? EMPTY_DRAFT);
+  const { text, attachments } = draft;
   const runBuiltin = useBuiltinCommands();
-  const [text, setText] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [stopping, setStopping] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState(false);
@@ -177,28 +173,28 @@ export function Composer() {
     }
     if (editorText && nonce !== seen) {
       seenEditorNonce.set(store, nonce);
-      setText(editorText.text);
-      textareaRef.current?.focus();
+      useDrafts.getState().replace(agentId, editorText.text);
     }
-  }, [editorText, hydrated, store]);
+  }, [editorText, hydrated, store, agentId]);
 
-  // A draft handed over by a fork (possibly from the tree screen, before this mounted).
+  // Draft changes made outside the composer, while mounted or since the last mount.
   useEffect(() => {
-    if (draft === null || draft.agentId !== agentId) return;
-    const value = useConversationUi.getState().takeDraft(agentId);
-    if (value !== null) {
-      setText(value);
-      textareaRef.current?.focus();
-    }
-  }, [draft, agentId]);
+    if ((seenExternal.get(store) ?? 0) === draft.external) return;
+    seenExternal.set(store, draft.external);
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(draft.selection.start, draft.selection.end);
+  }, [draft.external, draft.selection, store]);
 
   // Images can't be sent to a model without image input.
   useEffect(() => {
-    if (supportsImages) return;
-    setAttachments((current) =>
-      current.some((a) => a.kind === "image") ? current.filter((a) => a.kind !== "image") : current,
+    if (supportsImages || !attachments.some((a) => a.kind === "image")) return;
+    useDrafts.getState().setAttachments(
+      agentId,
+      attachments.filter((a) => a.kind !== "image"),
     );
-  }, [supportsImages]);
+  }, [supportsImages, attachments, agentId]);
 
   // Autosize where `field-sizing: content` is unsupported (Safari, Firefox).
   useEffect(() => {
@@ -230,17 +226,41 @@ export function Composer() {
   const menuOpen = ready && query !== null && !menuDismissed && menuItems.length > 0;
   const activeIndex = Math.min(menuIndex, Math.max(0, menuItems.length - 1));
 
-  function updateText(value: string) {
-    setText(value);
+  function setText(value: string) {
+    useDrafts.getState().edit(agentId, value, caretAt(value.length));
+  }
+
+  function setAttachments(value: Attachment[]) {
+    useDrafts.getState().setAttachments(agentId, value);
+  }
+
+  /** Puts back what a failed send took, unless the draft has been written to since. */
+  function restore(message: string, taken: Attachment[] = []) {
+    const current = useDrafts.getState().drafts[agentId] ?? EMPTY_DRAFT;
+    if (current.text === "") setText(message);
+    if (current.attachments.length === 0 && taken.length > 0) setAttachments(taken);
+  }
+
+  /** Typing and caret moves. */
+  function onEdit(event: SyntheticEvent<HTMLTextAreaElement>) {
+    const el = event.currentTarget;
+    useDrafts.getState().edit(agentId, el.value, {
+      start: el.selectionStart,
+      end: el.selectionEnd,
+    });
+  }
+
+  function updateText(event: SyntheticEvent<HTMLTextAreaElement>) {
+    onEdit(event);
     setMenuIndex(0);
-    if (slashQuery(value) === null) setMenuDismissed(false);
+    if (slashQuery(event.currentTarget.value) === null) setMenuDismissed(false);
   }
 
   const hasQueue = queue.steering.length + queue.followUp.length > 0;
   const canSend = ready && (text.trim() !== "" || attachments.length > 0);
 
   async function runBash(message: string, command: string, excludeFromContext: boolean) {
-    setText("");
+    useDrafts.getState().clear(agentId);
     try {
       await rpc(
         agentId,
@@ -249,7 +269,7 @@ export function Composer() {
           : { type: "bash", command },
       );
     } catch (error) {
-      setText((current) => (current === "" ? message : current));
+      restore(message);
       toast.error(errorMessage(error));
     }
   }
@@ -267,7 +287,7 @@ export function Composer() {
       // Other slash commands (extension, skill, template) go to pi as a prompt.
       const slash = parseSlash(typed);
       if (slash && findBuiltin(slash.name)) {
-        setText("");
+        useDrafts.getState().clear(agentId);
         await runBuiltin(slash.name, slash.args);
         return;
       }
@@ -280,8 +300,7 @@ export function Composer() {
       else message += formatFileBlock({ name: attachment.name, text: attachment.text });
     }
     message += typed;
-    setText("");
-    setAttachments([]);
+    useDrafts.getState().clear(agentId);
     const base = images.length > 0 ? { message, images } : { message };
     try {
       await rpc(
@@ -291,8 +310,7 @@ export function Composer() {
           : { type: "prompt", ...base },
       );
     } catch (error) {
-      setText((current) => (current === "" ? typed : current));
-      setAttachments((current) => (current.length === 0 ? attachments : current));
+      restore(typed, attachments);
       toast.error(errorMessage(error));
     }
   }
@@ -324,8 +342,8 @@ export function Composer() {
     try {
       const queued = await rpc(agentId, { type: "clear_queue" });
       const restored = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])];
-      setText((current) => joinTexts([...restored, current]));
-      textareaRef.current?.focus();
+      const current = useDrafts.getState().drafts[agentId]?.text ?? "";
+      useDrafts.getState().replace(agentId, joinTexts([...restored, current]));
       await rpc(agentId, { type: "abort" });
     } catch (error) {
       toast.error(errorMessage(error));
@@ -344,7 +362,9 @@ export function Composer() {
       if (result.status === "fulfilled") added.push(result.value);
       else toast.error(errorMessage(result.reason));
     }
-    if (added.length > 0) setAttachments((current) => [...current, ...added]);
+    if (added.length === 0) return;
+    const current = useDrafts.getState().drafts[agentId]?.attachments ?? [];
+    setAttachments([...current, ...added]);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -409,7 +429,7 @@ export function Composer() {
                   type="button"
                   aria-label={`Remove attachment ${index + 1}`}
                   onClick={() =>
-                    setAttachments((current) => current.filter((a) => a.key !== attachment.key))
+                    setAttachments(attachments.filter((a) => a.key !== attachment.key))
                   }
                   className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border bg-background shadow"
                 >
@@ -431,9 +451,13 @@ export function Composer() {
           placeholder={
             !ready ? "Waiting for pi…" : running ? "Steer or queue a message…" : "Message pi…"
           }
-          onChange={(event) => updateText(event.target.value)}
+          onChange={updateText}
+          onSelect={onEdit}
           onKeyDown={onKeyDown}
-          onBlur={() => setMenuDismissed(false)}
+          onBlur={(event) => {
+            onEdit(event);
+            setMenuDismissed(false);
+          }}
           className="field-sizing-content block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
         />
         <div className="flex items-center justify-end gap-1.5 px-2 pb-2">

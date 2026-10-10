@@ -8,12 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { SessionList } from "@/features/catalog/session-list";
-import { useConversationUi } from "@/features/conversation/conversation-ui";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { PlaceholderScreen } from "@/routes/placeholder";
 import { useLiveAgents } from "@/store/context";
+import { useDrafts } from "@/store/drafts";
 import { composeShareText, parseShareParams } from "./share-text";
 
 const RECENT_SESSIONS = 8;
@@ -43,7 +43,7 @@ export function ShareScreen() {
   const sessions = useQuery({ queryKey: queryKeys.sessions(), queryFn: () => listSessions() });
 
   const handOff = (agent: Pick<AgentInfo, "id">) => {
-    if (text.trim() !== "") useConversationUi.getState().setDraft(agent.id, text);
+    if (text.trim() !== "") useDrafts.getState().replace(agent.id, text);
   };
   const sendToAgent = (agent: AgentInfo) => {
     handOff(agent);

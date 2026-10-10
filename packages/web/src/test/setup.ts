@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { useDrafts } from "@/store/drafts";
 import { FakeEventSource } from "./fake-event-source";
 
 // jsdom lacks these; next-themes and the router use them.
@@ -29,4 +30,5 @@ globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 afterEach(() => {
   cleanup();
   FakeEventSource.instances = [];
+  useDrafts.setState({ drafts: {} });
 });
