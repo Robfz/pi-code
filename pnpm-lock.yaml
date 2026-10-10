@@ -44,6 +44,9 @@ importers:
       '@pi-code/protocol':
         specifier: workspace:*
         version: link:../protocol
+      fuzzysort:
+        specifier: ^4.0.2
+        version: 4.0.2
       hono:
         specifier: ^4.13.9
         version: 4.13.9
@@ -3378,6 +3381,9 @@ packages:
 
   fuzzysort@3.1.0:
     resolution: {integrity: sha512-sR9BNCjBg6LNgwvxlBd0sBABvQitkLzoVY9MYYROQVX/FvfJ4Mai9LsGhDgd8qYdds0bY77VzYd5iuB+v5rwQQ==}
+
+  fuzzysort@4.0.2:
+    resolution: {integrity: sha512-3c7yD6rK1EXIsqpcu1ZVzXJugODWNMzvUij6yTiziaAHrpNS8kzFOI9mJLE8pmG4K9JOaVgzQRgklfOEk8f4Tg==}
 
   gaxios@7.3.1:
     resolution: {integrity: sha512-kB3rzJV7d9juLZh8/56QTXCwQfxyhdOMdyYk1HdQKFtF8TJTDTZQJtixWIwXdE9Jji91mC41DUNpjleo4L4eAQ==}
@@ -8919,6 +8925,8 @@ snapshots:
   functions-have-names@1.2.3: {}
 
   fuzzysort@3.1.0: {}
+
+  fuzzysort@4.0.2: {}
 
   gaxios@7.3.1:
     dependencies:

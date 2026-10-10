@@ -1,6 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GitBranchesResponse, GitDiffResponse } from "@pi-code/protocol";
+import type {
+  FileContentResponse,
+  FileSearchResponse,
+  GitBranchesResponse,
+  GitDiffResponse,
+} from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ErrorEnvelope } from "../errors.ts";
 import { type Harness, startHarness } from "../testing/http-harness.ts";
@@ -92,6 +97,87 @@ describe("GET /api/agents/:id/git/branches", () => {
     harness = h;
     const agent = await h.open();
     const res = await h.json<ErrorEnvelope>("GET", `/api/agents/${agent.id}/git/branches`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("not_a_git_repo");
+  });
+});
+
+describe("GET /api/agents/:id/files", () => {
+  it("searches the project's files", async () => {
+    const h = await start();
+    writeFileSync(join(h.project, "c.txt"), "c\n");
+    const agent = await h.open();
+    const res = await h.json<FileSearchResponse>("GET", `/api/agents/${agent.id}/files?q=b.t`);
+    expect(res.status).toBe(200);
+    expect(res.body.files[0]).toBe("b.txt");
+
+    const empty = await h.json<FileSearchResponse>("GET", `/api/agents/${agent.id}/files`);
+    expect(empty.body).toEqual({ files: [] });
+  });
+
+  it("answers 400 for a query over 200 characters", async () => {
+    const h = await start();
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>(
+      "GET",
+      `/api/agents/${agent.id}/files?q=${"a".repeat(201)}`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("invalid_body");
+  });
+
+  it("answers 404 outside a work tree", async () => {
+    const h = await startHarness();
+    harness = h;
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>("GET", `/api/agents/${agent.id}/files?q=a`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("not_a_git_repo");
+  });
+});
+
+describe("GET /api/agents/:id/files/content", () => {
+  it("reads a working-tree file", async () => {
+    const h = await start();
+    writeFileSync(join(h.project, "a.txt"), "edited\n");
+    const agent = await h.open();
+    const res = await h.json<FileContentResponse>(
+      "GET",
+      `/api/agents/${agent.id}/files/content?path=${encodeURIComponent("./a.txt")}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      path: "a.txt",
+      content: "edited\n",
+      binary: false,
+      tooLarge: false,
+    });
+  });
+
+  it("answers 404 file_not_found for a missing file and 400 without a path", async () => {
+    const h = await start();
+    const agent = await h.open();
+    const missing = await h.json<ErrorEnvelope>(
+      "GET",
+      `/api/agents/${agent.id}/files/content?path=nope.txt`,
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe("file_not_found");
+
+    const noPath = await h.json<ErrorEnvelope>("GET", `/api/agents/${agent.id}/files/content`);
+    expect(noPath.status).toBe(400);
+    expect(noPath.body.error.code).toBe("invalid_body");
+  });
+
+  it("answers 404 outside a work tree", async () => {
+    const h = await startHarness();
+    harness = h;
+    writeFileSync(join(h.project, "a.txt"), "a\n");
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>(
+      "GET",
+      `/api/agents/${agent.id}/files/content?path=a.txt`,
+    );
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("not_a_git_repo");
   });

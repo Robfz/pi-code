@@ -78,7 +78,7 @@ interface GitBranchesResponse {
 
 `readProjectFile(cwd, path)` (`git/files.ts`) reads the working-tree copy:
 
-- `path` is cwd-relative or absolute and is resolved against the cwd. Its realpath must be inside `realpath(cwd)`, else `400 invalid_body` "outside the project", which covers `..` and symlinks leading out. Missing, or not a regular file → `404 file_not_found`. Outside a work tree → `404 not_a_git_repo`.
+- `path` is cwd-relative or absolute and is resolved against the cwd; an empty or missing `path` → `400 invalid_body`. Its realpath must be inside `realpath(cwd)`, else `400 invalid_body` "outside the project", which covers `..` and symlinks leading out. Missing, or not a regular file → `404 file_not_found`. Outside a work tree → `404 not_a_git_repo`.
 - The diff's limits apply: over 1 MB → `tooLarge`, no content. A NUL byte in the first 8000 bytes (git's heuristic) → `binary`, no content. Otherwise the content is decoded as UTF-8.
 
 ```ts
