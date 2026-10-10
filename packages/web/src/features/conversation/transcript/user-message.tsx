@@ -1,12 +1,14 @@
 import { splitFileBlocks, type UserMessage } from "@pi-code/protocol";
 import { FileTextIcon } from "lucide-react";
 import { useState } from "react";
+import { CodeRefText } from "@/features/review/code-ref-text";
 import { baseName, contentImages, contentText, imageSrc } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
 /**
  * User text + image thumbnails (content may be a string or a content array). Leading `<file>`
- * blocks (attached text files) render as collapsed chips that expand to the file's content.
+ * blocks (attached text files) render as collapsed chips that expand to the file's content. Line
+ * references in the text are clickable.
  */
 export function UserMessageView({
   message,
@@ -67,7 +69,11 @@ export function UserMessageView({
           </pre>
         </details>
       ))}
-      {body !== "" && <div className="whitespace-pre-wrap break-words">{body}</div>}
+      {body !== "" && (
+        <div className="whitespace-pre-wrap break-words">
+          <CodeRefText text={body} />
+        </div>
+      )}
     </div>
   );
 }

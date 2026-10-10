@@ -61,6 +61,33 @@ describe("Markdown", () => {
   });
 });
 
+describe("Markdown codeRefs", () => {
+  const TEXT = [
+    "See @src/a.ts:3, `@b.ts:4-5`, *@c.ts:6* and [@d.ts:7](https://x.example).",
+    "",
+    "```",
+    "@e.ts:8",
+    "```",
+  ].join("\n");
+  const refs = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll("[data-code-ref]")).map((ref) => ref.textContent);
+
+  it("marks references in text, inline code and emphasis, not in links or code blocks", () => {
+    const { container } = render(<Markdown text={TEXT} codeRefs />);
+    expect(refs(container)).toEqual(["@src/a.ts:3", "@b.ts:4-5", "@c.ts:6"]);
+    const inline = container.querySelector("code [data-code-ref]");
+    expect(inline).toHaveAttribute("role", "button");
+    expect(inline).toHaveAttribute("tabindex", "0");
+    expect(container).toHaveTextContent("@d.ts:7");
+    expect(container).toHaveTextContent("@e.ts:8");
+  });
+
+  it("marks nothing without the prop", () => {
+    const { container } = render(<Markdown text={TEXT} />);
+    expect(refs(container)).toEqual([]);
+  });
+});
+
 describe("imagePolicy", () => {
   it("classifies image URLs", () => {
     expect(imagePolicy("https://x.example/a.png")).toEqual({ kind: "click", host: "x.example" });
