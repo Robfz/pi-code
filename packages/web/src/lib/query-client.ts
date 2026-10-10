@@ -20,4 +20,12 @@ export const queryKeys = {
   commands: (agentId: string) => ["agent", agentId, "commands"] as const,
   stats: (agentId: string) => ["agent", agentId, "stats"] as const,
   forkMessages: (agentId: string) => ["agent", agentId, "fork-messages"] as const,
+  /** The review panel's diff and open file, invalidated by every `git_status` event. */
+  review: (agentId: string) => ["agent", agentId, "review"] as const,
+  gitDiff: (agentId: string, mode: "uncommitted" | "branch", base?: string, uncommitted = false) =>
+    ["agent", agentId, "review", "diff", mode, base ?? null, uncommitted] as const,
+  gitBranches: (agentId: string) => ["agent", agentId, "branches"] as const,
+  fileSearch: (agentId: string, q: string) => ["agent", agentId, "files", q] as const,
+  fileContent: (agentId: string, path: string) =>
+    ["agent", agentId, "review", "file", path] as const,
 };

@@ -242,7 +242,7 @@ interface ReviewState {
 }
 ```
 
-`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes, uncommitted mode). Setters update the entry, among them `openPane(agentId, tab?)`, `togglePane` and `openFile(agentId, path, target?)`.
+`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes, uncommitted mode). Setters update the entry, among them `openPane(agentId, tab?)`, `togglePane` and `openFile(agentId, path, target?)`, which switches to the Files tab and gives `target` a fresh `nonce`, so opening the same lines again scrolls to them again.
 
 ### Changes tab
 
@@ -305,7 +305,7 @@ At ≥1024px (`useIsDesktop`), the conversation route renders the review panel a
 
 `useOpenReference()` (`features/review/open-reference.ts`):
 
-1. `openFile(agentId, ref.path, { start, end, nonce })` and `tab: "files"`.
+1. `openFile(agentId, ref.path, { start, end })`, which switches to the Files tab.
 2. Desktop: `paneOpen = true`. Phone: navigate to `/agents/$agentId/diff`.
 3. A reference with `rev` opens the current file at those lines, with a toast: "That reference points at version <rev>; showing the current file."
 

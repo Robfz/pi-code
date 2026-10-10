@@ -12,8 +12,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadedDiff, stubCanvas } from "@/components/diff/testing";
+import { ConversationStoreProvider } from "@/store/context";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { stubFetch } from "@/test/render";
+import { makeAgent } from "@/test/fixtures";
+import { hydratedStore, stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
 
@@ -22,7 +24,14 @@ const editPatch = fixtureEditPatch;
 const gitPatch = () => `diff --git a/notes.txt b/notes.txt\nindex 1..2 100644\n${editPatch()}`;
 
 async function renderScreen(agentId = "a1") {
-  const rootRoute = createRootRoute({ component: () => <Outlet /> });
+  const store = hydratedStore({ agent: makeAgent({ id: agentId }) });
+  const rootRoute = createRootRoute({
+    component: () => (
+      <ConversationStoreProvider store={store}>
+        <Outlet />
+      </ConversationStoreProvider>
+    ),
+  });
   const conversation = createRoute({
     getParentRoute: () => rootRoute,
     path: "/agents/$agentId",
