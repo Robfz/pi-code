@@ -28,9 +28,10 @@ import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
-import { EMPTY_DRAFT, useDrafts } from "@/store/drafts";
+import { type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
 import { selectEditorText, selectIsRunning, selectQueue } from "@/store/selectors";
 import { type Attachment, prepareAttachment } from "./attachments";
+import { ComposerInput } from "./composer-input";
 import {
   BUILTIN_COMMANDS,
   commandItems,
@@ -140,6 +141,7 @@ function SlashMenu({
  *   survive navigation. `set_editor_text` requests and Stop & edit replace the text; a draft
  *   changed outside the composer (fork, share, an inserted reference) focuses the textarea at
  *   the draft's selection, now or on the next mount.
+ * - `ComposerInput` colors line references blue and deletes them whole.
  */
 export function Composer() {
   const store = useConversationStore();
@@ -250,10 +252,10 @@ export function Composer() {
     });
   }
 
-  function updateText(event: SyntheticEvent<HTMLTextAreaElement>) {
-    onEdit(event);
+  function updateText(value: string, selection: DraftSelection) {
+    useDrafts.getState().edit(agentId, value, selection);
     setMenuIndex(0);
-    if (slashQuery(event.currentTarget.value) === null) setMenuDismissed(false);
+    if (slashQuery(value) === null) setMenuDismissed(false);
   }
 
   const hasQueue = queue.steering.length + queue.followUp.length > 0;
@@ -439,7 +441,7 @@ export function Composer() {
             ))}
           </ul>
         )}
-        <textarea
+        <ComposerInput
           ref={textareaRef}
           aria-label="Message"
           aria-autocomplete="list"
@@ -451,14 +453,14 @@ export function Composer() {
           placeholder={
             !ready ? "Waiting for pi…" : running ? "Steer or queue a message…" : "Message pi…"
           }
-          onChange={updateText}
+          onValueChange={updateText}
           onSelect={onEdit}
           onKeyDown={onKeyDown}
           onBlur={(event) => {
             onEdit(event);
             setMenuDismissed(false);
           }}
-          className="field-sizing-content block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
+          className="field-sizing-content max-h-48 min-h-11 placeholder:text-muted-foreground disabled:cursor-not-allowed"
         />
         <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
           <input
