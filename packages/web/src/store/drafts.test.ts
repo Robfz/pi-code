@@ -56,6 +56,15 @@ describe("drafts", () => {
     expect(draft("a2")).toMatchObject({ text: "two", selection: { start: 1, end: 2 } });
   });
 
+  it("edit leaves the store untouched when text and selection are unchanged", () => {
+    typed("hi", 1, 2);
+    const before = useDrafts.getState();
+    typed("hi", 1, 2);
+    expect(useDrafts.getState()).toBe(before);
+    typed("hi", 2);
+    expect(draft().selection).toEqual({ start: 2, end: 2 });
+  });
+
   it("replace puts the caret at the end and bumps external", () => {
     typed("old", 1);
     useDrafts.getState().replace("a1", "new text");

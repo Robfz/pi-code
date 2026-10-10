@@ -23,7 +23,7 @@ export interface Draft {
 
 interface Drafts {
   drafts: Record<string, Draft>;
-  /** Typing. */
+  /** Typing and caret moves; a no-op when neither text nor selection changed. */
   edit(agentId: string, text: string, selection: DraftSelection): void;
   setAttachments(agentId: string, attachments: Attachment[]): void;
   /** Fork, share, `set_editor_text`, Stop & edit: the caret goes to the end. */
@@ -41,9 +41,9 @@ export const EMPTY_DRAFT: Draft = {
   external: 0,
 };
 
-const caretAt = (offset: number): DraftSelection => ({ start: offset, end: offset });
+export const caretAt = (offset: number): DraftSelection => ({ start: offset, end: offset });
 
-export const useDrafts = create<Drafts>()((set) => {
+export const useDrafts = create<Drafts>()((set, get) => {
   const update = (agentId: string, change: (draft: Draft) => Partial<Draft>) =>
     set((state) => {
       const draft = state.drafts[agentId] ?? EMPTY_DRAFT;
@@ -52,7 +52,14 @@ export const useDrafts = create<Drafts>()((set) => {
 
   return {
     drafts: {},
-    edit: (agentId, text, selection) => update(agentId, () => ({ text, selection })),
+    edit: (agentId, text, selection) => {
+      const draft = get().drafts[agentId] ?? EMPTY_DRAFT;
+      const same =
+        draft.text === text &&
+        draft.selection.start === selection.start &&
+        draft.selection.end === selection.end;
+      if (!same) update(agentId, () => ({ text, selection }));
+    },
     setAttachments: (agentId, attachments) => update(agentId, () => ({ attachments })),
     replace: (agentId, text) =>
       update(agentId, (draft) => ({

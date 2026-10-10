@@ -1,7 +1,6 @@
 /** Local branches and default-branch detection (design/07-code-review.md, "GET git/branches"). */
 import type { GitBranchesResponse } from "@pi-code/protocol";
-import { ApiError } from "../errors.ts";
-import { gitTopLevel, runGit } from "./git.ts";
+import { requireWorkTree, runGit } from "./git.ts";
 
 const ORIGIN_PREFIX = "refs/remotes/origin/";
 
@@ -11,9 +10,7 @@ const ORIGIN_PREFIX = "refs/remotes/origin/";
  * `null`. Throws `not_a_git_repo` outside a work tree.
  */
 export async function listBranches(cwd: string): Promise<GitBranchesResponse> {
-  if ((await gitTopLevel(cwd)) === null) {
-    throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
-  }
+  await requireWorkTree(cwd);
   // `lstrip=2` rather than `refname:short`, which writes `heads/x` when a tag is also named `x`.
   const [listed, originHead] = await Promise.all([
     runGit(cwd, [

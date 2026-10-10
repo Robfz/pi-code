@@ -138,6 +138,17 @@ function marked(): string[] {
   );
 }
 
+/** New-side numbers of the marked rows, in either layout. */
+function markedNew(): string[] {
+  return Array.from(
+    document.querySelectorAll(
+      ".diff-line-num.diff-multi-select-active [data-line-new-num], .diff-line-new-num.diff-multi-select-active [data-line-num]",
+    ),
+  ).map(
+    (span) => span.getAttribute("data-line-new-num") ?? span.getAttribute("data-line-num") ?? "",
+  );
+}
+
 describe("DiffViewer line selection", () => {
   it("reports a click on a line number", async () => {
     const onSelectLines = vi.fn();
@@ -216,6 +227,25 @@ describe("DiffViewer line selection", () => {
     await waitFor(() => expect(marked()).toEqual(["1", "old:2"]));
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(marked()).toEqual([]));
+  });
+
+  it("re-applies the selection after a layout switch", async () => {
+    const width = stubElementWidth(800);
+    render(
+      <DiffViewer
+        patch={editPatch}
+        selection={{ side: "new", start: 2, end: 3 }}
+        onSelectLines={() => {}}
+      />,
+    );
+    await waitFor(() => expect(markedNew()).toEqual(["2", "3"]));
+    act(() => width.resize(1200));
+    // The split view's final (non-wrapping) rows.
+    await waitFor(() => expect(document.querySelector(".split-diff-view-normal")).not.toBeNull());
+    await waitFor(() => expect(markedNew()).toEqual(["2", "3"]));
+    act(() => width.resize(800));
+    expect(await loadedDiff()).toHaveAttribute("data-mode", "unified");
+    await waitFor(() => expect(markedNew()).toEqual(["2", "3"]));
   });
 });
 

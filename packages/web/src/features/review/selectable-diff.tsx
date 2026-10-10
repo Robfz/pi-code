@@ -6,15 +6,18 @@
  */
 
 import { type CodeRef, formatCodeRef } from "@pi-code/protocol";
-import { useEffect, useId } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { DiffViewer, type DiffViewerProps, type LineSelection } from "@/components/diff";
 import { Button } from "@/components/ui/button";
+import { CODE_REF_COLOR } from "@/lib/code-refs";
 import { useIsDesktop } from "@/lib/use-media-query";
+import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { useDrafts } from "@/store/drafts";
 import { type PendingSelection, useLineSelection } from "./line-selection";
+import type { FileTarget } from "./review-state";
 
 export interface SelectableDiffProps
   extends Omit<DiffViewerProps, "onSelectLines" | "selection" | "scrollTo"> {
@@ -23,7 +26,7 @@ export interface SelectableDiffProps
   /** After a reference is inserted. */
   onAdded?(): void;
   /** New-side lines to mark and scroll to; a new `nonce` scrolls again. */
-  highlight?: { start: number; end: number; nonce: number };
+  highlight?: FileTarget;
 }
 
 function pendingRange({ side, anchor, end = anchor }: PendingSelection): LineSelection {
@@ -59,7 +62,7 @@ export function SelectableDiff({
     onAdded?.();
   };
 
-  const onSelectLines = (selection: LineSelection) => {
+  const select = (selection: LineSelection) => {
     if (desktop) {
       add(selection);
       return;
@@ -79,17 +82,33 @@ export function SelectableDiff({
     }
     set(next);
   };
+  // Stable props keep the memoized `DiffViewer` from re-rendering with this component.
+  const selectRef = useRef(select);
+  useLayoutEffect(() => {
+    selectRef.current = select;
+  });
+  const onSelectLines = useCallback((selection: LineSelection) => selectRef.current(selection), []);
 
-  const marked = highlight
-    ? { side: "new" as const, start: highlight.start, end: highlight.end }
-    : undefined;
+  const start = highlight?.start;
+  const end = highlight?.end;
+  const nonce = highlight?.nonce;
+  const selection = useMemo(() => {
+    const marked =
+      start === undefined || end === undefined ? undefined : { side: "new" as const, start, end };
+    return desktop ? marked : pending ? pendingRange(pending) : (marked ?? null);
+  }, [desktop, pending, start, end]);
+  const scrollTo = useMemo(
+    () => (start === undefined || nonce === undefined ? undefined : { line: start, nonce }),
+    [start, nonce],
+  );
+
   return (
     <>
       <DiffViewer
         {...viewer}
         onSelectLines={onSelectLines}
-        selection={desktop ? marked : pending ? pendingRange(pending) : (marked ?? null)}
-        scrollTo={highlight && { line: highlight.start, nonce: highlight.nonce }}
+        selection={selection}
+        scrollTo={scrollTo}
       />
       {pending && (
         <AddToChatBar
@@ -127,7 +146,7 @@ function AddToChatBar({
       className="fixed inset-x-0 bottom-0 z-50 flex items-center gap-2 border-t bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg"
     >
       {reference ? (
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-blue-600 dark:text-blue-400">
+        <span className={cn("min-w-0 flex-1 truncate font-mono text-sm", CODE_REF_COLOR)}>
           {reference}
         </span>
       ) : (

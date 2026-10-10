@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { ReviewPane } from "@/features/review/review-pane";
-import { useReview } from "@/features/review/review-state";
+import { useReviewStore } from "@/features/review/review-state";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
@@ -28,7 +28,7 @@ export function ConversationScreen() {
   const exited = useConversation((s) => s.agent.status === "exited");
   const desktop = useIsDesktop();
   const agentId = useConversation((s) => s.agentId);
-  const pane = useReview(agentId).paneOpen && desktop;
+  const pane = useReviewStore((s) => s.reviews[agentId]?.paneOpen ?? false) && desktop;
   // Where desktop scopes the dialog and trust sheets, clear of the sidebar.
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   // What such a sheet's overlay covers is inert while it's open: focus skips to the sidebar.
@@ -41,7 +41,7 @@ export function ConversationScreen() {
   return (
     <div className="flex h-dvh">
       <div ref={setRoot} className="relative flex h-dvh min-w-0 flex-1 flex-col">
-        <ConversationHeader inert={inert} />
+        <ConversationHeader inert={inert} paneOpen={pane} className={padding} />
         <div
           ref={scrollRef}
           inert={inert}

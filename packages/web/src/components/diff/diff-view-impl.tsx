@@ -45,7 +45,9 @@ function whenRendered(
 }
 
 // A new key per parsed patch remounts the selectable view, so its selection manager follows
-// the patch's `DiffFile` (it keeps the one it was created with).
+// the patch's `DiffFile` (it keeps the one it was created with). The view also remounts on a
+// layout change: switching to split swaps the library's row elements one render late, dropping
+// the marks applied in between.
 let nextViewKey = 0;
 
 export interface DiffViewImplProps {
@@ -89,8 +91,7 @@ export default function DiffViewImpl({
   );
 
   // Applied in an effect: on mouseup the library marks the line just selected after calling
-  // `onMultiSelectComplete`, which would overwrite a range set from inside that callback. It also
-  // drops its preselected lines when the layout changes, hence `split`.
+  // `onMultiSelectComplete`, which would overwrite a range set from inside that callback.
   const selectionSide = selection?.side;
   const selectionStart = selection?.start;
   const selectionEnd = selection?.end;
@@ -137,7 +138,7 @@ export default function DiffViewImpl({
     <div ref={rootRef}>
       {onSelectLines ? (
         <DiffViewWithMultiSelect
-          key={view.key}
+          key={`${view.key}-${split}`}
           ref={viewRef}
           {...props}
           onMultiSelectComplete={({ range }: MultiSelectResult) =>

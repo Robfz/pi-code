@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fuzzysort from "fuzzysort";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "../errors.ts";
 import { git } from "../testing/layout-repo.ts";
 import { listProjectFiles, readProjectFile, searchFiles } from "./files.ts";
@@ -60,6 +60,21 @@ describe("listProjectFiles", () => {
     ]);
   });
 
+  it("lists a conflicted file once", async () => {
+    write({ "a.txt": "base\n", "b.txt": "b\n" });
+    commit();
+    git(repo, "checkout", "-q", "-b", "feature");
+    write({ "a.txt": "feature\n" });
+    commit();
+    git(repo, "checkout", "-q", "main");
+    write({ "a.txt": "main\n" });
+    commit();
+    expect(() => git(repo, "merge", "-q", "feature")).toThrow();
+    expect(git(repo, "ls-files", "--unmerged")).toContain("a.txt");
+
+    expect((await listProjectFiles(repo)).sort()).toEqual(["a.txt", "b.txt"]);
+  });
+
   it("lists only the subtree of a subfolder cwd, relative to it", async () => {
     write({ "top.txt": "t\n", "pkg/src/a.ts": "a\n" });
     commit();
@@ -88,6 +103,19 @@ describe("searchFiles", () => {
     );
 
     expect(await searchFiles(repo, "gt")).toEqual(["docs/big-elephant.ts", "g/t/readme.md"]);
+  });
+
+  it("hands fuzzysort prepared targets, which it doesn't cache", async () => {
+    write({ "src/a.ts": "" });
+    const go = vi.spyOn(fuzzysort, "go");
+    try {
+      expect(await searchFiles(repo, "a")).toEqual(["src/a.ts"]);
+      // `go` keeps the strings it prepares itself in a module-level cache that never shrinks.
+      const targets = go.mock.calls[0]?.[1] as unknown as object[];
+      expect(targets.flatMap(Object.values).every((t) => typeof t === "object")).toBe(true);
+    } finally {
+      go.mockRestore();
+    }
   });
 
   it("returns at most 10 files", async () => {
@@ -168,18 +196,32 @@ describe("readProjectFile", () => {
     writeFileSync(join(root, "x"), "secret\n");
     write({ "pkg/a.ts": "" });
     symlinkSync(join(root, "x"), join(repo, "link"));
+    mkdirSync(join(root, "out"));
+    writeFileSync(join(root, "out", "y"), "secret\n");
+    symlinkSync(join(root, "out"), join(repo, "out-link"));
     const cases: [string, string][] = [
       [repo, "../x"],
       [repo, "../missing"],
       [repo, join(root, "x")],
       [repo, "link"],
       [join(repo, "pkg"), "../link"],
+      [repo, "out-link/y"],
+      [repo, "out-link/missing"],
     ];
     for (const [cwd, path] of cases) {
       const error = await rejection(readProjectFile(cwd, path));
       expect(isApiError(error, "invalid_body")).toBe(true);
       expect((error as Error).message).toBe(`${path} is outside the project`);
     }
+  });
+
+  it("resolves absolute paths through a symlinked cwd", async () => {
+    write({ "a.ts": "a\n" });
+    const cwd = join(root, "repo-link");
+    symlinkSync(repo, cwd);
+    expect(await readProjectFile(cwd, join(cwd, "a.ts"))).toMatchObject({ path: "a.ts" });
+    const missing = join(cwd, "missing.ts");
+    expect(isApiError(await rejection(readProjectFile(cwd, missing)), "file_not_found")).toBe(true);
   });
 
   it("follows a symlink inside the cwd", async () => {

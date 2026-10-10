@@ -6,20 +6,14 @@
 
 import type { CodeRef, GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, FileIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { countPatchLines, type LineSelection } from "@/components/diff";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  ApiRequestError,
-  errorMessage,
-  getGitBranches,
-  getGitDiff,
-  isApiRequestError,
-} from "@/lib/api";
+import { getGitBranches, getGitDiff, isApiRequestError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
+import { LoadError, NotARepo, retryServerErrors } from "./query-states";
 import { type DiffMode, useReview, useReviewStore } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
@@ -35,10 +29,6 @@ const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; cla
     deleted: { letter: "D", label: "Deleted", className: "text-red-600 dark:text-red-400" },
     renamed: { letter: "R", label: "Renamed", className: "text-sky-600 dark:text-sky-400" },
   };
-
-/** Client errors (an unknown base, not a repo) won't change on a retry. */
-export const retryServerErrors = (count: number, error: unknown) =>
-  !(error instanceof ApiRequestError && error.status < 500) && count < 1;
 
 /**
  * The reference for lines of `file`: old-side lines name the old commit; new-side lines name
@@ -161,15 +151,6 @@ function Totals({ files }: { files: GitFileDiff[] }) {
   );
 }
 
-export function NotARepo() {
-  return (
-    <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
-      <FileIcon className="size-6" />
-      <p>This project isn't a git repository.</p>
-    </div>
-  );
-}
-
 function Loading() {
   return (
     <div data-testid="diff-loading" className="flex flex-col gap-2">
@@ -280,14 +261,11 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
   let body: ReactNode;
   if (branchMode && branches.isError) {
     body = (
-      <div className="flex flex-col items-start gap-2 text-sm">
-        <p className="text-destructive">
-          Couldn't load the branches: {errorMessage(branches.error)}
-        </p>
-        <Button size="sm" variant="outline" onClick={() => void branches.refetch()}>
-          Retry
-        </Button>
-      </div>
+      <LoadError
+        what="the branches"
+        error={branches.error}
+        onRetry={() => void branches.refetch()}
+      />
     );
   } else if (branchMode && base === undefined) {
     body = branches.isPending ? (
@@ -300,14 +278,7 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
   } else if (diff.isPending) {
     body = <Loading />;
   } else if (diff.isError) {
-    body = (
-      <div className="flex flex-col items-start gap-2 text-sm">
-        <p className="text-destructive">Couldn't load the diff: {errorMessage(diff.error)}</p>
-        <Button size="sm" variant="outline" onClick={() => void diff.refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
+    body = <LoadError what="the diff" error={diff.error} onRetry={() => void diff.refetch()} />;
   } else if (diff.data.files.length === 0) {
     body = (
       <p className="py-10 text-center text-sm text-muted-foreground">

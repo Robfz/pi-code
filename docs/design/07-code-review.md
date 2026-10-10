@@ -355,4 +355,4 @@ Coverage per task is in [`../plan/07-code-review.md`](../plan/07-code-review.md)
 - The flow follows the viewport width, not the input: a tablet at ≥1024px gets the desktop flow, where touch can't drag, so it selects single lines only.
 - Paths containing `"` or a line break can't be referenced.
 - Drafts survive navigation, not a reload.
-- File search lists tracked files deleted from the working tree; opening one says it no longer exists. The explorer is search-only, with no folder tree.
+- File search lists tracked files deleted from the working tree and submodule paths; opening one says it no longer exists. The explorer is search-only, with no folder tree.

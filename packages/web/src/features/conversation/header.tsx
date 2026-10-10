@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useReview, useReviewStore } from "@/features/review/review-state";
+import { useReviewStore } from "@/features/review/review-state";
 import { SidebarSheet } from "@/features/sidebar/sidebar-sheet";
 import { baseName } from "@/lib/content";
 import { useIsDesktop } from "@/lib/use-media-query";
@@ -39,7 +39,16 @@ import { useSessionActions } from "./session-actions";
  * below the desktop breakpoint, fork, clone, compact, rename, new session, close). Session commands
  * need a ready agent. `inert` while a scoped sheet covers it.
  */
-export function ConversationHeader({ inert }: { inert?: boolean }) {
+export function ConversationHeader({
+  inert,
+  paneOpen = false,
+  className,
+}: {
+  inert?: boolean;
+  /** Whether the desktop review pane is open. */
+  paneOpen?: boolean;
+  className?: string;
+}) {
   const agentId = useConversation((s) => s.agentId);
   const cwd = useConversation((s) => s.agent.cwd);
   const name = useConversation(selectSessionName);
@@ -50,14 +59,13 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   const openSheet = useOpenSheet();
   const folder = cwd ? baseName(cwd) : "";
   const desktop = useIsDesktop();
-  const paneOpen = useReview(agentId).paneOpen && desktop;
 
   return (
     <header
       inert={inert}
       className={cn(
         "flex items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur",
-        paneOpen ? "lg:px-6" : "lg:px-32",
+        className,
       )}
     >
       <div className="flex h-12 min-w-0 flex-1 items-center gap-1">

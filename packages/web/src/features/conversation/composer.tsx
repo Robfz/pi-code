@@ -28,10 +28,10 @@ import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
-import { type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
+import { caretAt, type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
 import { selectEditorText, selectIsRunning, selectQueue } from "@/store/selectors";
 import { type Attachment, prepareAttachment } from "./attachments";
-import { ComposerInput } from "./composer-input";
+import { ComposerInput, selectionOf } from "./composer-input";
 import {
   BUILTIN_COMMANDS,
   commandItems,
@@ -58,8 +58,6 @@ function joinTexts(texts: readonly string[]): string {
 const seenEditorNonce = new WeakMap<ConversationStore, number>();
 /** Last draft `external` applied per conversation store (outlives remounts). */
 const seenExternal = new WeakMap<ConversationStore, number>();
-
-const caretAt = (offset: number) => ({ start: offset, end: offset });
 
 /** Slash-command suggestions above the composer. */
 function SlashMenu({
@@ -246,10 +244,7 @@ export function Composer() {
   /** Typing and caret moves. */
   function onEdit(event: SyntheticEvent<HTMLTextAreaElement>) {
     const el = event.currentTarget;
-    useDrafts.getState().edit(agentId, el.value, {
-      start: el.selectionStart,
-      end: el.selectionEnd,
-    });
+    useDrafts.getState().edit(agentId, el.value, selectionOf(el));
   }
 
   function updateText(value: string, selection: DraftSelection) {

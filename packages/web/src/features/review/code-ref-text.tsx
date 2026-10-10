@@ -1,28 +1,23 @@
-import { findCodeRefs } from "@pi-code/protocol";
-import { Fragment, type ReactNode } from "react";
+import { CODE_REF_COLOR, splitCodeRefs } from "@/lib/code-refs";
+import { cn } from "@/lib/utils";
 import { useOpenReference } from "./open-reference";
 
 /** Plain text with its line references as blue buttons that open those lines. */
 export function CodeRefText({ text }: { text: string }) {
   const open = useOpenReference();
-  const parts: ReactNode[] = [];
-  let last = 0;
-  for (const match of findCodeRefs(text)) {
-    const { index, length } = match;
-    if (index > last) parts.push(<Fragment key={last}>{text.slice(last, index)}</Fragment>);
-    parts.push(
+  return splitCodeRefs(text).map(({ text: part, match }) =>
+    match ? (
       <button
-        key={index}
+        key={match.index}
         type="button"
         data-code-ref=""
         onClick={() => open(match)}
-        className="inline cursor-pointer text-left text-blue-600 hover:underline dark:text-blue-400"
+        className={cn("inline cursor-pointer text-left hover:underline", CODE_REF_COLOR)}
       >
-        {text.slice(index, index + length)}
-      </button>,
-    );
-    last = index + length;
-  }
-  if (last < text.length) parts.push(<Fragment key={last}>{text.slice(last)}</Fragment>);
-  return <>{parts}</>;
+        {part}
+      </button>
+    ) : (
+      part
+    ),
+  );
 }

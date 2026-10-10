@@ -1,11 +1,18 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GitFileDiff } from "@pi-code/protocol";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "../errors.ts";
 import { gitDiff, gitStatus, MAX_PATCH_BYTES } from "./git.ts";
+
+// Spied on to count the git processes a diff spawns.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 let root: string;
 let repo: string;
@@ -235,6 +242,15 @@ describe("gitDiff in branch mode", () => {
     expect(files["untracked.txt"]).toMatchObject({ status: "untracked" });
   });
 
+  it("abbreviates revisions to at least 7 digits whatever core.abbrev says", async () => {
+    featureBranch();
+    git("config", "core.abbrev", "4");
+    const diff = await gitDiff(repo, { base: "main" });
+    expect(diff.oldRev).toBe(git("rev-parse", "--short=7", "main~1").trim());
+    expect(diff.newRev).toBe(git("rev-parse", "--short=7", "HEAD").trim());
+    expect(diff.newRev).toMatch(/^[0-9a-f]{7,40}$/);
+  });
+
   it("is empty against the current branch", async () => {
     featureBranch();
     writeFileSync(join(repo, "edited.txt"), "dirty\n");
@@ -309,6 +325,28 @@ describe("gitDiff in branch mode", () => {
     expect(files["gone.txt"]).toMatchObject({ status: "deleted", tooLarge: true });
     expect(files["small.txt"]).toMatchObject({ tooLarge: false, worktreeChanged: true });
     expect(files["small.txt"]?.patch).toContain("+b");
+  });
+
+  it("sizes hundreds of changed files without a git process each", async () => {
+    const count = 300;
+    // Random, so the two large files aren't paired as a rename.
+    const big = () => randomBytes(MAX_PATCH_BYTES).toString("hex");
+    mkdirSync(join(repo, "many"));
+    writeFileSync(join(repo, "gone.txt"), big());
+    commit();
+    git("checkout", "-q", "-b", "feature");
+    for (let i = 0; i < count; i++) writeFileSync(join(repo, "many", `${i}.txt`), `${i}\n`);
+    writeFileSync(join(repo, "big.txt"), big());
+    unlinkSync(join(repo, "gone.txt"));
+    commit();
+
+    vi.mocked(spawn).mockClear();
+    const files = byPath((await gitDiff(repo, { base: "main" })).files);
+    expect(vi.mocked(spawn).mock.calls.length).toBeLessThan(20);
+    expect(Object.keys(files)).toHaveLength(count + 2);
+    expect(files["big.txt"]).toMatchObject({ status: "added", tooLarge: true });
+    expect(files["gone.txt"]).toMatchObject({ status: "deleted", tooLarge: true });
+    expect(files["many/0.txt"]?.patch).toContain("+0\n");
   });
 });
 

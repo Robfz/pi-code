@@ -8,12 +8,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeftIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { fileAsPatch } from "@/components/diff";
+import { fileAsPatch, splitLines } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, getFileContent, isApiRequestError } from "@/lib/api";
+import { getFileContent, isApiRequestError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
-import { NotARepo, retryServerErrors } from "./changes-view";
+import { LoadError, NotARepo, retryServerErrors } from "./query-states";
 import type { FileTarget } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
@@ -29,12 +29,6 @@ const SINGLE_NUMBER_COLUMN = [
   "[&_.diff-line-num]:min-w-0!",
   "[&_.diff-line-num]:max-w-none!",
 ].join(" ");
-
-function lineCount(content: string): number {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  return lines.length;
-}
 
 function Message({ children }: { children: ReactNode }) {
   return <p className="py-10 text-center text-sm text-muted-foreground">{children}</p>;
@@ -62,9 +56,11 @@ export function FileViewer({
     retry: retryServerErrors,
   });
   const content = file.data?.content;
-  const lines = content === undefined ? 0 : lineCount(content);
-  const patch = useMemo(
-    () => (file.data && content !== undefined ? fileAsPatch(file.data.path, content) : ""),
+  const { patch, lines } = useMemo(
+    () =>
+      file.data && content !== undefined
+        ? { patch: fileAsPatch(file.data.path, content), lines: splitLines(content).length }
+        : { patch: "", lines: 0 },
     [file.data, content],
   );
   const pastTheEnd = target !== undefined && content !== undefined && target.end > lines;
@@ -104,14 +100,7 @@ export function FileViewer({
       );
     }
   } else if (file.isError) {
-    body = (
-      <div className="flex flex-col items-start gap-2 text-sm">
-        <p className="text-destructive">Couldn't load the file: {errorMessage(file.error)}</p>
-        <Button size="sm" variant="outline" onClick={() => void file.refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
+    body = <LoadError what="the file" error={file.error} onRetry={() => void file.refetch()} />;
   } else {
     body = (
       <div data-testid="file-loading" className="flex flex-col gap-2">

@@ -1,5 +1,5 @@
 import type { FileContentResponse } from "@pi-code/protocol";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
-import { FilesView } from "./files-view";
+import { FILE_SEARCH_DEBOUNCE_MS, FilesView } from "./files-view";
 import { useReviewStore } from "./review-state";
 
 vi.mock("sonner", async (importOriginal) => {
@@ -36,6 +36,7 @@ beforeEach(() => {
   };
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.mocked(toast).mockClear();
   delete (Element.prototype as Partial<Element>).scrollIntoView;
@@ -99,7 +100,11 @@ describe("FilesView search", () => {
     const { calls } = serve();
     await renderView();
     expect(screen.getByText("Type to search files")).toBeInTheDocument();
-    await userEvent.setup().type(screen.getByRole("combobox", { name: "Search files" }), "gitts");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.type(screen.getByRole("combobox", { name: "Search files" }), "gitts");
+    expect(searches(calls)).toEqual([]);
+    await act(() => vi.advanceTimersByTimeAsync(FILE_SEARCH_DEBOUNCE_MS));
     const options = await screen.findAllByRole("option");
     expect(searches(calls)).toEqual(["gitts"]);
     expect(options.map((option) => option.textContent)).toEqual([
@@ -180,6 +185,18 @@ describe("FilesView viewer", () => {
     expect(toast).toHaveBeenCalledTimes(1);
     expect(marked()).toEqual([]);
     expect(scrolled).toEqual([]);
+  });
+
+  it("toasts once per target when a refetch changes the line count", async () => {
+    let count = 5;
+    serve({ content: (path) => [200, text(path, lines(count).join("\n"))] });
+    useReviewStore.getState().openFile("a1", "src/a.ts", { start: 9, end: 9 });
+    const { queryClient } = await renderView();
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("src/a.ts has only 5 lines"));
+    count = 6;
+    await act(() => queryClient.refetchQueries());
+    await lineNumber(6);
+    expect(toast).toHaveBeenCalledTimes(1);
   });
 
   it.each<[string, [number, unknown]]>([

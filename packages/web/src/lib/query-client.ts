@@ -8,6 +8,11 @@ export function createQueryClient(): QueryClient {
   });
 }
 
+const review = (agentId: string) => ["agent", agentId, "review"] as const;
+const gitDiffs = (agentId: string) => [...review(agentId), "diff"] as const;
+const fileSearches = (agentId: string) => ["agent", agentId, "files"] as const;
+const fileContents = (agentId: string) => [...review(agentId), "file"] as const;
+
 export const queryKeys = {
   health: ["health"] as const,
   projects: ["projects"] as const,
@@ -21,11 +26,16 @@ export const queryKeys = {
   stats: (agentId: string) => ["agent", agentId, "stats"] as const,
   forkMessages: (agentId: string) => ["agent", agentId, "fork-messages"] as const,
   /** The review panel's diff and open file, invalidated by every `git_status` event. */
-  review: (agentId: string) => ["agent", agentId, "review"] as const,
+  review,
+  /** Every `gitDiff` of the agent. */
+  gitDiffs,
   gitDiff: (agentId: string, mode: "uncommitted" | "branch", base?: string, uncommitted = false) =>
-    ["agent", agentId, "review", "diff", mode, base ?? null, uncommitted] as const,
+    [...gitDiffs(agentId), mode, base ?? null, uncommitted] as const,
   gitBranches: (agentId: string) => ["agent", agentId, "branches"] as const,
-  fileSearch: (agentId: string, q: string) => ["agent", agentId, "files", q] as const,
-  fileContent: (agentId: string, path: string) =>
-    ["agent", agentId, "review", "file", path] as const,
+  /** Every `fileSearch` of the agent. */
+  fileSearches,
+  fileSearch: (agentId: string, q: string) => [...fileSearches(agentId), q] as const,
+  /** Every `fileContent` of the agent. */
+  fileContents,
+  fileContent: (agentId: string, path: string) => [...fileContents(agentId), path] as const,
 };

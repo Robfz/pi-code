@@ -17,7 +17,7 @@ import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { ConversationStoreProvider } from "@/store/context";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { makeAgent } from "@/test/fixtures";
-import { hydratedStore, stubFetch } from "@/test/render";
+import { type FetchCall, hydratedStore, stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
 
@@ -65,6 +65,8 @@ const file = (patch: Partial<GitFileDiff>): GitFileDiff => ({
   tooLarge: false,
   ...patch,
 });
+
+const urls = (calls: FetchCall[]) => calls.map((call) => call.url);
 
 beforeAll(stubCanvas);
 beforeEach(() => {
@@ -156,6 +158,52 @@ describe("DiffScreen", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByTestId("diff-file")).toBeInTheDocument();
     expect(calls).toHaveLength(2);
+  });
+
+  it("refresh in branch mode refetches the branches and the diff", async () => {
+    useReviewStore.getState().setDiffMode("a1", { mode: "branch" });
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/git/branches"
+        ? [200, { branches: ["main"], defaultBranch: "main" }]
+        : [200, { files: [] }],
+    );
+    await renderScreen();
+    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(urls(calls).sort()).toEqual([
+        "/api/agents/a1/git/branches",
+        "/api/agents/a1/git/branches",
+        "/api/agents/a1/git/diff",
+        "/api/agents/a1/git/diff",
+      ]),
+    );
+  });
+
+  it("refresh on the Files tab refetches the open file, then the search", async () => {
+    useReviewStore.getState().setFilesQuery("a1", "a");
+    useReviewStore.getState().openFile("a1", "a.ts");
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/files/content"
+        ? [200, { path: "a.ts", content: "one\n", binary: false, tooLarge: false }]
+        : [200, { files: ["a.ts"] }],
+    );
+    await renderScreen();
+    const user = userEvent.setup();
+    await waitFor(() => expect(urls(calls)).toEqual(["/api/agents/a1/files/content"]));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(urls(calls)).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Back to search" }));
+    await screen.findByRole("option", { name: "a.ts" });
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(urls(calls)).toEqual([
+        "/api/agents/a1/files/content",
+        "/api/agents/a1/files/content",
+        "/api/agents/a1/files",
+        "/api/agents/a1/files",
+      ]),
+    );
   });
 
   it("other errors offer a retry; back link goes to the conversation", async () => {

@@ -5,36 +5,27 @@
  * emphasis) counts as a reference start.
  */
 
-import { findCodeRefs } from "@pi-code/protocol";
 import type { Element, ElementContent, Root, RootContent, Text } from "hast";
+import { CODE_REF_COLOR, splitCodeRefs } from "./code-refs";
 
 const SKIPPED = new Set(["pre", "a"]);
 
-export const CODE_REF_CLASS = [
-  "cursor-pointer",
-  "text-blue-600",
-  "hover:underline",
-  "dark:text-blue-400",
-];
+export const CODE_REF_CLASS = ["cursor-pointer", "hover:underline", ...CODE_REF_COLOR.split(" ")];
 
 /** `node` split into text and reference spans, or `null` without references. */
 function split(node: Text): ElementContent[] | null {
-  const matches = findCodeRefs(node.value);
-  if (matches.length === 0) return null;
-  const parts: ElementContent[] = [];
-  let last = 0;
-  for (const { index, length } of matches) {
-    if (index > last) parts.push({ type: "text", value: node.value.slice(last, index) });
-    parts.push({
-      type: "element",
-      tagName: "span",
-      properties: { dataCodeRef: "", role: "button", tabIndex: 0, className: CODE_REF_CLASS },
-      children: [{ type: "text", value: node.value.slice(index, index + length) }],
-    });
-    last = index + length;
-  }
-  if (last < node.value.length) parts.push({ type: "text", value: node.value.slice(last) });
-  return parts;
+  const parts = splitCodeRefs(node.value);
+  if (!parts.some((part) => part.match)) return null;
+  return parts.map(({ text, match }) =>
+    match
+      ? {
+          type: "element",
+          tagName: "span",
+          properties: { dataCodeRef: "", role: "button", tabIndex: 0, className: CODE_REF_CLASS },
+          children: [{ type: "text", value: text }],
+        }
+      : { type: "text", value: text },
+  );
 }
 
 function visit(parent: Root | Element) {

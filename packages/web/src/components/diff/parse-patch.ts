@@ -26,6 +26,13 @@ function stripPrefix(name: string): string | null {
   return clean.replace(/^[ab]\//, "");
 }
 
+/** The lines of `text`, CRLF or LF separated; a final line break ends the last line. */
+export function splitLines(text: string): string[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
 /** `+n −m` counts of a unified patch (header lines excluded). */
 export function countPatchLines(patch: string): { additions: number; deletions: number } {
   const { additions, deletions } = parsePatch(patch);
@@ -38,8 +45,7 @@ export function countPatchLines(patch: string): { additions: number; deletions: 
  * in `hunks`, while names describe the first file.
  */
 export function parsePatch(patch: string, fallbackName = "file"): ParsedPatch {
-  const lines = patch.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines = splitLines(patch);
 
   const files: { oldName: string | null; newName: string | null; body: string[] }[] = [];
   let current: (typeof files)[number] | undefined;
@@ -136,8 +142,7 @@ export function parsePatch(patch: string, fallbackName = "file"): ParsedPatch {
 
 /** A new-file patch where every line of `content` is added. */
 export function allAddedPatch(path: string, content: string): string {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines = splitLines(content);
   if (lines.length === 0) return "";
   return [
     "--- /dev/null",
@@ -150,8 +155,7 @@ export function allAddedPatch(path: string, content: string): string {
 
 /** An all-context patch showing every line of `content`, for viewing a whole file. */
 export function fileAsPatch(path: string, content: string): string {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines = splitLines(content);
   if (lines.length === 0) return "";
   return [
     `--- ${path}`,

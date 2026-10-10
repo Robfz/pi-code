@@ -3,22 +3,17 @@
  * "GET files/content").
  */
 import { readFile, realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import type { FileContentResponse } from "@pi-code/protocol";
 import fuzzysort from "fuzzysort";
 import { ApiError } from "../errors.ts";
-import { gitTopLevel, MAX_PATCH_BYTES, runGit } from "./git.ts";
+import { isInside, realpathOrAncestor } from "../paths.ts";
+import { MAX_PATCH_BYTES, requireWorkTree, runGit } from "./git.ts";
 
 const MAX_QUERY_LENGTH = 200;
 const SEARCH_LIMIT = 10;
 /** Git's binary heuristic: a NUL byte within the first 8000 bytes. */
 const BINARY_SNIFF_BYTES = 8000;
-
-async function requireWorkTree(cwd: string): Promise<void> {
-  if ((await gitTopLevel(cwd)) === null) {
-    throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
-  }
-}
 
 /**
  * Tracked and untracked non-ignored files under `cwd`, relative to it, without nested
@@ -49,7 +44,12 @@ export async function searchFiles(cwd: string, q: string): Promise<string[]> {
   }
   await requireWorkTree(cwd);
   if (query === "") return [];
-  const targets = (await listProjectFiles(cwd)).map((path) => ({ path, name: basename(path) }));
+  // Prepared here: `go` would keep the strings it prepares in a module-level cache that never
+  // shrinks.
+  const targets = (await listProjectFiles(cwd)).map((path) => ({
+    path: fuzzysort.prepare(path),
+    name: fuzzysort.prepare(basename(path)),
+  }));
   const results = fuzzysort.go(query, targets, {
     keys: ["path", "name"],
     limit: SEARCH_LIMIT,
@@ -60,12 +60,7 @@ export async function searchFiles(cwd: string, q: string): Promise<string[]> {
       return name > 0 ? 1 + name : (r[0]?.score ?? 0);
     },
   });
-  return results.map((r) => r.obj.path);
-}
-
-function isInside(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return rel !== "" && rel.split(sep)[0] !== ".." && !isAbsolute(rel);
+  return results.map((r) => r.obj.path.target);
 }
 
 function outside(path: string): ApiError {
@@ -84,18 +79,12 @@ function notFound(path: string): ApiError {
 export async function readProjectFile(cwd: string, path: string): Promise<FileContentResponse> {
   await requireWorkTree(cwd);
   const root = await realpath(cwd);
-  const target = resolve(root, path);
-  let real: string;
-  try {
-    real = await realpath(target);
-  } catch {
-    throw isInside(root, target) ? notFound(path) : outside(path);
-  }
-  if (real === root) throw notFound(path);
+  // A missing path is confined by its nearest existing ancestor's realpath: below a link
+  // leading out, missing and existing files alike are outside the project.
+  const real = await realpathOrAncestor(resolve(root, path));
   if (!isInside(root, real)) throw outside(path);
-
-  const info = await stat(real);
-  if (!info.isFile()) throw notFound(path);
+  const info = await stat(real).catch(() => undefined);
+  if (!info?.isFile()) throw notFound(path);
   const response: FileContentResponse = {
     path: relative(root, real),
     binary: false,

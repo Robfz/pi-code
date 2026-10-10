@@ -10,4 +10,5 @@ export {
   fileAsPatch,
   type ParsedPatch,
   parsePatch,
+  splitLines,
 } from "./parse-patch";

@@ -23,11 +23,8 @@ const TABS: [ReviewTab, string][] = [
 /** The queries the Refresh button refetches, per tab. */
 function tabQueries(agentId: string, tab: ReviewTab): QueryKey[] {
   return tab === "changes"
-    ? [[...queryKeys.review(agentId), "diff"], queryKeys.gitBranches(agentId)]
-    : [
-        [...queryKeys.review(agentId), "file"],
-        ["agent", agentId, "files"],
-      ];
+    ? [queryKeys.gitDiffs(agentId), queryKeys.gitBranches(agentId)]
+    : [queryKeys.fileContents(agentId), queryKeys.fileSearches(agentId)];
 }
 
 export function ReviewPanel({

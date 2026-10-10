@@ -10,6 +10,7 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
+import { CODE_REF_COLOR, splitCodeRefs } from "@/lib/code-refs";
 import { cn } from "@/lib/utils";
 import type { DraftSelection } from "@/store/drafts";
 
@@ -19,19 +20,16 @@ const SHARED =
 
 /** The text with every reference in a blue span, plus a zero-width space that keeps a final empty line's height. */
 function highlight(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let at = 0;
-  for (const ref of findCodeRefs(text)) {
-    nodes.push(text.slice(at, ref.index));
-    nodes.push(
-      <span key={ref.index} className="text-blue-600 dark:text-blue-400">
-        {text.slice(ref.index, ref.index + ref.length)}
-      </span>,
-    );
-    at = ref.index + ref.length;
-  }
-  nodes.push(text.slice(at), "\u200b");
-  return nodes;
+  const nodes = splitCodeRefs(text).map(({ text: part, match }) =>
+    match ? (
+      <span key={match.index} className={CODE_REF_COLOR}>
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+  return [...nodes, "\u200b"];
 }
 
 /** Whether removing `prev[from, to)` yields `next`. */
@@ -98,7 +96,7 @@ function syncScroll(textarea: HTMLTextAreaElement | null, mirror: HTMLDivElement
   if (textarea && mirror) mirror.scrollTop = textarea.scrollTop;
 }
 
-const selectionOf = (el: HTMLTextAreaElement): DraftSelection => ({
+export const selectionOf = (el: HTMLTextAreaElement): DraftSelection => ({
   start: el.selectionStart,
   end: el.selectionEnd,
 });

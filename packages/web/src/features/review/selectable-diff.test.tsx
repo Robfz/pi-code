@@ -26,6 +26,7 @@ afterEach(() => {
   useUiPrefs.setState({ toolsExpanded: false });
   vi.unstubAllGlobals();
   vi.mocked(toast.error).mockClear();
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
 const desktop = () => stubMatchMedia((query) => query === DESKTOP_QUERY);
@@ -75,10 +76,16 @@ async function tap(side: "old" | "new", line: number, root?: ParentNode) {
   fireEvent.mouseUp(span);
 }
 
+/**
+ * One synchronous gesture once both lines are rendered: until the view's first frame, a pending
+ * selection sync (`whenRendered`) would clear a drag still in progress.
+ */
 async function drag(side: "old" | "new", from: number, to: number) {
-  fireEvent.mouseDown(await lineNumber(side, from));
-  fireEvent.mouseOver(await lineNumber(side, to));
-  fireEvent.mouseUp(await lineNumber(side, to));
+  const start = await lineNumber(side, from);
+  const end = await lineNumber(side, to);
+  fireEvent.mouseDown(start);
+  fireEvent.mouseOver(end);
+  fireEvent.mouseUp(end);
 }
 
 /** New-side numbers of the marked rows under `root` (old-side for deleted rows, as `old:N`). */

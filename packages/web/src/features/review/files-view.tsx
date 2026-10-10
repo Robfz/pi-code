@@ -10,8 +10,8 @@ import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui
 import { errorMessage, isApiRequestError, searchFiles } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
-import { NotARepo, retryServerErrors } from "./changes-view";
 import { FileViewer } from "./file-viewer";
+import { NotARepo, retryServerErrors } from "./query-states";
 import { useReview, useReviewStore } from "./review-state";
 
 /** Delay before the search field queries `GET files`. */

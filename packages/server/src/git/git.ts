@@ -43,6 +43,8 @@ export interface RunGitOptions {
   timeoutMs?: number;
   /** Added to the server's environment. */
   env?: Record<string, string>;
+  /** Written to stdin, which is otherwise empty. */
+  input?: string;
 }
 
 /**
@@ -66,8 +68,12 @@ export function runGit(
         GIT_PAGER: "cat",
         LC_ALL: "C",
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    // A git that exits before reading all of its input fails the write with EPIPE; its exit
+    // code tells what happened.
+    child.stdin.on("error", () => {});
+    child.stdin.end(opts.input);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let size = 0;
@@ -115,6 +121,13 @@ export async function gitTopLevel(cwd: string): Promise<string | null> {
   } catch (e) {
     if (e instanceof GitError && e.code !== null) return null; // not a repo (128), bare repo…
     throw e;
+  }
+}
+
+/** Throws `not_a_git_repo` unless `cwd` is inside a git work tree. */
+export async function requireWorkTree(cwd: string): Promise<void> {
+  if ((await gitTopLevel(cwd)) === null) {
+    throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
   }
 }
 
@@ -198,15 +211,26 @@ async function fileSize(path: string): Promise<number | undefined> {
   }
 }
 
-/** Size of `<rev>:./<path>` in the object store, `path` relative to `cwd`. */
-async function blobSize(cwd: string, rev: string, path: string): Promise<number | undefined> {
-  try {
-    const { stdout } = await runGit(cwd, ["cat-file", "-s", `${rev}:./${path}`]);
-    const n = Number(stdout.trim());
-    return Number.isFinite(n) ? n : undefined;
-  } catch {
-    return undefined;
-  }
+/** The `paths` (relative to `cwd`) whose working-tree file is over `MAX_PATCH_BYTES`. */
+async function largeFiles(cwd: string, paths: string[]): Promise<string[]> {
+  const sizes = await Promise.all(paths.map((path) => fileSize(join(cwd, path))));
+  return paths.filter((_, i) => (sizes[i] ?? 0) > MAX_PATCH_BYTES);
+}
+
+/**
+ * The `paths` (relative to `cwd`) whose blob at `rev` is over `MAX_PATCH_BYTES`, sized by a
+ * single git process. Its input is line-based, so a path containing a newline goes unchecked;
+ * `toDiff` still bounds its patch.
+ */
+async function largeBlobs(cwd: string, rev: string, paths: string[]): Promise<string[]> {
+  const queried = paths.filter((path) => !path.includes("\n"));
+  if (queried.length === 0) return [];
+  const { stdout } = await runGit(cwd, ["cat-file", "--batch-check=%(objectsize)"], {
+    input: queried.map((path) => `${rev}:./${path}\n`).join(""),
+  });
+  // One line per input line: the size, or `<object> missing`.
+  const sizes = stdout.split("\n");
+  return queried.filter((_, i) => Number(sizes[i]) > MAX_PATCH_BYTES);
 }
 
 function toDiff(file: ChangedFile, patch: string | undefined, tooLarge: boolean): GitFileDiff {
@@ -232,17 +256,15 @@ async function trackedDiffs(cwd: string, from: string, to?: string): Promise<Git
   );
   if (listed.length === 0) return [];
 
-  const large = new Set<string>();
-  await Promise.all(
-    listed.map(async (file) => {
-      const size =
-        file.status === "deleted"
-          ? await blobSize(cwd, from, file.path)
-          : to === undefined
-            ? await fileSize(join(cwd, file.path))
-            : await blobSize(cwd, to, file.path);
-      if (size !== undefined && size > MAX_PATCH_BYTES) large.add(file.path);
-    }),
+  const deleted = listed.filter((f) => f.status === "deleted").map((f) => f.path);
+  const present = listed.filter((f) => f.status !== "deleted").map((f) => f.path);
+  const large = new Set(
+    (
+      await Promise.all([
+        largeBlobs(cwd, from, deleted),
+        to === undefined ? largeFiles(cwd, present) : largeBlobs(cwd, to, present),
+      ])
+    ).flat(),
   );
   const exclude = [...large].map((path) => `:(exclude,literal)${path}`);
   const patchArgs = ["diff", ...DIFF_FLAGS, "--patch", ...revs, "--", ".", ...exclude];
@@ -313,7 +335,8 @@ async function untrackedDiffs(cwd: string): Promise<GitFileDiff[]> {
 }
 
 async function shortRev(cwd: string, rev: string): Promise<string> {
-  return (await runGit(cwd, ["rev-parse", "--short", rev])).stdout.trim();
+  // Plain `--short` follows core.abbrev, which may be as low as 4.
+  return (await runGit(cwd, ["rev-parse", "--short=7", rev])).stdout.trim();
 }
 
 /** The merge-base of local branch `base` and `HEAD`; throws `invalid_body` when there is none. */
@@ -357,9 +380,7 @@ export interface GitDiffOptions {
  * tree and `invalid_body` for an unusable `base`.
  */
 export async function gitDiff(cwd: string, opts: GitDiffOptions = {}): Promise<GitDiffResponse> {
-  if ((await gitTopLevel(cwd)) === null) {
-    throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
-  }
+  await requireWorkTree(cwd);
   const committed = await hasHead(cwd);
   if (opts.base === undefined) {
     const [tracked, untracked, oldRev] = await Promise.all([
