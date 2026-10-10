@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { useLineSelection } from "@/features/review/line-selection";
 import { useDrafts } from "@/store/drafts";
 import { FakeEventSource } from "./fake-event-source";
 
@@ -31,4 +32,5 @@ afterEach(() => {
   cleanup();
   FakeEventSource.instances = [];
   useDrafts.setState({ drafts: {} });
+  useLineSelection.setState({ pending: null });
 });
