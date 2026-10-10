@@ -1,11 +1,12 @@
 import type {
+  BeforeAgentStartEvent,
   ExtensionAPI,
   ExtensionCommandContext,
   ProjectTrustHandler,
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import piCodeExtension from "./index.ts";
+import piCodeExtension, { REFERENCE_GUIDELINE } from "./index.ts";
 
 type CommandOptions = Omit<RegisteredCommand, "name" | "sourceInfo">;
 
@@ -55,6 +56,66 @@ describe("project_trust", () => {
     expect(await runTrust()).toEqual({ trusted: "undecided" });
     vi.stubEnv("PI_CODE_TRUST", "maybe");
     expect(await runTrust()).toEqual({ trusted: "undecided" });
+  });
+});
+
+describe("before_agent_start", () => {
+  function event(options: Partial<BeforeAgentStartEvent["systemPromptOptions"]>) {
+    return {
+      type: "before_agent_start",
+      prompt: "hi",
+      systemPrompt: "",
+      systemPromptOptions: {
+        cwd: "/p",
+        selectedTools: [],
+        hiddenTools: [],
+        toolSnippets: {},
+        toolGuidelines: {},
+        promptGuidelines: [],
+        appendSystemPrompt: "",
+        sections: {},
+        contextFiles: [],
+        skills: [],
+        ...options,
+      },
+    } satisfies BeforeAgentStartEvent;
+  }
+
+  function run(e: BeforeAgentStartEvent) {
+    const handler = load().handlers.get("before_agent_start") as (
+      e: BeforeAgentStartEvent,
+    ) => unknown;
+    return handler(e);
+  }
+
+  it("adds the guideline once to empty prompt guidelines", () => {
+    const e = event({});
+    expect(run(e)).toBeUndefined();
+    expect(run(e)).toBeUndefined();
+    expect(e.systemPromptOptions.promptGuidelines).toEqual([REFERENCE_GUIDELINE]);
+    expect(e.systemPromptOptions.appendSystemPrompt).toBe("");
+  });
+
+  it("appends the guideline after existing prompt guidelines", () => {
+    const e = event({ promptGuidelines: ["Be brief."], appendSystemPrompt: "user text" });
+    expect(run(e)).toBeUndefined();
+    run(e);
+    expect(e.systemPromptOptions.promptGuidelines).toEqual(["Be brief.", REFERENCE_GUIDELINE]);
+    expect(e.systemPromptOptions.appendSystemPrompt).toBe("user text");
+  });
+
+  it("appends the guideline once to appendSystemPrompt with a custom prompt", () => {
+    const e = event({ customPrompt: "You are X.", appendSystemPrompt: "user text" });
+    expect(run(e)).toBeUndefined();
+    run(e);
+    expect(e.systemPromptOptions.appendSystemPrompt).toBe(`user text\n\n${REFERENCE_GUIDELINE}`);
+    expect(e.systemPromptOptions.promptGuidelines).toEqual([]);
+  });
+
+  it("uses the guideline alone as appendSystemPrompt when it is empty", () => {
+    const e = event({ customPrompt: "You are X." });
+    run(e);
+    expect(e.systemPromptOptions.appendSystemPrompt).toBe(REFERENCE_GUIDELINE);
   });
 });
 
