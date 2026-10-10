@@ -130,7 +130,7 @@ function formatCodeRef(ref: CodeRef): string | null;
 function findCodeRefs(text: string): CodeRefMatch[];
 ```
 
-`formatCodeRef` quotes a path that contains whitespace or begins like a rev (`<7–40 hex>:`), and writes `N` when `start === end`. With a rev, it writes a path not starting with `./` or `../` as `./<path>`: git resolves `<rev>:./<path>` from the current directory, so `git show <sha>:./<path>` works from a subfolder cwd, while `<rev>:<path>` resolves from the repo root.
+`formatCodeRef` quotes a path whose bare form wouldn't read back as the same path: one that contains whitespace or a backtick, begins like a rev (`<7–40 hex>:`), or contains a `:N` segment that would end it early (`a:3`). It writes `N` when `start === end`. With a rev, it writes a path not starting with `./` or `../` as `./<path>`: git resolves `<rev>:./<path>` from the current directory, so `git show <sha>:./<path>` works from a subfolder cwd, while `<rev>:<path>` resolves from the repo root. `findCodeRefs` drops that `./` after a rev, so a reference's `path` is cwd-relative either way and `formatCodeRef` output round trips.
 
 ### Version naming
 

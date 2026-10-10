@@ -91,6 +91,8 @@ export interface GitFileDiff {
   patch?: string;
   binary: boolean;
   tooLarge: boolean;
+  /** Branch mode without uncommitted changes: the working-tree copy differs from `HEAD`. */
+  worktreeChanged?: true;
 }
 
 /** Committed session entries (all branches) and the current leaf. */
@@ -266,6 +268,30 @@ export interface NavigateResponse {
 
 export interface GitDiffResponse {
   files: GitFileDiff[];
+  /** Short sha of the old side (`HEAD` or the merge-base); absent without commits. */
+  oldRev?: string;
+  /** Short sha of `HEAD` when it is the new side; absent when the new side is the working tree. */
+  newRev?: string;
+}
+
+export interface GitBranchesResponse {
+  /** Local branches, most recent commit first. */
+  branches: string[];
+  defaultBranch: string | null;
+}
+
+export interface FileSearchResponse {
+  /** Cwd-relative paths, best match first, at most 10. */
+  files: string[];
+}
+
+export interface FileContentResponse {
+  /** Cwd-relative, normalized. */
+  path: string;
+  /** Absent when binary or too large. */
+  content?: string;
+  binary: boolean;
+  tooLarge: boolean;
 }
 
 export interface GitStatusResponse {
