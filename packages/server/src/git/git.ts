@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import type { GitFileDiff, GitStatus } from "@pi-code/protocol";
+import type { GitDiffResponse, GitFileDiff, GitStatus } from "@pi-code/protocol";
 import { ApiError } from "../errors.ts";
 
 /** Git's well-known empty tree: the diff base of a repository without commits. */
@@ -43,6 +43,8 @@ export interface RunGitOptions {
   timeoutMs?: number;
   /** Added to the server's environment. */
   env?: Record<string, string>;
+  /** Written to stdin, which is otherwise empty. */
+  input?: string;
 }
 
 /**
@@ -66,8 +68,12 @@ export function runGit(
         GIT_PAGER: "cat",
         LC_ALL: "C",
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    // A git that exits before reading all of its input fails the write with EPIPE; its exit
+    // code tells what happened.
+    child.stdin.on("error", () => {});
+    child.stdin.end(opts.input);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let size = 0;
@@ -107,7 +113,7 @@ export function runGit(
 }
 
 /** The work tree's top-level directory, or `null` when `cwd` isn't inside a git work tree. */
-async function gitTopLevel(cwd: string): Promise<string | null> {
+export async function gitTopLevel(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
     const top = stdout.trim();
@@ -118,8 +124,15 @@ async function gitTopLevel(cwd: string): Promise<string | null> {
   }
 }
 
-async function hasHead(top: string): Promise<boolean> {
-  const { code } = await runGit(top, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
+/** Throws `not_a_git_repo` unless `cwd` is inside a git work tree. */
+export async function requireWorkTree(cwd: string): Promise<void> {
+  if ((await gitTopLevel(cwd)) === null) {
+    throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
+  }
+}
+
+async function hasHead(cwd: string): Promise<boolean> {
+  const { code } = await runGit(cwd, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
     okCodes: [0, 1, 128],
   });
   return code === 0;
@@ -198,15 +211,26 @@ async function fileSize(path: string): Promise<number | undefined> {
   }
 }
 
-/** Size of `<rev>:<path>` in the object store (for deleted files). */
-async function blobSize(top: string, rev: string, path: string): Promise<number | undefined> {
-  try {
-    const { stdout } = await runGit(top, ["cat-file", "-s", `${rev}:${path}`]);
-    const n = Number(stdout.trim());
-    return Number.isFinite(n) ? n : undefined;
-  } catch {
-    return undefined;
-  }
+/** The `paths` (relative to `cwd`) whose working-tree file is over `MAX_PATCH_BYTES`. */
+async function largeFiles(cwd: string, paths: string[]): Promise<string[]> {
+  const sizes = await Promise.all(paths.map((path) => fileSize(join(cwd, path))));
+  return paths.filter((_, i) => (sizes[i] ?? 0) > MAX_PATCH_BYTES);
+}
+
+/**
+ * The `paths` (relative to `cwd`) whose blob at `rev` is over `MAX_PATCH_BYTES`, sized by a
+ * single git process. Its input is line-based, so a path containing a newline goes unchecked;
+ * `toDiff` still bounds its patch.
+ */
+async function largeBlobs(cwd: string, rev: string, paths: string[]): Promise<string[]> {
+  const queried = paths.filter((path) => !path.includes("\n"));
+  if (queried.length === 0) return [];
+  const { stdout } = await runGit(cwd, ["cat-file", "--batch-check=%(objectsize)"], {
+    input: queried.map((path) => `${rev}:./${path}\n`).join(""),
+  });
+  // One line per input line: the size, or `<object> missing`.
+  const sizes = stdout.split("\n");
+  return queried.filter((_, i) => Number(sizes[i]) > MAX_PATCH_BYTES);
 }
 
 function toDiff(file: ChangedFile, patch: string | undefined, tooLarge: boolean): GitFileDiff {
@@ -219,27 +243,32 @@ function toDiff(file: ChangedFile, patch: string | undefined, tooLarge: boolean)
   return diff;
 }
 
-const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-textconv", "-M"] as const;
+const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-textconv", "-M", "--relative"] as const;
 
-async function trackedDiffs(top: string, base: string): Promise<GitFileDiff[]> {
+/**
+ * Tracked changes under `cwd` from `from` to `to`, or to the working tree without `to`. Paths
+ * are relative to `cwd`; changes outside its subtree are left out.
+ */
+async function trackedDiffs(cwd: string, from: string, to?: string): Promise<GitFileDiff[]> {
+  const revs = to === undefined ? [from] : [from, to];
   const listed = parseNameStatus(
-    (await runGit(top, ["diff", ...DIFF_FLAGS, "--name-status", "-z", base])).stdout,
+    (await runGit(cwd, ["diff", ...DIFF_FLAGS, "--name-status", "-z", ...revs])).stdout,
   );
   if (listed.length === 0) return [];
 
-  const large = new Set<string>();
-  await Promise.all(
-    listed.map(async (file) => {
-      const size =
-        file.status === "deleted"
-          ? await blobSize(top, base, file.path)
-          : await fileSize(join(top, file.path));
-      if (size !== undefined && size > MAX_PATCH_BYTES) large.add(file.path);
-    }),
+  const deleted = listed.filter((f) => f.status === "deleted").map((f) => f.path);
+  const present = listed.filter((f) => f.status !== "deleted").map((f) => f.path);
+  const large = new Set(
+    (
+      await Promise.all([
+        largeBlobs(cwd, from, deleted),
+        to === undefined ? largeFiles(cwd, present) : largeBlobs(cwd, to, present),
+      ])
+    ).flat(),
   );
   const exclude = [...large].map((path) => `:(exclude,literal)${path}`);
-  const patchArgs = ["diff", ...DIFF_FLAGS, "--patch", base, "--", ".", ...exclude];
-  const chunks = splitPatch((await runGit(top, patchArgs)).stdout);
+  const patchArgs = ["diff", ...DIFF_FLAGS, "--patch", ...revs, "--", ".", ...exclude];
+  const chunks = splitPatch((await runGit(cwd, patchArgs)).stdout);
   const withPatch = listed.filter((f) => !large.has(f.path));
 
   // Both listings come from the same diff machinery, so their order matches. A count mismatch
@@ -254,12 +283,12 @@ async function trackedDiffs(top: string, base: string): Promise<GitFileDiff[]> {
     listed.map(async (file) => {
       if (large.has(file.path)) return toDiff(file, undefined, true);
       const paths = file.oldPath === undefined ? [file.path] : [file.oldPath, file.path];
-      const { stdout } = await runGit(top, [
+      const { stdout } = await runGit(cwd, [
         "--literal-pathspecs",
         "diff",
         ...DIFF_FLAGS,
         "--patch",
-        base,
+        ...revs,
         "--",
         ...paths,
       ]);
@@ -268,17 +297,17 @@ async function trackedDiffs(top: string, base: string): Promise<GitFileDiff[]> {
   );
 }
 
-async function untrackedDiff(top: string, path: string): Promise<GitFileDiff> {
+async function untrackedDiff(cwd: string, path: string): Promise<GitFileDiff> {
   const file: ChangedFile = { status: "untracked", path };
   if (path.endsWith("/")) {
     // A nested repository: listed, never diffed.
     return toDiff({ ...file, path: path.slice(0, -1) }, undefined, false);
   }
-  const size = await fileSize(join(top, path));
+  const size = await fileSize(join(cwd, path));
   if (size !== undefined && size > MAX_PATCH_BYTES) return toDiff(file, undefined, true);
   // Exit code 1 means "differences found", the normal outcome here.
   const { stdout } = await runGit(
-    top,
+    cwd,
     ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", path],
     { okCodes: [0, 1] },
   );
@@ -298,21 +327,83 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
-/**
- * The working tree's changes: tracked files against `HEAD` (the empty tree without commits),
- * plus untracked files as new-file patches. Throws `not_a_git_repo` outside a work tree.
- */
-export async function gitDiff(cwd: string): Promise<GitFileDiff[]> {
-  const top = await gitTopLevel(cwd);
-  if (top === null) throw new ApiError("not_a_git_repo", `${cwd} is not inside a git work tree`);
-  const base = (await hasHead(top)) ? "HEAD" : EMPTY_TREE;
-  const [tracked, untrackedOut] = await Promise.all([
-    trackedDiffs(top, base),
-    runGit(top, ["ls-files", "--others", "--exclude-standard", "-z"]),
+/** Untracked, non-ignored files under `cwd` as new-file patches, paths relative to `cwd`. */
+async function untrackedDiffs(cwd: string): Promise<GitFileDiff[]> {
+  const { stdout } = await runGit(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  const paths = stdout.split("\0").filter((p) => p !== "");
+  return mapLimit(paths, UNTRACKED_CONCURRENCY, (p) => untrackedDiff(cwd, p));
+}
+
+async function shortRev(cwd: string, rev: string): Promise<string> {
+  // Plain `--short` follows core.abbrev, which may be as low as 4.
+  return (await runGit(cwd, ["rev-parse", "--short=7", rev])).stdout.trim();
+}
+
+/** The merge-base of local branch `base` and `HEAD`; throws `invalid_body` when there is none. */
+async function mergeBase(cwd: string, base: string): Promise<string> {
+  // `show-ref --verify` takes only a full ref name, so expressions like `main~1` are rejected.
+  const ref = `refs/heads/${base}`;
+  const exists =
+    !base.startsWith("-") &&
+    (await runGit(cwd, ["show-ref", "--verify", "--quiet", ref], { okCodes: [0, 1] })).code === 0;
+  if (!exists) throw new ApiError("invalid_body", `unknown branch ${base}`);
+  const { code, stdout } = await runGit(cwd, ["merge-base", ref, "HEAD"], { okCodes: [0, 1] });
+  if (code === 1) throw new ApiError("invalid_body", `${base} and HEAD have no common commit`);
+  return stdout.trim();
+}
+
+/** Paths under `cwd` whose working-tree copy differs from `HEAD`. */
+async function worktreeChangedPaths(cwd: string): Promise<Set<string>> {
+  const { stdout } = await runGit(cwd, [
+    "diff",
+    "--name-only",
+    "-z",
+    "--no-renames",
+    "--relative",
+    "HEAD",
   ]);
-  const untrackedPaths = untrackedOut.stdout.split("\0").filter((p) => p !== "");
-  const untracked = await mapLimit(untrackedPaths, UNTRACKED_CONCURRENCY, (p) =>
-    untrackedDiff(top, p),
-  );
-  return [...tracked, ...untracked];
+  return new Set(stdout.split("\0").filter((p) => p !== ""));
+}
+
+export interface GitDiffOptions {
+  /** Local branch to diff against, from its merge-base with `HEAD` (branch mode). */
+  base?: string;
+  /** Branch mode: diff the merge-base against the working tree, untracked files included. */
+  uncommitted?: boolean;
+}
+
+/**
+ * The changes under `cwd` (design/07-code-review.md, "Diff modes"), paths relative to `cwd`.
+ * Without `base`: tracked files against `HEAD` (the empty tree without commits), plus untracked
+ * files as new-file patches. With `base`: from its merge-base with `HEAD` to the working tree
+ * plus untracked files (`uncommitted`), or to `HEAD`. Throws `not_a_git_repo` outside a work
+ * tree and `invalid_body` for an unusable `base`.
+ */
+export async function gitDiff(cwd: string, opts: GitDiffOptions = {}): Promise<GitDiffResponse> {
+  await requireWorkTree(cwd);
+  const committed = await hasHead(cwd);
+  if (opts.base === undefined) {
+    const [tracked, untracked, oldRev] = await Promise.all([
+      trackedDiffs(cwd, committed ? "HEAD" : EMPTY_TREE),
+      untrackedDiffs(cwd),
+      committed ? shortRev(cwd, "HEAD") : undefined,
+    ]);
+    const files = [...tracked, ...untracked];
+    return oldRev === undefined ? { files } : { files, oldRev };
+  }
+
+  if (!committed) throw new ApiError("invalid_body", "no commits yet");
+  const base = await mergeBase(cwd, opts.base);
+  const oldRev = await shortRev(cwd, base);
+  if (opts.uncommitted) {
+    const [tracked, untracked] = await Promise.all([trackedDiffs(cwd, base), untrackedDiffs(cwd)]);
+    return { files: [...tracked, ...untracked], oldRev };
+  }
+  const [files, changed, newRev] = await Promise.all([
+    trackedDiffs(cwd, base, "HEAD"),
+    worktreeChangedPaths(cwd),
+    shortRev(cwd, "HEAD"),
+  ]);
+  for (const file of files) if (changed.has(file.path)) file.worktreeChanged = true;
+  return { files, oldRev, newRev };
 }

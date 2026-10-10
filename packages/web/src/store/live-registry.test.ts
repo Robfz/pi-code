@@ -455,6 +455,34 @@ describe("LiveRegistry", () => {
     expect(a1.getState()).toMatchObject({ seq: 1, live: { run: { active: true } } });
   });
 
+  it("invalidates the agent's review queries on each git_status event and each refetch's hydrate", async () => {
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidated = () => invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey);
+    start();
+    await openHydrated("a1");
+    await openHydrated("a2");
+    invalidateQueries.mockClear();
+
+    const status = { branch: "main", dirty: true };
+    server.push("a1", { type: "git_status", status });
+    // An unchanged status is a refresh signal too.
+    server.push("a1", { type: "git_status", status });
+    server.push("a2", { type: "pi", event: { type: "agent_start" } });
+    expect(invalidated()).toEqual([
+      ["agent", "a1", "review"],
+      ["agent", "a1", "review"],
+    ]);
+
+    // A resync drops the events until the snapshot lands; the hydrate invalidates.
+    invalidateQueries.mockClear();
+    const snapshot = deferSnapshot();
+    latest().send({ type: "resync", agentId: "a2" });
+    expect(invalidateQueries).not.toHaveBeenCalled();
+    snapshot.release();
+    await flush();
+    expect(invalidated()).toEqual([["agent", "a2", "review"]]);
+  });
+
   it("refetches a store when its agent becomes ready", async () => {
     deps.fetchSnapshot
       .mockResolvedValueOnce(makeSnapshot({ seq: 1, agent: makeAgent({ status: "starting" }) }))

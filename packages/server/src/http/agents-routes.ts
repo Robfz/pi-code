@@ -12,7 +12,7 @@ import {
   runCommand,
 } from "../agents/commands.ts";
 import { ApiError, errorEnvelope } from "../errors.ts";
-import { gitDiff, gitStatus } from "../git/git.ts";
+import { gitStatus } from "../git/git.ts";
 
 /** `prompt.images` are base64: allow large bodies on `/rpc`. */
 const RPC_BODY_LIMIT = 25 * 1024 * 1024;
@@ -76,10 +76,6 @@ export function agentsRoutes(manager: AgentManager) {
         return c.json(await navigateTree(agent, c.req.valid("json")), 200);
       },
     )
-    .get("/:id/git/diff", async (c) => {
-      const agent = manager.require(c.req.param("id"));
-      return c.json({ files: await gitDiff(agent.cwd) }, 200);
-    })
     .get("/:id/git/status", async (c) => {
       const agent = manager.require(c.req.param("id"));
       return c.json({ status: await gitStatus(agent.cwd) }, 200);

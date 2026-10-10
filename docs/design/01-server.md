@@ -9,7 +9,7 @@ src/
   agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log, idle sweep
   live/              StreamHub: shared inputs of the live stream
   catalog/           projects, sessions, path autocomplete, session watcher, repo layouts, session deletion
-  git/               diff + status, folder branches, worktree create/remove
+  git/               diff + status, folder branches, local branches, project files, worktree create/remove
   push/              VAPID keys, subscriptions, triggers
   curator/           curator proxy listener
   store/             small JSON files in the data dir
@@ -84,8 +84,8 @@ All records from one agent flow through a single **sequential** async queue, so 
    - `compaction_end`, and completion of `new_session` / `switch_session` / `fork` / `clone` / tree navigation → full `get_entries` + `get_state` → `transcript_reset`.
    - `tool_execution_update|end` whose `details.curatorUrl` is set → register the curator session with the curator proxy and emit `curator { toolCallId, url }`.
    - `agent_settled`, dialog `extension_ui_request`, run failure → notification triggers (see Push).
-   - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`.
-   - `bash` completion → emit `bash_done`, then sync entries (the `bashExecution` entry has no `message_end`).
+   - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`, changed or not (see Git).
+   - `bash` completion → emit `bash_done`, then sync entries (the `bashExecution` entry has no `message_end`); refresh git status as after `turn_end`.
 2. **Publish**, synchronously per event: assign the next `seq`, reduce into `LiveState` with the shared reducer (`@pi-code/protocol`), update the cached transcript/state, append to the event log, fan out to the log's subscribers (live-stream connections that opened the agent). Nothing awaits inside this step, so state and `seq` always advance together.
 
 `message_update` deltas are forwarded as-is (pi already strips cumulative partials on the wire).
@@ -131,10 +131,16 @@ Read-only over `~/.pi/agent/sessions`, parsing the documented session format; wo
 
 ## Git
 
-`runGit` (`git/git.ts`) runs `git` with no shell, `GIT_TERMINAL_PROMPT=0` and a 10 s timeout by default; diff and status run in the agent's cwd.
+`runGit` (`git/git.ts`) runs `git` with no shell, `GIT_TERMINAL_PROMPT=0` and a 10 s timeout by default. Everything runs in the agent's cwd. Diffs and project files are scoped to it, so a conversation in a subfolder of a repo sees only that subtree's changes and files; the status covers the whole repo. The review routes (`http/review-routes.ts`, mounted at `/api/agents`) are specified in [`07-code-review.md`](07-code-review.md), "Server".
 
-- **Diff** (explicit action): `git diff HEAD --patch --no-color --no-ext-diff` plus untracked files from `git ls-files --others --exclude-standard`, each rendered as a new-file patch (`git diff --no-index /dev/null <file>`). Returns per-file `{ path, oldPath?, status, patch, binary }`. Files over 1 MB are listed without patch. Non-repo → `404 not_a_git_repo`. Empty repo (no HEAD) → diff against the empty tree.
-- **Status** (status bar): `git rev-parse --abbrev-ref HEAD` + `git status --porcelain=v1 -uno` → `{ branch, dirty }`.
+- **Diff** (explicit action, `gitDiff`): tracked diffs use `--relative` (cwd-relative paths, changes outside the cwd left out); untracked files come from `git ls-files --others --exclude-standard` run in the cwd, each rendered as a new-file patch (`git diff --no-index /dev/null <file>`); blob lookups use `<rev>:./<path>`. Two modes:
+  - **Uncommitted** (default): `HEAD` to the working tree, plus untracked files. Empty repo (no HEAD) → diff against the empty tree.
+  - **Branch** (`base=<local branch>`, checked with `git show-ref --verify`): from `merge-base(<base>, HEAD)` to `HEAD`, or with `uncommitted=1` to the working tree plus untracked files. An unknown base, a repo without commits or unrelated histories → `400 invalid_body`.
+
+  Returns `{ files, oldRev?, newRev? }` (short shas of the old side and, when it is `HEAD`, the new side), per file `{ path, oldPath?, status, patch, binary, tooLarge, worktreeChanged? }`. `worktreeChanged` marks files whose working copy differs from `HEAD` when the new side is `HEAD`. Files over 1 MB are listed without patch, measured as blob sizes when the new side is `HEAD`. Non-repo → `404 not_a_git_repo`.
+- **Branches** (`listBranches`, `git/refs.ts`): local branches, most recent commit first, and the default branch (`origin/HEAD` if it exists locally, else `main`, else `master`, else `null`).
+- **Files** (`git/files.ts`): `searchFiles` fuzzy-matches (`fuzzysort`, basename matches first, at most 10) the tracked and untracked, non-ignored files of the cwd, listed on every request; `readProjectFile` reads a working-tree file confined to the cwd's realpath, with the diff's 1 MB and binary limits. Missing or not a regular file → `404 file_not_found`.
+- **Status** (status bar): `git rev-parse --abbrev-ref HEAD` + `git status --porcelain=v1 -uno` → `{ branch, dirty }`. Refreshed 2 s after `turn_end` and after a `bash` command; `git_status` is published after every such refresh, changed or not, because it is also the web client's signal to refetch the review panel. The startup read publishes only when the status differs.
 
 ## Worktrees
 

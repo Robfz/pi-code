@@ -12,6 +12,7 @@
  *   up (`CLOSED`) the registry reconnects with a backoff, as it retries failed snapshots. On
  *   visible, window `focus` or `online`, a closed stream or one silent for `STALE_AFTER_MS` (the
  *   server pings every 15 s, so it's a dead one the browser hasn't noticed) is reopened.
+ * - An applied `git_status` event, or a hydrate, invalidates the agent's review queries.
  * - Snapshots don't clear attention: the conversation on screen (`show`) is acked on show, on
  *   `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its
  *   attention while the page is visible and focused.
@@ -196,6 +197,8 @@ export class LiveRegistry {
         entry.failures = 0;
         store.getState().hydrate(snapshot);
         store.getState().setConnection(this.live.getState().connection);
+        // Events dropped during the refetch may include a `git_status`.
+        this.invalidateReview(agentId);
         this.reconnect();
       },
       (error: unknown) => {
@@ -273,6 +276,7 @@ export class LiveRegistry {
         const { store } = entry;
         const wasReady = store.getState().agent.status === "ready";
         store.getState().apply(frame.event, frame.seq);
+        if (frame.event.type === "git_status") this.invalidateReview(frame.agentId);
         // pi just became ready: the snapshot now has state, stats and the startup transcript.
         if (
           frame.event.type === "agent_status" &&
@@ -326,6 +330,11 @@ export class LiveRegistry {
         return;
       }
     }
+  }
+
+  /** Every `git_status` follows a git refresh, changed or not: the review queries refetch. */
+  private invalidateReview(agentId: AgentId): void {
+    void this.queryClient.invalidateQueries({ queryKey: queryKeys.review(agentId) });
   }
 
   private closeAgent(agentId: AgentId): void {

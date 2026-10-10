@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversationUi } from "@/features/conversation/conversation-ui";
+import { useDrafts } from "@/store/drafts";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { buildTreeModel, flattenTree } from "./tree-model";
 import { MAX_INDENT, TreeScreen } from "./tree-screen";
@@ -293,7 +294,7 @@ describe("TreeScreen", () => {
     await u.click(within(row("u3")).getByRole("button", { name: /Fork from here/ }));
     await waitFor(() => expect(rpcBodies(calls)).toContainEqual({ type: "fork", entryId: "u3" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
-    expect(useConversationUi.getState().draft?.text).toBe("Try plan B instead");
+    expect(useDrafts.getState().drafts.a1?.text).toBe("Try plan B instead");
   });
 
   it("the current leaf can't be navigated to", async () => {

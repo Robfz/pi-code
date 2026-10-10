@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { closeAgent, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useConversation } from "@/store/context";
-import { useConversationUi } from "./conversation-ui";
+import { useDrafts } from "@/store/drafts";
 
 async function attempt<T>(run: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -65,7 +65,7 @@ export function useSessionActions() {
           return false;
         }
         invalidateCatalog();
-        useConversationUi.getState().setDraft(agentId, data.text);
+        useDrafts.getState().replace(agentId, data.text);
         toast.success("Forked into a new session");
         void navigate({ to: "/agents/$agentId", params: { agentId } });
         return true;

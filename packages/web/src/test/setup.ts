@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { useLineSelection } from "@/features/review/line-selection";
+import { useReviewStore } from "@/features/review/review-state";
+import { useDrafts } from "@/store/drafts";
 import { FakeEventSource } from "./fake-event-source";
 
 // jsdom lacks these; next-themes and the router use them.
@@ -29,4 +32,8 @@ globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 afterEach(() => {
   cleanup();
   FakeEventSource.instances = [];
+  useDrafts.setState({ drafts: {} });
+  useLineSelection.setState({ pending: null });
+  useReviewStore.setState({ reviews: {} });
+  localStorage.removeItem("pi-code:review");
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixtureEditPatch } from "@/tools/testing";
-import { allAddedPatch, countPatchLines, parsePatch } from "./parse-patch";
+import { allAddedPatch, countPatchLines, fileAsPatch, parsePatch } from "./parse-patch";
 
 const fixturePatch = fixtureEditPatch;
 
@@ -96,5 +96,29 @@ describe("allAddedPatch", () => {
 
   it("is empty for empty content", () => {
     expect(allAddedPatch("e.txt", "")).toBe("");
+  });
+});
+
+describe("fileAsPatch", () => {
+  it("shows every line as context", () => {
+    const patch = fileAsPatch("src/a.ts", "one\n\nthree\n");
+    expect(patch).toBe("--- src/a.ts\n+++ src/a.ts\n@@ -1,3 +1,3 @@\n one\n \n three\n");
+    expect(parsePatch(patch)).toMatchObject({
+      oldName: "src/a.ts",
+      newName: "src/a.ts",
+      additions: 0,
+      deletions: 0,
+      lineCount: 3,
+    });
+  });
+
+  it("counts the last line of a file without a trailing newline", () => {
+    const patch = fileAsPatch("a.txt", "one\r\ntwo");
+    expect(patch).toBe("--- a.txt\n+++ a.txt\n@@ -1,2 +1,2 @@\n one\n two\n");
+    expect(parsePatch(patch).lineCount).toBe(2);
+  });
+
+  it("is empty for empty content", () => {
+    expect(fileAsPatch("e.txt", "")).toBe("");
   });
 });

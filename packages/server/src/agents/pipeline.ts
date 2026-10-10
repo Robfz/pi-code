@@ -618,7 +618,10 @@ export class AgentPipeline {
     this.gitTimer.unref();
   }
 
-  /** Reads the git status (outside the queue) and publishes `git_status` if it changed. */
+  /**
+   * Reads the git status (outside the queue) and publishes `git_status`, changed or not: clients
+   * refetch their diffs on the event, and the working tree may change without the status.
+   */
   async refreshGitStatus(): Promise<void> {
     if (this.gitRefreshing) {
       this.gitAgain = true;
@@ -630,7 +633,7 @@ export class AgentPipeline {
         this.gitAgain = false;
         const status = await this.readGitStatus();
         if (status !== undefined && !this.disposed && this.agent.status !== "exited") {
-          await this.enqueue(() => this.publishGitStatus(status));
+          await this.enqueue(() => this.publish({ type: "git_status", status }));
         }
       } while (this.gitAgain && !this.disposed && this.agent.status !== "exited");
     } finally {
@@ -648,6 +651,7 @@ export class AgentPipeline {
     }
   }
 
+  /** Publishes `git_status` if `status` differs from the cached one. */
   private publishGitStatus(status: GitStatus | null): void {
     const current = this.caches.gitStatus;
     const same =

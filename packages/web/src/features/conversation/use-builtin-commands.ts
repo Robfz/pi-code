@@ -2,8 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import { useReviewStore } from "@/features/review/review-state";
 import { rpc } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
+import { useIsDesktop } from "@/lib/use-media-query";
 import { useConversation } from "@/store/context";
 import { useOpenSheet } from "./action-sheets";
 import { useSessionActions } from "./session-actions";
@@ -22,6 +24,7 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
   const queryClient = useQueryClient();
   const actions = useSessionActions();
   const openSheet = useOpenSheet();
+  const desktop = useIsDesktop();
 
   return useCallback(
     async (name: string, args: string) => {
@@ -95,13 +98,14 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
           await actions.copyLastAssistantText();
           break;
         case "diff":
-          void navigate({ to: "/agents/$agentId/diff", params: { agentId } });
+          if (desktop) useReviewStore.getState().togglePane(agentId);
+          else void navigate({ to: "/agents/$agentId/diff", params: { agentId } });
           break;
         default:
           return false;
       }
       return true;
     },
-    [actions, agentId, cwd, navigate, openSheet, queryClient],
+    [actions, agentId, cwd, desktop, navigate, openSheet, queryClient],
   );
 }

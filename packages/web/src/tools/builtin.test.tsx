@@ -2,8 +2,10 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadedDiff, stubCanvas } from "@/components/diff/testing";
+import { ConversationStoreProvider } from "@/store/context";
 import { useUiPrefs } from "@/store/ui-prefs";
 import { stubMatchMedia } from "@/test/dom-stubs";
+import { hydratedStore } from "@/test/render";
 import { bashOutcome, listResult, readRange } from "./builtin";
 import { langFromPath, splitNotice } from "./common";
 import { fixtureToolCall, propsAt } from "./testing";
@@ -19,7 +21,12 @@ const expand = () => userEvent.setup().click(screen.getByRole("button", { expand
 const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
 
 function view(props: ToolCallViewProps) {
-  return render(<ToolCallView {...props} />);
+  const store = hydratedStore();
+  return render(<ToolCallView {...props} />, {
+    wrapper: ({ children }) => (
+      <ConversationStoreProvider store={store}>{children}</ConversationStoreProvider>
+    ),
+  });
 }
 
 describe("read", () => {

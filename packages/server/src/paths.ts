@@ -20,20 +20,24 @@ export async function canonicalize(path: string): Promise<string> {
 
 /**
  * `path`'s realpath, or for a missing path the realpath of its nearest existing ancestor plus
- * the rest. `outside_home` unless inside `realpath(home)`.
+ * the rest.
  */
-export async function canonicalPath(path: string, home: string): Promise<string> {
-  const realHome = await realpath(home);
+export async function realpathOrAncestor(path: string): Promise<string> {
   const suffix: string[] = [];
-  let canonical: string | undefined;
-  for (let dir = resolve(path); canonical === undefined; dir = dirname(dir)) {
+  for (let dir = resolve(path); ; dir = dirname(dir)) {
     try {
-      canonical = join(await realpath(dir), ...suffix);
+      return join(await realpath(dir), ...suffix);
     } catch {
-      if (dirname(dir) === dir) canonical = resolve(path);
-      else suffix.unshift(basename(dir));
+      if (dirname(dir) === dir) return resolve(path);
+      suffix.unshift(basename(dir));
     }
   }
+}
+
+/** `realpathOrAncestor(path)`; `outside_home` unless inside `realpath(home)`. */
+export async function canonicalPath(path: string, home: string): Promise<string> {
+  const realHome = await realpath(home);
+  const canonical = await realpathOrAncestor(path);
   if (!isInside(realHome, canonical)) {
     throw new ApiError("outside_home", `${path} must be inside ${realHome}`);
   }
