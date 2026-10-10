@@ -526,5 +526,14 @@ describe("git status in the pipeline", () => {
     const event = await client.waitForEvent(a.id, (r) => r.event.type === "git_status", 3_000);
     expect(event.event).toEqual({ type: "git_status", status: { branch: "main", dirty: true } });
     expect((await h.snapshot(a.id)).gitStatus).toEqual({ branch: "main", dirty: true });
+
+    // An unchanged status is published too: clients refetch their diffs on the event.
+    await prompt(h, a.id, "edit again");
+    const again = await client.waitForEvent(
+      a.id,
+      (r) => r.event.type === "git_status" && r.seq > event.seq,
+      3_000,
+    );
+    expect(again.event).toEqual({ type: "git_status", status: { branch: "main", dirty: true } });
   });
 });

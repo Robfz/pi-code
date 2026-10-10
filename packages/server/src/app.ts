@@ -8,6 +8,7 @@ import { agentsRoutes } from "./http/agents-routes.ts";
 import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
 import { pushRoutes } from "./http/push-routes.ts";
+import { reviewRoutes } from "./http/review-routes.ts";
 import { spaHandler } from "./http/static.ts";
 import { type SseOptions, streamRoutes } from "./http/stream.ts";
 import { worktreesRoutes } from "./http/worktrees-routes.ts";
@@ -43,6 +44,7 @@ function apiRoutes(deps: AppDeps) {
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/agents", agentsRoutes(deps.manager))
+    .route("/agents", reviewRoutes(deps.manager))
     .route(
       "/worktrees",
       worktreesRoutes({
