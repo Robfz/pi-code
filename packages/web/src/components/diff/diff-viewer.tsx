@@ -2,7 +2,8 @@
  * Diff viewer (`docs/design/03-web-client.md`, "Diffs"): `@git-diff-view/react`, split once the
  * viewer itself is at least 1024px wide (unified below, whatever the viewport), following the
  * app theme. Large patches are guarded behind a "Show anyway" button; patches the library can't
- * render fall back to plain text.
+ * render fall back to plain text. With `onSelectLines`, line numbers are selectable
+ * (`docs/design/07-code-review.md`, "Diff viewer").
  */
 
 import { useTheme } from "next-themes";
@@ -56,6 +57,13 @@ function PlainPatch({ patch }: { patch: string }) {
   );
 }
 
+/** Lines of one side of a diff, 1-based and inclusive. */
+export interface LineSelection {
+  side: "old" | "new";
+  start: number;
+  end: number;
+}
+
 export interface DiffViewerProps {
   /** Unified patch text (one file). */
   patch: string;
@@ -64,6 +72,14 @@ export interface DiffViewerProps {
   className?: string;
   /** Override the large-patch threshold (lines). */
   maxLines?: number;
+  /** Makes line numbers selectable: a click selects a line, a drag a range on one side. */
+  onSelectLines?: (selection: LineSelection) => void;
+  /** Lines to mark; `null` clears the mark; `undefined` leaves the last selection marked. */
+  selection?: LineSelection | null;
+  /** New-side line to center; a new `nonce` scrolls to it again. */
+  scrollTo?: { line: number; nonce: number };
+  /** Unified whatever the width. */
+  unified?: boolean;
 }
 
 export const DiffViewer = memo(function DiffViewer({
@@ -71,6 +87,10 @@ export const DiffViewer = memo(function DiffViewer({
   fileName,
   className,
   maxLines = LARGE_DIFF_LINES,
+  onSelectLines,
+  selection,
+  scrollTo,
+  unified = false,
 }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
   const [widthRef, wide] = useWidthAtLeast<HTMLDivElement>(SPLIT_MIN_WIDTH);
@@ -102,11 +122,12 @@ export const DiffViewer = memo(function DiffViewer({
 
   const oldName = parsed.oldName ?? fileName ?? parsed.newName;
   const newName = parsed.newName ?? fileName ?? parsed.oldName;
+  const split = wide && !unified;
   return (
     <div
       ref={widthRef}
       data-testid="diff-viewer"
-      data-mode={wide ? "split" : "unified"}
+      data-mode={split ? "split" : "unified"}
       className={cn("min-w-0 overflow-hidden rounded-md border text-xs", className)}
     >
       <DiffErrorBoundary fallback={<PlainPatch patch={patch} />}>
@@ -115,8 +136,11 @@ export const DiffViewer = memo(function DiffViewer({
             oldName={oldName}
             newName={newName}
             hunks={parsed.hunks}
-            wide={wide}
+            split={split}
             dark={(forcedTheme ?? resolvedTheme) === "dark"}
+            onSelectLines={onSelectLines}
+            selection={selection}
+            scrollTo={scrollTo}
           />
         </Suspense>
       </DiffErrorBoundary>

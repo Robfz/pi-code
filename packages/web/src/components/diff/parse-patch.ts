@@ -147,3 +147,17 @@ export function allAddedPatch(path: string, content: string): string {
     "",
   ].join("\n");
 }
+
+/** An all-context patch showing every line of `content`, for viewing a whole file. */
+export function fileAsPatch(path: string, content: string): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.length === 0) return "";
+  return [
+    `--- ${path}`,
+    `+++ ${path}`,
+    `@@ -1,${lines.length} +1,${lines.length} @@`,
+    ...lines.map((line) => ` ${line}`),
+    "",
+  ].join("\n");
+}

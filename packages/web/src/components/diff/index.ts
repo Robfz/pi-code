@@ -1,2 +1,13 @@
-export { DiffViewer, type DiffViewerProps, LARGE_DIFF_LINES } from "./diff-viewer";
-export { allAddedPatch, countPatchLines, type ParsedPatch, parsePatch } from "./parse-patch";
+export {
+  DiffViewer,
+  type DiffViewerProps,
+  LARGE_DIFF_LINES,
+  type LineSelection,
+} from "./diff-viewer";
+export {
+  allAddedPatch,
+  countPatchLines,
+  fileAsPatch,
+  type ParsedPatch,
+  parsePatch,
+} from "./parse-patch";
