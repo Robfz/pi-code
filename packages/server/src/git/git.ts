@@ -107,7 +107,7 @@ export function runGit(
 }
 
 /** The work tree's top-level directory, or `null` when `cwd` isn't inside a git work tree. */
-async function gitTopLevel(cwd: string): Promise<string | null> {
+export async function gitTopLevel(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
     const top = stdout.trim();

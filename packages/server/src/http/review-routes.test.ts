@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GitDiffResponse } from "@pi-code/protocol";
+import type { GitBranchesResponse, GitDiffResponse } from "@pi-code/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ErrorEnvelope } from "../errors.ts";
 import { type Harness, startHarness } from "../testing/http-harness.ts";
@@ -72,6 +72,26 @@ describe("GET /api/agents/:id/git/diff", () => {
     harness = h;
     const agent = await h.open();
     const res = await h.json<ErrorEnvelope>("GET", `/api/agents/${agent.id}/git/diff`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("not_a_git_repo");
+  });
+});
+
+describe("GET /api/agents/:id/git/branches", () => {
+  it("lists local branches with the default", async () => {
+    const h = await start();
+    const agent = await h.open();
+    const res = await h.json<GitBranchesResponse>("GET", `/api/agents/${agent.id}/git/branches`);
+    expect(res.status).toBe(200);
+    expect(res.body.branches.sort()).toEqual(["feature", "main"]);
+    expect(res.body.defaultBranch).toBe("main");
+  });
+
+  it("answers 404 outside a work tree", async () => {
+    const h = await startHarness();
+    harness = h;
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>("GET", `/api/agents/${agent.id}/git/branches`);
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("not_a_git_repo");
   });

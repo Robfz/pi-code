@@ -62,7 +62,7 @@ interface GitBranchesResponse {
 ```
 
 - `branches`: `git for-each-ref --sort=-committerdate --format=%(refname:lstrip=2) refs/heads` (`refname:short` would write `heads/x` when a tag is also named `x`).
-- `defaultBranch`: the local branch named by `refs/remotes/origin/HEAD` (`git symbolic-ref --quiet --short`, `origin/` stripped) if it exists locally, else `main`, else `master`, else `null`. With `null`, branch mode waits for a pick.
+- `defaultBranch`: the local branch named by `refs/remotes/origin/HEAD` (`git symbolic-ref --quiet`, `refs/remotes/origin/` stripped) if it exists locally, else `main`, else `master`, else `null`. With `null`, branch mode waits for a pick.
 - Outside a work tree → `404 not_a_git_repo`.
 
 ### `GET /api/agents/:id/files?q=<text>`
