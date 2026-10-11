@@ -124,7 +124,7 @@ Builds on [2026-09-30-desktop.md](2026-09-30-desktop.md). Reference: Cursor's Ag
   - All are taken from `receivedAt`, so they also survive a reload mid-run.
   - Committed tools use `toolResult.durationMs`.
   - Agent's call (T1, T2).
-- [settled] B8c Limitation: thinking durations aren't persisted (T1), so a reloaded or historical thinking block reads "Thought", with no duration. Agent's call; this is preferred to engineering a persisted timing entry.
+- [settled] B8c Thinking durations live in the shared live state (`thinkingMs`, keyed by message timestamp and content index), so they survive commit and reloads while the pi process lives. After a process or server restart, and in history, a block reads "Thought" with no duration. Agent's call: without it, "Thought for 12s" would drop to "Thought" seconds later, when the message commits; persisting a timing entry is out of scope.
 - [settled] B9a Turn footer: one muted 12px line under a finished turn: "3m 12s · $0.14 · 4 files +120 −30".
   - Duration runs from the user message timestamp to the last assistant message's timestamp plus `durationMs`.
   - Cost is the sum of `usage.cost.total` across the turn, plus spawn usage (T3).

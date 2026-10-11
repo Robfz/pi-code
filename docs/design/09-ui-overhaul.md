@@ -212,7 +212,7 @@ interface ToolRenderer {
 ### Thinking
 
 - **Live** (a streaming block not yet done): a `Brain` row reading "Thinking" with `shimmer`; while collapsed, one faint line under it shows the latest line of the thought, truncated.
-- **Done:** "Thought" with the muted meta "for 12s" when the block has `startedAt` and `endedAt` (whole seconds, at least 1s; `1m 4s` from a minute). Committed blocks carry no timing and read "Thought".
+- **Done:** "Thought" with the muted meta "for 12s" when the duration is known: the streaming block's `startedAt` and `endedAt`, else `thinkingMs` for a committed block (whole seconds, at least 1s; `1m 4s` from a minute). Otherwise "Thought".
 - **Body:** 13px `muted-foreground`, line height 1.6, not italic, behind a left `--input` hairline.
 - **Redacted:** "Thought (redacted)", no body. An empty, finished block renders nothing.
 
@@ -310,11 +310,18 @@ interface LiveRun {
   // …
   startedAt?: number;   // agent_start
 }
+
+interface LiveState {
+  // …
+  /** Thinking durations by `${assistantMessage.timestamp}:${contentIndex}`; outlives runs. */
+  thinkingMs: Record<string, number>;
+}
 ```
 
 - **Blocks:** `startedAt` when the block is created (its `*_start`, or the delta that creates it), kept through deltas; `endedAt` at its `*_end`.
 - **Tool runs:** `startedAt` at `tool_execution_start`, kept through updates and the end; `durationMs` at `tool_execution_end`, from the event's `durationMs`, else `receivedAt − startedAt`.
 - **Run:** `startedAt` at `agent_start`; settling drops it with the rest of the run.
+- **Thinking durations:** at `thinking_end`, `endedAt − startedAt` is stored in `thinkingMs` under the streaming message's `timestamp` and the block's `contentIndex`. Settling keeps it, so a committed block looks up its duration by its message's `timestamp` and its index in `content`. It lives as long as the agent's live state on the server: reloads keep it, and only a restart of the pi process or the server loses it.
 - Committed calls use `ToolResultMessage.durationMs` and turns use `AssistantMessage.durationMs` (both absent on legacy messages). `packages/protocol` is typed against pi `1.1.0`, which has these fields and `tool_execution_end.durationMs`.
 - Every field derives from the event alone, so a snapshot at any `seq` plus the following events still equals the full reduction.
 - Elapsed times compare `receivedAt` with the device's clock, clamped at 0.
@@ -325,7 +332,7 @@ Reducer tests for the timing fields and the reconnect invariant over every fixtu
 
 ## Limitations
 
-- Thinking durations aren't persisted (pi records none): a thinking block reads "Thought", without a duration, once its message is committed (at the end of that message), after a reload, and in history.
+- Thinking durations aren't persisted (pi records none): they're kept in the agent's live state on the server, so a block reads "Thought", without a duration, after the pi process or the server restarts, and in sessions opened from history.
 - The files chip opens the working tree's review, not a diff of that turn; its counts are the turn's.
 - Messages from pi before 1.1.0 have no `durationMs`: their tool rows show no duration, and a turn's duration ends where its last assistant message started.
 - Elapsed timers assume the device's clock agrees with the server's.

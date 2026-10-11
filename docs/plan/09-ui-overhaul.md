@@ -46,8 +46,8 @@ Spans `packages/protocol` and `packages/web`. Design: `design/09-ui-overhaul.md`
 
 ### U5 — Timing fields
 - `packages/protocol/package.json`: `@earendil-works/pi-agent-core`, `pi-ai` and `pi-coding-agent` `1.1.0` (dev dependencies, the installed pi's version); `pnpm install` updates the lockfile; type errors from the bump in `protocol`, `server` and `web` are fixed.
-- `packages/protocol/src/live.ts`: `startedAt` / `endedAt` on `StreamingBlock`, `startedAt` / `durationMs` on `ToolRun`, `startedAt` on `LiveRun`, as in the design (`reduceMessageUpdate` receives `receivedAt`).
-- Done when: `live.test.ts` covers a thinking and a text block's `startedAt` / `endedAt`, a block created by a delta getting `startedAt`, events without `receivedAt` leaving the fields absent, a tool's `startedAt` kept through updates and the end, `durationMs` from the event and, without it, from `receivedAt`, `agent_start` setting `run.startedAt` and `agent_settled` dropping it; `fixtures.test.ts`'s invariant passes for every fixture.
+- `packages/protocol/src/live.ts`: `startedAt` / `endedAt` on `StreamingBlock`, `startedAt` / `durationMs` on `ToolRun`, `startedAt` on `LiveRun`, `thinkingMs` on `LiveState`, as in the design (`reduceMessageUpdate` receives `receivedAt`).
+- Done when: `live.test.ts` covers a thinking and a text block's `startedAt` / `endedAt`, a block created by a delta getting `startedAt`, events without `receivedAt` leaving the fields absent, a tool's `startedAt` kept through updates and the end, `durationMs` from the event and, without it, from `receivedAt`, `agent_start` setting `run.startedAt` and `agent_settled` dropping it, `thinking_end` writing `thinkingMs` under the message timestamp and content index and settling keeping it; `fixtures.test.ts`'s invariant passes for every fixture.
 
 ## C. Transcript primitives
 
