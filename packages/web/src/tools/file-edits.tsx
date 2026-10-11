@@ -1,18 +1,35 @@
 /**
  * Renderers for pi's `edit` and `write` tools: `+n −m` from the edit's `details.patch` and the
- * patch in the diff viewer; written content as an all-added diff.
+ * patch in the diff viewer; written content as an all-added diff. Selected lines become
+ * references to the tool's path as shown, never versioned (`docs/design/07-code-review.md`).
  */
 
 import type { EditToolDetails } from "@pi-code/protocol";
 import { useMemo } from "react";
-import { allAddedPatch, countPatchLines, DiffViewer } from "@/components/diff";
+import { allAddedPatch, countPatchLines } from "@/components/diff";
+import { SelectableDiff } from "@/features/review/selectable-diff";
 import { toolResultText } from "@/lib/content";
+import { cwdRelative } from "@/lib/paths";
+import { useConversation } from "@/store/context";
 import { argPath, asRecord, ErrorOutput, isActive, Muted, Notice, Pending, str } from "./common";
 import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
 
 function editPatch(result: ToolRendererProps["result"]): string | undefined {
   const patch = (result?.details as Partial<EditToolDetails> | undefined)?.patch;
   return typeof patch === "string" && patch !== "" ? patch : undefined;
+}
+
+/** A tool diff whose selections reference `path` (the tool's argument), made cwd-relative. */
+function ToolDiff({ patch, path, fileName }: { patch: string; path: string; fileName?: string }) {
+  const cwd = useConversation((s) => s.agent.cwd);
+  const refPath = cwdRelative(path, cwd);
+  return (
+    <SelectableDiff
+      patch={patch}
+      fileName={fileName}
+      toReference={({ start, end }) => ({ path: refPath, start, end })}
+    />
+  );
 }
 
 function Counts({ additions, deletions }: { additions: number; deletions: number }) {
@@ -53,7 +70,7 @@ function EditBody({ args, status, result, isError }: ToolRendererProps) {
   if (isError) return <ErrorOutput result={result} />;
   const patch = editPatch(result);
   if (!patch) return <Notice>{toolResultText(result) || "Edited"}</Notice>;
-  return <DiffViewer patch={patch} fileName={path} />;
+  return <ToolDiff patch={patch} path={path ?? ""} fileName={path} />;
 }
 
 export const editRenderer: ToolRenderer = { Summary: EditSummary, Body: EditBody };
@@ -80,13 +97,13 @@ function WriteSummary({ args }: ToolRendererProps) {
 }
 
 function WriteBody({ args, status, result, isError }: ToolRendererProps) {
-  const path = argPath(args) ?? "file";
+  const path = argPath(args);
   const content = str(args, "content") ?? "";
-  const patch = useMemo(() => allAddedPatch(path, content), [path, content]);
+  const patch = useMemo(() => allAddedPatch(path ?? "file", content), [path, content]);
   if (isError && result) return <ErrorOutput result={result} />;
   if (result === undefined && status === "streaming") return <Pending label="Writing…" />;
   if (content === "") return <Notice>Empty file</Notice>;
-  return <DiffViewer patch={patch} fileName={path} />;
+  return <ToolDiff patch={patch} path={path ?? ""} fileName={path ?? "file"} />;
 }
 
 /**

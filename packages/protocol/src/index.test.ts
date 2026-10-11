@@ -70,6 +70,7 @@ describe("API errors", () => {
       "agent_not_found",
       "session_not_found",
       "not_a_git_repo",
+      "file_not_found",
       "dialog_not_found",
       "session_owned",
       "agent_exited",
@@ -92,6 +93,7 @@ describe("API errors", () => {
     expect(API_ERROR_STATUS.session_not_listed).toBe(400);
     expect(API_ERROR_STATUS.worktree_dirty).toBe(409);
     expect(API_ERROR_STATUS.git_failed).toBe(502);
+    expect(API_ERROR_STATUS.file_not_found).toBe(404);
   });
 
   it("recognizes error bodies", () => {

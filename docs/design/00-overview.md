@@ -13,7 +13,8 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 | `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) |
 | `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout |
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees |
-| `07-delete-sessions.md` | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu |
+| [`07-code-review.md`](07-code-review.md) | Code review: the project's changes and files beside the conversation, `@path:N` line references in the composer and transcript |
+| [`08-delete-sessions.md`](08-delete-sessions.md) | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu |
 
 ## Goals
 
@@ -52,15 +53,15 @@ MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call appr
 
 | Component | Package | Responsibility |
 |---|---|---|
-| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; creates and removes git worktrees; deletes sessions; closes agents idle for 7 days (idle sweep). |
+| Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; serves the agent's git diff, branches and project files for review; creates and removes git worktrees; deletes sessions; closes agents idle for 7 days (idle sweep). |
 | Protocol | `packages/protocol` | Shared TypeScript: API/SSE types and the **live-state reducer** used by both server (snapshots) and client (live UI). |
-| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px. |
-| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command. |
+| Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px; review pane beside the conversation (`07-code-review.md`). |
+| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command, the line-reference guideline in every run's system prompt. |
 
 ## Core concepts
 
 - **Agent** — one `pi --mode rpc` child process, owned by the server, bound to one session file at a time. Identified by a server-generated `agentId`. Lives until the user stops it or deletes its conversation, it has been idle for 7 days, or the server stops.
-- **Session** — a pi session file (`~/.pi/agent/sessions/--<cwd>--/*.jsonl`). An agent can move between sessions (new / fork / clone), as in the TUI. The server reads pi's agent dir and deletes session files only when the user deletes a conversation (`07-delete-sessions.md`) or removes a git worktree (`06-worktrees.md`).
+- **Session** — a pi session file (`~/.pi/agent/sessions/--<cwd>--/*.jsonl`). An agent can move between sessions (new / fork / clone), as in the TUI. The server reads pi's agent dir and deletes session files only when the user deletes a conversation (`08-delete-sessions.md`) or removes a git worktree (`06-worktrees.md`).
 - **Committed transcript** — session entries fetched from pi with `get_entries` (stable entry ids, tree via `parentId`). Source of truth for history.
 - **Live state** — what is in flight and not yet committed: the streaming assistant message, running tools, pending dialogs, extension status/widgets, queue, compaction/retry status. Produced by one reducer over pi events.
 - **Event log** — per-agent sequence-numbered log of server events (`seq`), kept in a bounded ring buffer so stream clients resume from a per-agent cursor.

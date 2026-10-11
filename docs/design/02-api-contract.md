@@ -15,7 +15,7 @@ Both sides share these types; the client calls the API through a small typed `fe
 |---|---|
 | 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree`, `session_not_listed` |
 | 403 | `forbidden_origin`, `forbidden_host` |
-| 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found` |
+| 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found`, `file_not_found` |
 | 409 | `session_owned`, `agent_exited`, `agent_busy`, `worktree_exists`, `branch_exists`, `worktree_dirty` |
 | 502 | `pi_error` (pi answered `success: false`; message is pi's error), `git_failed` (message: the git command and its stderr) |
 | 504 | `pi_timeout` (no response within 60 s; `prompt`-family commands only wait for acceptance) |
@@ -79,6 +79,7 @@ interface GitFileDiff {
   patch?: string;                // unified diff; absent when binary or >1 MB
   binary: boolean;
   tooLarge: boolean;
+  worktreeChanged?: true;        // branch mode without uncommitted: the working tree differs from HEAD
 }
 
 type Transcript = { entries: SessionEntry[]; leafId: string | null };  // SessionEntry from pi
@@ -107,7 +108,7 @@ Directory autocomplete under `$HOME`. `prefix` may start with `~`.
 `400 outside_home` if the prefix resolves outside `$HOME`.
 
 ### `DELETE /api/sessions`
-Deletes one session ([`07-delete-sessions.md`](07-delete-sessions.md)): closes every agent, exited ones included, whose `sessionFile` is the file's realpath, then moves the file to the Trash (else unlinks it) if the catalog lists it (`<agentDir>/sessions/<dir>/*.jsonl` with a session header).
+Deletes one session ([`08-delete-sessions.md`](08-delete-sessions.md)): closes every agent, exited ones included, whose `sessionFile` is the file's realpath, then moves the file to the Trash (else unlinks it) if the catalog lists it (`<agentDir>/sessions/<dir>/*.jsonl` with a session header).
 ```ts
 interface DeleteSessionBody {
   file: string;      // absolute
@@ -215,7 +216,7 @@ type ServerEvent =
   | { type: "transcript_reset"; transcript: Transcript; state: RpcSessionState }
   | { type: "state"; state: RpcSessionState }                // after model/thinking/mode/name changes
   | { type: "stats"; stats: SessionStats }                   // after each turn_end
-  | { type: "git_status"; status: GitStatus | null }
+  | { type: "git_status"; status: GitStatus | null }         // after each post-turn / bash refresh, changed or not
   | { type: "curator"; toolCallId: string; url: string }     // proxied curator URL
   | { type: "bash_output"; id: string; delta: string; command?: string; excludeFromContext?: boolean } // `!` / `!!` streaming output
   | { type: "bash_done"; id: string; result: BashResult; command?: string; excludeFromContext?: boolean }
@@ -223,6 +224,7 @@ type ServerEvent =
   | { type: "agent_status"; agent: AgentInfo };              // status / attention changes
 ```
 
+- `git_status`: published after every scheduled refresh (2 s after `turn_end` and after a `bash` command) even when the status is unchanged, and at startup only when it differs. The web client refetches the review panel's diff and open file on every one.
 - `bash_*`: `id` is the rpc command id; `command` is the command line sent; `excludeFromContext: true` for commands sent with `excludeFromContext` (`!!`).
 - `curator`: only for pi-web-access `web_search` tools reporting a loopback curator URL (`http://localhost|127.0.0.1|[::1]:<port>/?session=<token>`).
 - `live_reset`: published when pi exits (after `ui_resolved` for its pending dialogs, before the `exited` `agent_status`) and when a new pi process starts, only if there is in-flight state to drop.
@@ -246,6 +248,7 @@ Allowlist:
 Rules:
 - `prompt` while `isStreaming` requires `streamingBehavior: "steer" | "followUp"` → else `400 streaming_behavior_required`.
 - `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB. pi's `prompt` has no file field: the web client inlines attached text files into `message` as leading `<file name="…" length="…">\n…\n</file>\n` blocks: pi's CLI convention plus `length` (content UTF-16 length) so a `</file>` line in the content can't end a block early. The name is escaped (`&amp;`, `&quot;`, `&lt;`, `&#10;`).
+- Line references (`@path:N`, `@path:N-M`, `@"quoted path":N`, `@<sha>:./path:N`) are plain text in `message`, passed to the model verbatim. `@pi-code/protocol` exports their only parser and formatter, `findCodeRefs` and `formatCodeRef` (`code-refs.ts`; syntax in [`07-code-review.md`](07-code-review.md), "References").
 - `switch_session`: `sessionPath` is validated like `POST /api/agents { sessionFile }` (`400 invalid_body | outside_home`, `404 session_not_found`) and its realpath is sent to pi; a session owned by another agent → `409 session_owned`.
 - `bash` returns `202 { data: { id } }` immediately; output streams as `bash_output` events and completion arrives as `bash_done`. Its `bashExecution` entry is committed like any other entry.
 - Commands on an `exited` agent → `409 agent_exited`.
@@ -301,8 +304,43 @@ interface RemoveWorktreeBody {
 
 ## Git
 
-### `GET /api/agents/:id/git/diff`
-→ `200 { files: GitFileDiff[] }`. `404 not_a_git_repo`.
+The review panel's routes; behavior, limits and rationale in [`07-code-review.md`](07-code-review.md). Each runs in the agent's cwd, with cwd-relative paths, and answers `404 not_a_git_repo` outside a git work tree.
+
+### `GET /api/agents/:id/git/diff?base=<branch>&uncommitted=1`
+Both optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a local branch name: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included.
+```ts
+interface GitDiffResponse {
+  files: GitFileDiff[];
+  oldRev?: string;               // short sha of the old side (HEAD or the merge-base); absent without commits
+  newRev?: string;               // short sha of HEAD when the new side is HEAD; absent when it is the working tree
+}
+```
+→ `200 GitDiffResponse`. `400 invalid_body`: `base` starts with `-` or isn't an existing local branch as written ("unknown branch <base>"), the repo has no commits, or `<base>` and `HEAD` have no common commit.
+
+### `GET /api/agents/:id/git/branches`
+```ts
+interface GitBranchesResponse {
+  branches: string[];            // local branches, most recent commit first
+  defaultBranch: string | null;  // origin/HEAD's branch if it exists locally, else main, else master
+}
+```
+→ `200 GitBranchesResponse`.
+
+### `GET /api/agents/:id/files?q=<text>`
+Fuzzy search over the cwd's tracked and untracked, non-ignored files. `q` is trimmed; empty → no results; over 200 characters → `400 invalid_body`.
+→ `200 { files: string[] }` (`FileSearchResponse`), cwd-relative paths, best first (basename matches before path-only matches), at most 10.
+
+### `GET /api/agents/:id/files/content?path=<path>`
+Reads a working-tree file. `path` is cwd-relative or absolute.
+```ts
+interface FileContentResponse {
+  path: string;                  // cwd-relative, normalized
+  content?: string;              // UTF-8; absent when binary or tooLarge
+  binary: boolean;               // a NUL byte in the first 8000 bytes
+  tooLarge: boolean;             // over 1 MB
+}
+```
+→ `200 FileContentResponse`. `400 invalid_body` (missing `path`, or its realpath outside the cwd's), `404 file_not_found` (missing, or not a regular file).
 
 ### `GET /api/agents/:id/git/status`
 → `200 { status: GitStatus | null }` (`null` outside a repo).

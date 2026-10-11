@@ -12,6 +12,7 @@ export const API_ERROR_STATUS = {
   agent_not_found: 404,
   session_not_found: 404,
   not_a_git_repo: 404,
+  file_not_found: 404,
   dialog_not_found: 404,
   session_owned: 409,
   agent_exited: 409,

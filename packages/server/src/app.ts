@@ -8,6 +8,7 @@ import { agentsRoutes } from "./http/agents-routes.ts";
 import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
 import { pushRoutes } from "./http/push-routes.ts";
+import { reviewRoutes } from "./http/review-routes.ts";
 import { sessionsRoutes } from "./http/sessions-routes.ts";
 import { spaHandler } from "./http/static.ts";
 import { type SseOptions, streamRoutes } from "./http/stream.ts";
@@ -51,6 +52,7 @@ function apiRoutes(deps: AppDeps) {
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/sessions", sessionsRoutes(writeDeps))
     .route("/agents", agentsRoutes(deps.manager))
+    .route("/agents", reviewRoutes(deps.manager))
     .route("/worktrees", worktreesRoutes(writeDeps))
     .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))
     .route("/push", pushRoutes(deps.push));

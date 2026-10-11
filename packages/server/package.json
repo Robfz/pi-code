@@ -14,6 +14,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@pi-code/protocol": "workspace:*",
+    "fuzzysort": "^4.0.2",
     "hono": "^4.13.9",
     "web-push": "^3.6.7"
   },

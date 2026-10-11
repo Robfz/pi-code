@@ -1,8 +1,13 @@
 import type {
+  BeforeAgentStartEvent,
   ExtensionAPI,
   ExtensionCommandContext,
   ProjectTrustEventResult,
 } from "@earendil-works/pi-coding-agent";
+
+/** Asks the model to write line references the web client can parse and link. */
+export const REFERENCE_GUIDELINE =
+  'When you point to specific lines of code, write the reference as `@path:N` for one line or `@path:N-M` for a range, with the path relative to the working directory. Quote paths that contain spaces: `@"dir name/file.ts":N`. The user can click these references to open those lines.';
 
 /**
  * pi-code extension, loaded with `--extension` into server-spawned pi processes only.
@@ -10,6 +15,7 @@ import type {
  */
 export default function piCodeExtension(pi: ExtensionAPI): void {
   pi.on("project_trust", projectTrust);
+  pi.on("before_agent_start", addReferenceGuideline);
   pi.registerCommand("pi-code-tree", {
     description: "Internal: pi-code tree navigation",
     handler: treeCommand,
@@ -21,6 +27,24 @@ export function projectTrust(): ProjectTrustEventResult {
   const decision = process.env.PI_CODE_TRUST;
   if (decision === "yes" || decision === "no") return { trusted: decision, remember: true };
   return { trusted: "undecided" };
+}
+
+/**
+ * Adds the reference guideline to the run's prompt sections, leaving the rest of the prompt
+ * (and the user's `APPEND_SYSTEM.md`) to pi. pi renders `promptGuidelines` only without a custom
+ * prompt (`SYSTEM.md`), so with one the guideline joins `appendSystemPrompt` instead.
+ */
+export function addReferenceGuideline(event: BeforeAgentStartEvent): void {
+  const options = event.systemPromptOptions;
+  if (options.customPrompt) {
+    if (!options.appendSystemPrompt.includes(REFERENCE_GUIDELINE)) {
+      options.appendSystemPrompt = [options.appendSystemPrompt, REFERENCE_GUIDELINE]
+        .filter(Boolean)
+        .join("\n\n");
+    }
+  } else if (!options.promptGuidelines.includes(REFERENCE_GUIDELINE)) {
+    options.promptGuidelines.push(REFERENCE_GUIDELINE);
+  }
 }
 
 export interface TreeArgs {

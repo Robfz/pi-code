@@ -14,8 +14,10 @@ import type {
   DeleteSessionBody,
   DirSuggestion,
   DirsResponse,
+  FileContentResponse,
+  FileSearchResponse,
+  GitBranchesResponse,
   GitDiffResponse,
-  GitFileDiff,
   HealthResponse,
   NavigateBody,
   NavigateResponse,
@@ -149,9 +151,42 @@ export function ackAgent(id: AgentId): Promise<void> {
   return request<void>("POST", agentPath(id, "/ack"), {});
 }
 
-/** Working-tree diff of the agent's project (`not_a_git_repo` outside a repository). */
-export async function getGitDiff(id: AgentId): Promise<GitFileDiff[]> {
-  return (await request<GitDiffResponse>("GET", agentPath(id, "/git/diff"))).files;
+/**
+ * The agent's project diff: uncommitted changes against `HEAD`, or with `base` the branch's changes
+ * since its merge-base with that local branch (`uncommitted` adds the working tree and untracked
+ * files). `not_a_git_repo` outside a repository.
+ */
+export function getGitDiff(
+  id: AgentId,
+  { base, uncommitted }: { base?: string; uncommitted?: boolean } = {},
+): Promise<GitDiffResponse> {
+  const params = new URLSearchParams();
+  if (base !== undefined) {
+    params.set("base", base);
+    if (uncommitted) params.set("uncommitted", "1");
+  }
+  const query = params.toString();
+  return request<GitDiffResponse>("GET", agentPath(id, `/git/diff${query && `?${query}`}`));
+}
+
+/** Local branches, most recent first, and the detected default branch. */
+export function getGitBranches(id: AgentId): Promise<GitBranchesResponse> {
+  return request<GitBranchesResponse>("GET", agentPath(id, "/git/branches"));
+}
+
+/** Fuzzy file search in the agent's cwd: at most 10 cwd-relative paths, best first. */
+export async function searchFiles(id: AgentId, q: string): Promise<string[]> {
+  return (
+    await request<FileSearchResponse>("GET", agentPath(id, `/files?q=${encodeURIComponent(q)}`))
+  ).files;
+}
+
+/** A project file's working-tree content (`file_not_found` when missing). */
+export function getFileContent(id: AgentId, path: string): Promise<FileContentResponse> {
+  return request<FileContentResponse>(
+    "GET",
+    agentPath(id, `/files/content?path=${encodeURIComponent(path)}`),
+  );
 }
 
 /** `GET /api/stream` URL opening each conversation in `cursors` (status and catalog only when empty). */

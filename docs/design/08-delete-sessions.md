@@ -1,6 +1,6 @@
 # Deleting sessions
 
-pi-code deletes one conversation at a time from every listing surface except the share screen, to reduce clutter and free disk space. Decisions and rationale: [`../../maps/2026-10-09-delete-sessions.md`](../../maps/2026-10-09-delete-sessions.md). Where this document overlaps `01`–`06`, it takes precedence.
+pi-code deletes one conversation at a time from every listing surface except the share screen, to reduce clutter and free disk space. Decisions and rationale: [`../../maps/2026-10-09-delete-sessions.md`](../../maps/2026-10-09-delete-sessions.md). Where this document overlaps `01`–`07`, it takes precedence.
 
 pi has no delete primitive (F1), so the server deletes the session's `.jsonl` itself. That and worktree removal ([`06-worktrees.md`](06-worktrees.md)) are pi-code's only writes to pi's agent dir. The user-facing actions on a conversation are **Stop** (`DELETE /api/agents/:id`: pi stops, the conversation stays listed) and **Delete**; there is no "Close".
 
@@ -56,7 +56,7 @@ The conversation header's `⋮` offers Stop and Delete (destructive, no dialog: 
 
 ## Tests
 
-The HTTP harness for the route (fake pi, `harness.stream()` for `agent_closed` and `catalog`, a stub `trashCommand`), component tests for the provider and every surface; coverage per task in [`../plan/07-delete-sessions.md`](../plan/07-delete-sessions.md).
+The HTTP harness for the route (fake pi, `harness.stream()` for `agent_closed` and `catalog`, a stub `trashCommand`), component tests for the provider and every surface; coverage per task in [`../plan/08-delete-sessions.md`](../plan/08-delete-sessions.md).
 
 ## Limitations
 

@@ -10,10 +10,14 @@ import {
 } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadedDiff, stubCanvas } from "@/components/diff/testing";
+import { useReviewStore } from "@/features/review/review-state";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
+import { ConversationStoreProvider } from "@/store/context";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { stubFetch } from "@/test/render";
+import { makeAgent } from "@/test/fixtures";
+import { type FetchCall, hydratedStore, stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
 
@@ -22,7 +26,14 @@ const editPatch = fixtureEditPatch;
 const gitPatch = () => `diff --git a/notes.txt b/notes.txt\nindex 1..2 100644\n${editPatch()}`;
 
 async function renderScreen(agentId = "a1") {
-  const rootRoute = createRootRoute({ component: () => <Outlet /> });
+  const store = hydratedStore({ agent: makeAgent({ id: agentId }) });
+  const rootRoute = createRootRoute({
+    component: () => (
+      <ConversationStoreProvider store={store}>
+        <Outlet />
+      </ConversationStoreProvider>
+    ),
+  });
   const conversation = createRoute({
     getParentRoute: () => rootRoute,
     path: "/agents/$agentId",
@@ -55,12 +66,25 @@ const file = (patch: Partial<GitFileDiff>): GitFileDiff => ({
   ...patch,
 });
 
+const urls = (calls: FetchCall[]) => calls.map((call) => call.url);
+
 beforeAll(stubCanvas);
+beforeEach(() => {
+  stubMatchMedia(() => false);
+  // cmdk's list measures itself; jsdom has no ResizeObserver.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DiffScreen", () => {
   it("lists files with status and counts; tapping a file shows its patch", async () => {
-    stubMatchMedia(() => false);
     const { calls } = stubFetch(() => [
       200,
       {
@@ -136,6 +160,52 @@ describe("DiffScreen", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("refresh in branch mode refetches the branches and the diff", async () => {
+    useReviewStore.getState().setDiffMode("a1", { mode: "branch" });
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/git/branches"
+        ? [200, { branches: ["main"], defaultBranch: "main" }]
+        : [200, { files: [] }],
+    );
+    await renderScreen();
+    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(urls(calls).sort()).toEqual([
+        "/api/agents/a1/git/branches",
+        "/api/agents/a1/git/branches",
+        "/api/agents/a1/git/diff",
+        "/api/agents/a1/git/diff",
+      ]),
+    );
+  });
+
+  it("refresh on the Files tab refetches the open file, then the search", async () => {
+    useReviewStore.getState().setFilesQuery("a1", "a");
+    useReviewStore.getState().openFile("a1", "a.ts");
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/files/content"
+        ? [200, { path: "a.ts", content: "one\n", binary: false, tooLarge: false }]
+        : [200, { files: ["a.ts"] }],
+    );
+    await renderScreen();
+    const user = userEvent.setup();
+    await waitFor(() => expect(urls(calls)).toEqual(["/api/agents/a1/files/content"]));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(urls(calls)).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Back to search" }));
+    await screen.findByRole("option", { name: "a.ts" });
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(urls(calls)).toEqual([
+        "/api/agents/a1/files/content",
+        "/api/agents/a1/files/content",
+        "/api/agents/a1/files",
+        "/api/agents/a1/files",
+      ]),
+    );
+  });
+
   it("other errors offer a retry; back link goes to the conversation", async () => {
     let fail = true;
     stubFetch(() =>
@@ -152,5 +222,29 @@ describe("DiffScreen", () => {
     expect(await screen.findByText(/No changes/)).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "Back to conversation" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a9"));
+  });
+
+  it("switches between the Changes and Files tabs", async () => {
+    stubFetch(() => [200, { files: [] }]);
+    await renderScreen();
+    const user = userEvent.setup();
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Files" }));
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "Search files" })).toBeInTheDocument();
+    expect(useReviewStore.getState().reviews.a1?.tab).toBe("files");
+    await user.click(screen.getByRole("tab", { name: "Changes" }));
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+  });
+
+  it("on desktop opens the review pane and replaces itself with the conversation", async () => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    const { calls } = stubFetch(() => [200, { files: [] }]);
+    const router = await renderScreen("a3");
+    expect(await screen.findByText("conversation")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/agents/a3");
+    expect(router.history.length).toBe(1);
+    expect(useReviewStore.getState().reviews.a3?.paneOpen).toBe(true);
+    expect(calls).toEqual([]);
   });
 });

@@ -33,7 +33,7 @@ tailscale serve --bg --https=443  http://127.0.0.1:4180   # the app and API
 tailscale serve --bg --https=8443 http://127.0.0.1:4181   # the web-search curator proxy
 ```
 
-Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder or repo, with search), and one tab follows all of them at once.
+Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder or repo, with search), and one tab follows all of them at once. The header's changes button opens a review pane beside the conversation with the project's git changes (uncommitted, or the branch against a base) and a file search; selecting lines adds an `@path:N` reference to the message, and references in messages open those lines. On the phone the same panel is a page, under Diff in the conversation menu.
 
 Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
 
@@ -95,12 +95,15 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 - Worktrees are created and removed only in repos laid out as `<repo>/main` (or `master`) whose parent folder isn't inside a git repo; plain clones stay flat folder groups. A repo with no session and no open conversation appears nowhere: the picker and `/sessions` list only session-derived entries. See [`docs/design/06-worktrees.md`](docs/design/06-worktrees.md) for the rest.
 - A new worktree whose conversation closes before any message drops out of every listing; the folder stays, reachable through the picker's path field.
 - Removing a worktree doesn't stop a TUI pi running in it: its next write recreates its session file, listed under a missing worktree.
-- Deleting a conversation moves its session file to the server's Trash (recoverable only on that Mac, Finder → Put Back), or unlinks it for good where `trash` is missing. There is no confirmation except the Stop-or-Delete choice on live conversations. A conversation opened from a file outside pi's sessions folder is only stopped; its file is kept. See [`docs/design/07-delete-sessions.md`](docs/design/07-delete-sessions.md).
+- Nothing watches the working tree: the review panel refreshes after each agent turn or `!` command and on Refresh, so edits made in an editor or a TUI pi show up only then.
+- Line references from transcript edit diffs are inserted as shown, and references in older messages aren't tied to a version: later edits can shift their lines.
+- A conversation in a subfolder of a repo reviews only that subtree's changes and files, while the header's dirty marker covers the whole repo. See [`docs/design/07-code-review.md`](docs/design/07-code-review.md) for the rest.
+- Deleting a conversation moves its session file to the server's Trash (recoverable only on that Mac, Finder → Put Back), or unlinks it for good where `trash` is missing. There is no confirmation except the Stop-or-Delete choice on live conversations. A conversation opened from a file outside pi's sessions folder is only stopped; its file is kept. See [`docs/design/08-delete-sessions.md`](docs/design/08-delete-sessions.md).
 - The status bar's subagent spend `(sa $x)` counts calls that throw (Stop/abort, server shutdown) and cursor-runner calls as $0: their spend never reaches the session file.
 
 ## Documentation
 
 - [`maps/`](maps/) — decision maps and their rationale
-- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md), [worktrees](docs/design/06-worktrees.md), [deleting sessions](docs/design/07-delete-sessions.md)
+- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md), [worktrees](docs/design/06-worktrees.md), [code review](docs/design/07-code-review.md), [deleting sessions](docs/design/08-delete-sessions.md)
 - [`docs/plan/`](docs/plan/) — implementation plan
 - [`docs/spikes/`](docs/spikes/) — protocol spike findings

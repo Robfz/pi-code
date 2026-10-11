@@ -7,6 +7,7 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import { lazyCodePlugin } from "@/lib/code-highlighter";
+import { rehypeCodeRefs } from "@/lib/code-refs-rehype";
 import { cn } from "@/lib/utils";
 
 /** How an image URL from untrusted markdown may be shown. */
@@ -106,6 +107,7 @@ function rehypePlugins(): RehypePlugins {
 }
 
 const REHYPE_PLUGINS = rehypePlugins();
+const REHYPE_PLUGINS_WITH_CODE_REFS: RehypePlugins = [...REHYPE_PLUGINS, rehypeCodeRefs];
 
 const PLUGINS = { code: lazyCodePlugin };
 
@@ -113,14 +115,18 @@ const PLUGINS = { code: lazyCodePlugin };
  * Markdown via Streamdown; `streaming` enables incomplete-markdown handling for live text.
  * Single newlines inside a paragraph render as line breaks (`pre-line`), like pi's TUI.
  * Code blocks are highlighted by `@streamdown/code` (Shiki, languages loaded on demand).
+ * `codeRefs` marks line references as `span[data-code-ref]` (`rehypeCodeRefs`); the caller
+ * handles their clicks.
  */
 export const Markdown = memo(function Markdown({
   text,
   streaming = false,
+  codeRefs = false,
   className,
 }: {
   text: string;
   streaming?: boolean;
+  codeRefs?: boolean;
   className?: string;
 }) {
   return (
@@ -133,7 +139,7 @@ export const Markdown = memo(function Markdown({
       isAnimating={streaming}
       parseIncompleteMarkdown={streaming}
       components={COMPONENTS}
-      rehypePlugins={REHYPE_PLUGINS}
+      rehypePlugins={codeRefs ? REHYPE_PLUGINS_WITH_CODE_REFS : REHYPE_PLUGINS}
       plugins={PLUGINS}
     >
       {text}

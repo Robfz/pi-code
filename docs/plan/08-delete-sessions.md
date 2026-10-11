@@ -1,6 +1,6 @@
 # Plan — deleting sessions
 
-Spans `packages/protocol`, `packages/server`, `packages/web`. Design: `design/07-delete-sessions.md`; decisions: `maps/2026-10-09-delete-sessions.md`. The route (X1–X2) lands before the web actions (X3), which the surfaces (X4–X6) build on; the doc update goes last.
+Spans `packages/protocol`, `packages/server`, `packages/web`. Design: `design/08-delete-sessions.md`; decisions: `maps/2026-10-09-delete-sessions.md`. The route (X1–X2) lands before the web actions (X3), which the surfaces (X4–X6) build on; the doc update goes last.
 
 ## Test strategy
 
@@ -43,7 +43,7 @@ Spans `packages/protocol`, `packages/server`, `packages/web`. Design: `design/07
 - `docs/design/00-overview.md`, `01-server.md`, `06-worktrees.md`, `README.md` (`PI_AGENT_DIR` row, Known limitations): session deletion as the second write to the agent dir; the docblocks of `catalog/sessions.ts` and `catalog/session-files.ts`.
 - `docs/design/02-api-contract.md`: `DELETE /api/sessions` and `session_not_listed`.
 - `docs/design/03-web-client.md`, `05-desktop.md`: the `×` rule, Stop and Delete, the header menu.
-- Done when: no doc calls the agent dir read-only except worktree removal, none offers "Close", and they link `07-delete-sessions.md`.
+- Done when: no doc calls the agent dir read-only except worktree removal, none offers "Close", and they link `08-delete-sessions.md`.
 
 ## End-to-end verification
 
