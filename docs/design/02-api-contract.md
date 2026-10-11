@@ -13,7 +13,7 @@ Both sides share these types; the client calls the API through a small typed `fe
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree` |
+| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree`, `session_not_listed` |
 | 403 | `forbidden_origin`, `forbidden_host` |
 | 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found` |
 | 409 | `session_owned`, `agent_exited`, `agent_busy`, `worktree_exists`, `branch_exists`, `worktree_dirty` |
@@ -106,6 +106,15 @@ Directory autocomplete under `$HOME`. `prefix` may start with `~`.
 → `200 { dirs: { path: string; isGitRepo: boolean; hasSessions: boolean }[] }` (≤50).
 `400 outside_home` if the prefix resolves outside `$HOME`.
 
+### `DELETE /api/sessions`
+Deletes one session ([`07-delete-sessions.md`](07-delete-sessions.md)): closes every agent, exited ones included, whose `sessionFile` is the file's realpath, then moves the file to the Trash (else unlinks it) if the catalog lists it (`<agentDir>/sessions/<dir>/*.jsonl` with a session header).
+```ts
+interface DeleteSessionBody {
+  file: string;      // absolute
+}
+```
+→ `204`, also when the file doesn't exist (already deleted, or a new conversation pi hasn't written yet). Errors: `400 invalid_body` (`file` missing, empty or not absolute), `400 session_not_listed` (the file exists but isn't a listed session; it is kept, and the message says when an agent was stopped), `500 internal` naming a file that couldn't be deleted.
+
 ## Agents
 
 ### `GET /api/agents`
@@ -131,7 +140,7 @@ type TrustBody = { trusted: boolean };
 → `200 { agent: AgentInfo }`. `409 agent_busy` if the agent isn't awaiting trust.
 
 ### `DELETE /api/agents/:id`
-Close: stops the pi process and releases the session. → `204`.
+Stop: stops the pi process and releases the session, which stays listed. → `204`.
 
 ### `POST /api/agents/:id/restart`
 Only for `status: "exited"`. Respawns with the last session file. → `200 { agent: AgentInfo }`.

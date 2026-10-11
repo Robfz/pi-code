@@ -294,6 +294,12 @@ export interface RemoveWorktreeBody {
   force?: boolean;
 }
 
+/** `DELETE /api/sessions`. */
+export interface DeleteSessionBody {
+  /** Absolute path of the session file. */
+  file: string;
+}
+
 // ---------------------------------------------------------------------------
 // Push
 

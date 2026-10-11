@@ -11,6 +11,7 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { createQueryClient } from "@/lib/query-client";
 import { HomeScreen } from "@/routes/home";
@@ -49,7 +50,9 @@ async function renderRoutes(ui: React.ReactNode, path = "/", live: Partial<LiveO
       <QueryClientProvider client={queryClient}>
         <LiveRegistryProvider registry={registry}>
           <WorktreeActionsProvider>
-            <Outlet />
+            <StopOrDeleteProvider>
+              <Outlet />
+            </StopOrDeleteProvider>
           </WorktreeActionsProvider>
         </LiveRegistryProvider>
       </QueryClientProvider>
@@ -293,6 +296,162 @@ describe("Sessions", () => {
   });
 });
 
+describe("Stop or delete from Home and /sessions", () => {
+  const deletes = (calls: FetchCall[]) =>
+    calls.filter((c) => c.method === "DELETE").map((c) => ({ url: c.url, body: c.body }));
+  const listings = (calls: FetchCall[]) =>
+    calls.filter((c) => c.method === "GET" && c.url === "/api/sessions").length;
+
+  it("deletes a recent session at once and refetches the list", async () => {
+    const { calls } = stubFetch((call) => {
+      if (call.url === "/api/sessions" && call.method === "GET") {
+        return [200, { sessions: [session({ file: "/s/a.jsonl", firstMessage: "first" })] }];
+      }
+      if (call.method === "DELETE") return [204, null];
+      return undefined;
+    });
+    await renderRoutes(<HomeScreen />, "/", { loaded: true, agents: {}, connection: "live" });
+    const recent = await screen.findByRole("list", { name: "Recent sessions" });
+    await userEvent
+      .setup()
+      .click(within(recent).getByRole("button", { name: "Delete first (alpha)" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/a.jsonl" } }]),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(listings(calls)).toBe(2));
+  });
+
+  it("follows the holding agent's rule on an Open session, and on its open conversation row", async () => {
+    const { calls } = stubFetch((call) => {
+      if (call.url === "/api/sessions" && call.method === "GET") {
+        return [
+          200,
+          {
+            sessions: [
+              session({ file: "/s/live.jsonl", name: "Held live", ownedBy: "a1" }),
+              session({ file: "/s/exited.jsonl", name: "Held exited", ownedBy: "a2" }),
+            ],
+          },
+        ];
+      }
+      if (call.method === "DELETE") return [204, null];
+      return undefined;
+    });
+    await renderRoutes(<HomeScreen />, "/", {
+      loaded: true,
+      agents: {
+        a1: makeAgent({ id: "a1", sessionName: "Live agent", sessionFile: "/s/live.jsonl" }),
+        a2: makeAgent({
+          id: "a2",
+          cwd: "/home/me/beta",
+          sessionName: "Exited agent",
+          status: "exited",
+          sessionFile: "/s/exited.jsonl",
+        }),
+      },
+      connection: "live",
+    });
+    const user = userEvent.setup();
+    const recent = await screen.findByRole("list", { name: "Recent sessions" });
+
+    await user.click(
+      within(recent).getByRole("button", { name: "Stop or delete Held live (alpha)" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Held live?" });
+    await user.click(within(dialog).getByRole("button", { name: "Stop" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/agents/a1", body: undefined }]),
+    );
+
+    await user.click(within(recent).getByRole("button", { name: "Delete Held exited (alpha)" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toContainEqual({
+        url: "/api/sessions",
+        body: { file: "/s/exited.jsonl" },
+      }),
+    );
+
+    const open = screen.getByRole("list", { name: "Open conversations" });
+    expect(within(open).getByRole("button", { name: "Delete Exited agent (beta)" })).toBeEnabled();
+    await user.click(
+      within(open).getByRole("button", { name: "Stop or delete Live agent (project)" }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Stop or delete Live agent?" })).toBeVisible();
+  });
+
+  it("/sessions deletes a session held by an agent this tab doesn't know through its file", async () => {
+    const { calls } = stubFetch((call) => {
+      if (call.url === "/api/projects") return [200, { projects: [] }];
+      if (call.url === "/api/sessions" && call.method === "GET") {
+        return [200, { sessions: [session({ file: "/s/h.jsonl", name: "Held", ownedBy: "a9" })] }];
+      }
+      if (call.method === "DELETE") return [204, null];
+      return undefined;
+    });
+    await renderRoutes(null, "/sessions");
+    const list = await screen.findByRole("list", { name: "Sessions" });
+    await userEvent
+      .setup()
+      .click(within(list).getByRole("button", { name: "Delete Held (alpha)" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/h.jsonl" } }]),
+    );
+  });
+
+  it("/sessions follows a live agent holding a session the listing doesn't mark Open", async () => {
+    const { calls } = stubFetch((call) => {
+      if (call.url === "/api/projects") return [200, { projects: [] }];
+      if (call.url === "/api/sessions" && call.method === "GET") {
+        return [200, { sessions: [session({ file: "/s/h.jsonl", name: "Held" })] }];
+      }
+      if (call.method === "DELETE") return [204, null];
+      return undefined;
+    });
+    await renderRoutes(null, "/sessions", {
+      loaded: true,
+      agents: { a1: makeAgent({ id: "a1", sessionFile: "/s/h.jsonl" }) },
+      connection: "live",
+    });
+    const list = await screen.findByRole("list", { name: "Sessions" });
+    const user = userEvent.setup();
+    await user.click(within(list).getByRole("button", { name: "Stop or delete Held (alpha)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Held?" });
+    await user.click(within(dialog).getByRole("button", { name: "Stop" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/agents/a1", body: undefined }]),
+    );
+  });
+
+  it("disables only the × whose request is in flight", async () => {
+    const sessions = [
+      session({ file: "/s/a.jsonl", firstMessage: "first" }),
+      session({ file: "/s/b.jsonl", firstMessage: "second" }),
+    ];
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/sessions" && call.method === "GET" ? [200, { sessions }] : undefined,
+    );
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const original = fetchMock.getMockImplementation() as NonNullable<
+      ReturnType<typeof fetchMock.getMockImplementation>
+    >;
+    // The delete never answers.
+    fetchMock.mockImplementation((input, init) => {
+      const pending = original(input, init);
+      return init?.method === "DELETE" ? new Promise(() => {}) : pending;
+    });
+    await renderRoutes(<HomeScreen />, "/", { loaded: true, agents: {}, connection: "live" });
+    const recent = await screen.findByRole("list", { name: "Recent sessions" });
+    const first = within(recent).getByRole("button", { name: "Delete first (alpha)" });
+    const user = userEvent.setup();
+    await user.click(first);
+    await waitFor(() => expect(first).toBeDisabled());
+    await user.click(first);
+    expect(within(recent).getByRole("button", { name: "Delete second (alpha)" })).toBeEnabled();
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+  });
+});
+
 describe("Layout repos on Home, /sessions and the picker", () => {
   const R = "/home/me/Dev/pi-code";
   const layout = (role: RepoLayout["role"], missing = false): RepoLayout => ({
@@ -392,6 +551,13 @@ describe("Layout repos on Home, /sessions and the picker", () => {
     expect(within(repo).getByRole("group", { name: "old-spike" })).toHaveTextContent("missing");
     expect(sessionRow("Try the thing")).toBeDisabled();
     expect(sessionRow("Design worktrees")).toBeEnabled();
+    // Only opening is off in a missing worktree; its rows stay deletable.
+    expect(
+      within(recent).getByRole("button", { name: "Delete Try the thing (pi-code/old-spike)" }),
+    ).toBeEnabled();
+    expect(
+      within(open).getByRole("button", { name: "Delete Exited in gone (pi-code/old-spike)" }),
+    ).toBeEnabled();
   });
 
   it("/sessions groups the list, filtered by ?cwd= first", async () => {

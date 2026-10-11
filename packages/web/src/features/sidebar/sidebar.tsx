@@ -7,17 +7,10 @@ import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { AttentionIcon } from "@/components/attention-badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
+import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
 import {
   ListingGroupIcon,
   type ListingGroupKind,
@@ -26,13 +19,14 @@ import {
   RemoveWorktreeButton,
   worktreeSubgroupGuideClass,
 } from "@/features/worktrees/worktree-actions";
-import { closeAgent, errorMessage, restartAgent, searchSessions } from "@/lib/api";
+import { isLive } from "@/lib/agents";
+import { errorMessage, restartAgent, searchSessions } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
-import { useLive, useLiveRegistry } from "@/store/context";
-import { buildSidebarGroups, isLive, liveBranch, type SidebarRow } from "./sidebar-model";
+import { useLive } from "@/store/context";
+import { buildSidebarGroups, liveBranch, type SidebarRow } from "./sidebar-model";
 
 /** Delay before the search text queries `GET /api/sessions?q=`. */
 export const SEARCH_DEBOUNCE_MS = 200;
@@ -49,9 +43,6 @@ function useNow(intervalMs: number): number {
   }, [intervalMs]);
   return now;
 }
-
-/** Closing loses work in progress, so the sidebar asks first. */
-const closeNeedsConfirm = (agent: AgentInfo) => agent.isStreaming || agent.attention === "input";
 
 function RowMark({ row, pending }: { row: SidebarRow; pending: boolean }) {
   const agent = row.agent;
@@ -78,24 +69,20 @@ function Row({
   current,
   pending,
   disabled,
-  closing,
   onOpen,
   onRestart,
-  onClose,
   onSelect,
 }: {
   row: SidebarRow;
-  /** The group's label, to tell apart same-titled rows in the close button's label. */
+  /** The group's label, to tell apart same-titled rows in the `×`'s label. */
   folder: string;
   now: number;
   current: boolean;
   pending: boolean;
+  /** Opening only; the `×` stays usable. */
   disabled: boolean;
-  /** Its agent's DELETE is in flight. */
-  closing: boolean;
   onOpen(sessionFile: string): void;
   onRestart(agent: AgentInfo): void;
-  onClose(agent: AgentInfo): void;
   onSelect(): void;
 }) {
   const agent = row.agent;
@@ -149,21 +136,13 @@ function Row({
           {content}
         </button>
       )}
-      {live ? (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="mr-1 text-muted-foreground"
-          aria-label={`Close ${row.title} (${folder})`}
-          disabled={closing}
-          onClick={() => onClose(agent)}
-        >
-          <XIcon />
-        </Button>
-      ) : (
-        // Keeps the times aligned with the rows that have ×.
-        <span aria-hidden className="mr-1 size-6 shrink-0" />
-      )}
+      <StopOrDeleteButton
+        title={row.title}
+        folder={folder}
+        agent={agent}
+        file={row.sessionFile}
+        className="mr-1"
+      />
     </li>
   );
 }
@@ -230,12 +209,11 @@ function Group({
 
 /**
  * Conversations grouped by folder or repo (`groupListing`), with New conversation, search,
- * per-folder `+`, New and Remove worktree on repo groups, close on live rows and settings in the
- * footer. `action` goes before New conversation (the shell's toggle, the sheet's close);
- * `onSelect` runs whenever a row, `+` or a new conversation is picked.
+ * per-folder `+`, New and Remove worktree on repo groups, Stop or Delete on every row (`×`) and
+ * settings in the footer. `action` goes before New conversation (the shell's toggle, the sheet's
+ * close); `onSelect` runs whenever a row, `+` or a new conversation is picked.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
-  const registry = useLiveRegistry();
   const { loaded, agents, sessions, branches } = useLive(
     useShallow((s) => ({
       loaded: s.loaded,
@@ -259,12 +237,6 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
     placeholderData: keepPreviousData,
   });
   const now = useNow(RELATIVE_TIME_TICK_MS);
-  const [closing, setClosing] = useState<ReadonlySet<string>>(new Set());
-  // The target outlives `confirmOpen` so the title holds while the dialog fades out.
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState<{ agentId: string; title: string } | null>(
-    null,
-  );
   const searchRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const open = useOpenAgent();
@@ -293,22 +265,6 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
     });
   }, [agents, sessions, searching, query, search.data]);
 
-  async function close(agentId: string) {
-    setClosing((ids) => new Set(ids).add(agentId));
-    try {
-      await closeAgent(agentId);
-      registry.drop(agentId);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setClosing((ids) => {
-        const next = new Set(ids);
-        next.delete(agentId);
-        return next;
-      });
-    }
-  }
-
   /** `+`: a new conversation in `cwd`; `name` tells same-labelled folders apart. */
   const newHere = (cwd: string, name: string) => (
     <Button
@@ -329,7 +285,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
     </Button>
   );
 
-  /** Rows of one folder; in a `missing` one only live agents stay usable. */
+  /** Rows of one folder; in a `missing` one only live agents open, but every row deletes. */
   const rowList = (rows: SidebarRow[], folder: string, missing: boolean) => (
     <ul className="flex flex-col gap-0.5">
       {rows.map((row) => (
@@ -347,15 +303,8 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
                 pending.sessionFile === row.sessionFile
           }
           disabled={busy || missing}
-          closing={row.agent !== undefined && closing.has(row.agent.id)}
           onOpen={(sessionFile) => open.mutate({ sessionFile })}
           onRestart={(agent) => restart.mutate(agent.id)}
-          onClose={(agent) => {
-            if (closeNeedsConfirm(agent)) {
-              setConfirmTarget({ agentId: agent.id, title: row.title });
-              setConfirmOpen(true);
-            } else void close(agent.id);
-          }}
           onSelect={select}
         />
       ))}
@@ -493,31 +442,6 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
           ),
         )}
       </div>
-
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Close {confirmTarget?.title}?</DialogTitle>
-            <DialogDescription>
-              pi is still working or waiting for your input; closing stops it.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (confirmTarget) void close(confirmTarget.agentId);
-                setConfirmOpen(false);
-              }}
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <div className="flex items-center border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <Button variant="ghost" size="icon" asChild>

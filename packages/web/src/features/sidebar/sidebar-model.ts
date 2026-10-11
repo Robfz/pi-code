@@ -10,6 +10,7 @@ import {
   groupListing,
   type ListingGroup,
 } from "@/features/catalog/listing-groups";
+import { isLive } from "@/lib/agents";
 
 export interface SidebarRow {
   /** Agent id, or the session file for session rows. */
@@ -26,11 +27,6 @@ export interface SidebarRow {
 }
 
 export type SidebarGroup = ListingGroup<SidebarRow>;
-
-/** The pi process runs (exited agents aren't live). */
-export function isLive(agent: AgentInfo): boolean {
-  return agent.status !== "exited";
-}
 
 /** Case-insensitive substring match on an agent row's displayed title and cwd path. */
 export function agentMatches(row: Pick<SidebarRow, "title" | "cwd">, query: string): boolean {

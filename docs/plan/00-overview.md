@@ -12,6 +12,7 @@ Component plans:
 | `04-pi-extension.md` | pi-code pi extension | `E` |
 | `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout | `D` |
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees | `T` |
+| `07-delete-sessions.md` | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu | `X` |
 
 ## Repository setup (task R1)
 
@@ -56,6 +57,7 @@ Tooling choices made while drafting (open to veto): pnpm, Biome, Vitest, tsx, No
 | 5. PWA | Install, push, badge, share target | S12, W16–W18 |
 | 6. Curator & hardening | Curator proxy, crash handling polish, README | S13, S14, W19 |
 | 7. Git worktrees | Repo grouping on every listing, create and remove worktrees | T1–T12 |
+| 8. Delete sessions | Delete one session at a time from every listing; Stop and Delete replace Close | X1–X7 |
 
 Exit criterion per phase: its tasks' "done when" pass, plus the phone checklist for that phase.
 

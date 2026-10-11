@@ -17,6 +17,7 @@
  *   `branch_summary` when `summarize`; with `MINI_PI_TREE_FAIL` it emits `extension_error`
  *   instead; answers after.
  * - `fork`, `new_session`, `switch_session`, `get_*` queries.
+ * - End of stdin: exits, saving the session first when `MINI_PI_SAVE_ON_EXIT` is set.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -266,4 +267,7 @@ process.stdin.on("data", (chunk: string) => {
     if (line.trim()) run(JSON.parse(line) as Command);
   }
 });
-process.stdin.on("end", () => process.exit(0));
+process.stdin.on("end", () => {
+  if (process.env.MINI_PI_SAVE_ON_EXIT) save();
+  process.exit(0);
+});

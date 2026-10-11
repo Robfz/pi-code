@@ -14,10 +14,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
+import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { createAppRouter } from "@/router";
+import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendFrame } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
@@ -182,13 +184,19 @@ describe("Sidebar", () => {
       "Finished",
     );
     expect(within(row("Ready one")).queryByText("Finished")).toBeNull();
-    // Close only on live rows.
+    // × on every row: live ones ask Stop or Delete, the others delete.
     expect(
-      within(row("Ready one")).getByRole("button", { name: "Close Ready one (project)" }),
+      within(row("Ready one")).getByRole("button", { name: "Stop or delete Ready one (project)" }),
     ).toBeInTheDocument();
-    expect(within(row("Starting one")).getByRole("button", { name: /Close/ })).toBeInTheDocument();
-    expect(within(row("Exited one")).queryByRole("button", { name: /Close/ })).toBeNull();
-    expect(within(row("Disk one")).queryByRole("button", { name: /Close/ })).toBeNull();
+    expect(
+      within(row("Starting one")).getByRole("button", { name: /^Stop or delete/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(row("Exited one")).getByRole("button", { name: "Delete Exited one (project)" }),
+    ).toBeInTheDocument();
+    expect(
+      within(row("Disk one")).getByRole("button", { name: "Delete Disk one (project)" }),
+    ).toBeInTheDocument();
     // The route's agent is highlighted.
     expect(within(row("Ready one")).getByRole("link")).toHaveAttribute("aria-current", "page");
     expect(within(row("Trust one")).getByRole("link")).not.toHaveAttribute("aria-current");
@@ -209,7 +217,7 @@ describe("Sidebar", () => {
         : undefined,
     );
     baseline([], [session({ file: "free", name: "Disk one" })]);
-    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Disk one/ }));
+    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /^Disk one/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/new"));
     expect(
       calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body),
@@ -225,7 +233,9 @@ describe("Sidebar", () => {
     baseline([
       makeAgent({ id: "exited", sessionName: "Exited one", status: "exited", sessionFile: "fx" }),
     ]);
-    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Exited one/ }));
+    await userEvent
+      .setup()
+      .click(await within(nav()).findByRole("button", { name: /^Exited one/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/exited"));
     const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
     expect(posts).toContain("/api/agents/exited/restart");
@@ -239,12 +249,14 @@ describe("Sidebar", () => {
         : undefined,
     );
     baseline([makeAgent({ id: "exited", sessionName: "Exited one", status: "exited" })]);
-    await userEvent.setup().click(await within(nav()).findByRole("button", { name: /Exited one/ }));
+    await userEvent
+      .setup()
+      .click(await within(nav()).findByRole("button", { name: /^Exited one/ }));
     expect(await screen.findByText("Restart broke")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/");
   });
 
-  it("keeps times aligned: rows without × reserve its slot", async () => {
+  it("ends every row with its ×", async () => {
     await renderSidebar();
     baseline(
       [makeAgent({ id: "a1", sessionName: "Live one" })],
@@ -252,9 +264,8 @@ describe("Sidebar", () => {
     );
     await within(nav()).findByText("Disk one");
     const lastChild = (name: string) => row(name).lastElementChild as HTMLElement;
-    expect(lastChild("Live one").tagName).toBe("BUTTON");
-    expect(lastChild("Disk one")).toHaveAttribute("aria-hidden", "true");
-    expect(lastChild("Disk one")).toHaveClass("size-6");
+    expect(lastChild("Live one")).toHaveAccessibleName("Stop or delete Live one (project)");
+    expect(lastChild("Disk one")).toHaveAccessibleName("Delete Disk one (project)");
   });
 
   it("clears the search from its clear button", async () => {
@@ -319,59 +330,198 @@ describe("Sidebar", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ cwd: "/home/me/alpha" });
   });
 
-  it("closes a live row with DELETE and drops its store", async () => {
-    const { calls } = await renderSidebar("/agents/a1", (call) =>
+  const deletes = (calls: FetchCall[]) =>
+    calls.filter((c) => c.method === "DELETE").map((c) => ({ url: c.url, body: c.body }));
+
+  it("asks Stop or Delete on a live row; Cancel does nothing", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
       call.method === "DELETE" ? [204, null] : undefined,
     );
-    baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
-    await userEvent
-      .setup()
-      .click(await within(nav()).findByRole("button", { name: "Close Live one (project)" }));
-    expect(await screen.findByRole("heading", { name: "Conversation closed" })).toBeInTheDocument();
-    // The sidebar is there; no back-to-Home chevron.
-    expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
-    expect(calls.find((c) => c.method === "DELETE")?.url).toBe("/api/agents/a1");
+    baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
+    const user = userEvent.setup();
+    const button = await within(nav()).findByRole("button", {
+      name: "Stop or delete Live one (project)",
+    });
+
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deletes(calls)).toEqual([]);
+
+    await user.click(button);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }),
+    );
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/a1.jsonl" } }]),
+    );
   });
 
-  it("sends one DELETE however often × is clicked while it's in flight", async () => {
+  it("Stop on the conversation on screen: DELETE /api/agents/:id, then Home", async () => {
+    const { router, calls } = await renderSidebar("/agents/a1", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(deletes(calls)).toEqual([{ url: "/api/agents/a1", body: undefined }]);
+  });
+
+  it("Delete on the conversation on screen goes Home", async () => {
+    const { router, calls } = await renderSidebar("/agents/a1", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/a1.jsonl" } }]);
+  });
+
+  it("Stop and Delete on a conversation not on screen stay put and drop its store", async () => {
+    const drop = vi.spyOn(LiveRegistry.prototype, "drop");
+    const { router, calls } = await renderSidebar("/agents/a2", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline([
+      makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" }),
+      makeAgent({ id: "a2", sessionName: "Shown one", sessionFile: "/s/a2.jsonl" }),
+      makeAgent({ id: "a3", sessionName: "Third one", sessionFile: "/s/a3.jsonl" }),
+    ]);
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+    );
+    let dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(drop).toHaveBeenCalledWith("a1"));
+
+    await user.click(
+      within(nav()).getByRole("button", { name: "Stop or delete Third one (project)" }),
+    );
+    dialog = await screen.findByRole("dialog", { name: "Stop or delete Third one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(drop).toHaveBeenCalledWith("a3"));
+    expect(deletes(calls)).toEqual([
+      { url: "/api/agents/a1", body: undefined },
+      { url: "/api/sessions", body: { file: "/s/a3.jsonl" } },
+    ]);
+    expect(router.state.location.pathname).toBe("/agents/a2");
+    expect(drop).not.toHaveBeenCalledWith("a2");
+    drop.mockRestore();
+  });
+
+  it("Delete takes the session file the agent has when it's chosen", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/old.jsonl" })]);
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
+    sendFrame({
+      type: "agent",
+      agent: makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/new.jsonl" }),
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/new.jsonl" } }]),
+    );
+  });
+
+  it("Delete on a live agent with no session file yet only stops it", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline([makeAgent({ id: "a1", sessionName: "Fresh one" })]);
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Stop or delete Fresh one (project)" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Stop or delete Fresh one?" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/agents/a1", body: undefined }]),
+    );
+  });
+
+  it("deletes exited and session rows at once", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
+      call.method === "DELETE" ? [204, null] : undefined,
+    );
+    baseline(
+      [
+        makeAgent({
+          id: "x1",
+          sessionName: "Exited one",
+          status: "exited",
+          sessionFile: "/s/x1.jsonl",
+        }),
+      ],
+      [session({ file: "/s/free.jsonl", name: "Disk one" })],
+    );
+    const user = userEvent.setup();
+    await user.click(
+      await within(nav()).findByRole("button", { name: "Delete Exited one (project)" }),
+    );
+    await user.click(within(nav()).getByRole("button", { name: "Delete Disk one (project)" }));
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([
+        { url: "/api/sessions", body: { file: "/s/x1.jsonl" } },
+        { url: "/api/sessions", body: { file: "/s/free.jsonl" } },
+      ]),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("toasts a failed delete and stays put", async () => {
+    const { router } = await renderSidebar("/settings", (call) =>
+      call.method === "DELETE"
+        ? [400, { error: { code: "session_not_listed", message: "Not a listed session" } }]
+        : undefined,
+    );
+    baseline([], [session({ file: "/s/free.jsonl", name: "Disk one" })]);
+    await userEvent
+      .setup()
+      .click(await within(nav()).findByRole("button", { name: "Delete Disk one (project)" }));
+    expect(await screen.findByText("Not a listed session")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("sends one DELETE however often × is clicked while it's in flight; other rows stay usable", async () => {
     const { calls } = await renderSidebar("/", (call) =>
       call.method === "DELETE" ? [204, null] : undefined,
     );
     const held = holdFetch((_input, init) => init?.method === "DELETE");
-    baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
-    const button = await within(nav()).findByRole("button", { name: "Close Live one (project)" });
+    baseline(
+      [],
+      [
+        session({ file: "/s/a.jsonl", name: "Disk one" }),
+        session({ file: "/s/b.jsonl", name: "Disk two" }),
+      ],
+    );
+    const button = await within(nav()).findByRole("button", { name: "Delete Disk one (project)" });
     const user = userEvent.setup();
     await user.click(button);
     expect(button).toBeDisabled();
     await user.click(button);
     expect(held).toHaveLength(1);
+    expect(within(nav()).getByRole("button", { name: "Delete Disk two (project)" })).toBeEnabled();
     held[0]?.();
-    await waitFor(() => expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1));
-  });
-
-  it("asks before closing a working agent or one waiting for input", async () => {
-    const { calls } = await renderSidebar("/", (call) =>
-      call.method === "DELETE" ? [204, null] : undefined,
-    );
-    baseline([
-      makeAgent({ id: "a1", sessionName: "Streaming one", isStreaming: true }),
-      makeAgent({ id: "a2", sessionName: "Asking one", attention: "input" }),
-    ]);
-    const deletes = () => calls.filter((c) => c.method === "DELETE").map((c) => c.url);
-    const user = userEvent.setup();
-
-    await user.click(
-      await within(nav()).findByRole("button", { name: "Close Streaming one (project)" }),
-    );
-    const dialog = await screen.findByRole("dialog", { name: "Close Streaming one?" });
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(deletes()).toEqual([]);
-
-    await user.click(within(nav()).getByRole("button", { name: "Close Asking one (project)" }));
-    const confirm = await screen.findByRole("dialog", { name: "Close Asking one?" });
-    await user.click(within(confirm).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(deletes()).toEqual(["/api/agents/a2"]));
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
   });
 
   it("opens the project picker from New conversation", async () => {
@@ -546,7 +696,8 @@ describe("Sidebar with layout repos", () => {
           id: "gone-live",
           cwd: `${R}/old-spike`,
           sessionName: "Still running",
-          startedAt: recent(60 * 24 * 3),
+          // A minute after "Try the thing", so the order doesn't hang on a millisecond.
+          startedAt: recent(60 * 24 * 3 - 1),
           layout: layout("worktree"),
         }),
         makeAgent({
@@ -656,17 +807,28 @@ describe("Sidebar with layout repos", () => {
     layoutBaseline();
     await within(nav()).findByText("Try the thing");
     expect(
-      within(row("Try the thing")).getByRole("button", { name: /Try the thing/ }),
+      within(row("Try the thing")).getByRole("button", { name: /^Try the thing/ }),
     ).toBeDisabled();
     expect(
-      within(row("Exited there")).getByRole("button", { name: /Exited there/ }),
+      within(row("Exited there")).getByRole("button", { name: /^Exited there/ }),
     ).toBeDisabled();
+    // Their × still deletes.
+    expect(
+      within(row("Try the thing")).getByRole("button", {
+        name: "Delete Try the thing (pi-code/old-spike)",
+      }),
+    ).toBeEnabled();
+    expect(
+      within(row("Exited there")).getByRole("button", {
+        name: "Delete Exited there (pi-code/old-spike)",
+      }),
+    ).toBeEnabled();
     expect(within(row("Still running")).getByRole("link")).toHaveAttribute(
       "href",
       "/agents/gone-live",
     );
     expect(
-      within(row("Design worktrees")).getByRole("button", { name: /Design worktrees/ }),
+      within(row("Design worktrees")).getByRole("button", { name: /^Design worktrees/ }),
     ).toBeEnabled();
   });
 
@@ -705,7 +867,9 @@ describe("Sidebar with layout repos", () => {
     const rootRoute = createRootRoute({
       component: () => (
         <WorktreeActionsProvider>
-          <Sidebar onSelect={onSelect} />
+          <StopOrDeleteProvider>
+            <Sidebar onSelect={onSelect} />
+          </StopOrDeleteProvider>
         </WorktreeActionsProvider>
       ),
     });

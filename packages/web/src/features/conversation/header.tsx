@@ -11,6 +11,7 @@ import {
   PowerIcon,
   ShrinkIcon,
   SquarePenIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { HomeBackButton } from "@/components/home-back-button";
 import { Button } from "@/components/ui/button";
@@ -21,10 +22,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useStopOrDelete } from "@/features/sessions/stop-or-delete";
 import { SidebarSheet } from "@/features/sidebar/sidebar-sheet";
 import { baseName } from "@/lib/content";
 import { useIsDesktop } from "@/lib/use-media-query";
-import { useConversation } from "@/store/context";
+import { useConversation, useLive } from "@/store/context";
 import { selectSessionName } from "@/store/selectors";
 import { useUiPrefs } from "@/store/ui-prefs";
 import { useOpenSheet } from "./action-sheets";
@@ -34,7 +36,8 @@ import { useSessionActions } from "./session-actions";
 /**
  * Back to Home and the conversations sheet (below the desktop breakpoint only) · session name ·
  * project · connection · tool expansion toggle · menu (tree, diff, fork, clone, compact, rename,
- * new session, close). Session commands need a ready agent. `inert` while a scoped sheet covers it.
+ * new session, stop, delete). Session commands need a ready agent. `inert` while a scoped sheet
+ * covers it.
  */
 export function ConversationHeader({ inert }: { inert?: boolean }) {
   const agentId = useConversation((s) => s.agentId);
@@ -44,6 +47,11 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   const toolsExpanded = useUiPrefs((s) => s.toolsExpanded);
   const setToolsExpanded = useUiPrefs((s) => s.setToolsExpanded);
   const actions = useSessionActions();
+  // The overview tracks the agent's current session file; the store's copy is its snapshot's.
+  const storeAgent = useConversation((s) => s.agent);
+  const agent = useLive((s) => s.agents[agentId]) ?? storeAgent;
+  const stopOrDelete = useStopOrDelete();
+  const busy = stopOrDelete.pending({ agent });
   const openSheet = useOpenSheet();
   const folder = cwd ? baseName(cwd) : "";
   const desktop = useIsDesktop();
@@ -106,8 +114,15 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
               <SquarePenIcon /> New session
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={() => void actions.close()}>
-              <PowerIcon /> Close conversation
+            <DropdownMenuItem disabled={busy} onSelect={() => stopOrDelete.stop(agent)}>
+              <PowerIcon /> Stop
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy}
+              onSelect={() => stopOrDelete.remove({ agent })}
+            >
+              <Trash2Icon /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

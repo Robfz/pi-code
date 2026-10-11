@@ -87,7 +87,7 @@ interface RemoveWorktreeBody { path: string; force?: boolean }
 5. The sessions whose header `cwd` is inside `path`, from `SessionCatalog.sessions()` after `invalidate()` and never from directory names (F12), are deleted by `deleteSessionFiles` (`catalog/session-files.ts`) one at a time like pi's TUI: `trash <file>` (no shell, 10 s timeout), counted as done when it exits 0 or the file is gone, else `unlink`. After the first `trash` timeout, the remaining files are unlinked directly. A file failing both fails the request with `500 internal` naming it, after the others are attempted. The encoded session dir is kept.
 6. `hub.refreshCatalog()`, also after a failed step 5, sends `catalog` without the deleted sessions, with or without the session watcher; the closed agents produce `agent_closed`. → `204`.
 
-This is pi-code's only write to pi's agent dir (F11).
+With session deletion ([`07-delete-sessions.md`](07-delete-sessions.md)), this is one of pi-code's two writes to pi's agent dir (F11).
 
 ### Git runs
 
@@ -126,7 +126,7 @@ interface WorktreeGroup<T> {
 - An agent's `layout` (`agentLayout`) is its session's from the latest catalog scan, which turns `missing` when the folder goes, else its own from creation.
 - Items with `layout` group under `layout.repo`. `role: "container"` items go in the repo group's own `items`, directly under its header. The others go in one `WorktreeGroup` per cwd: the main checkout first, then the rest by most recent item. Items without `layout` form folder groups by cwd, as in `05`.
 - Top-level groups are ordered by their most recent item, items within a group by activity. Top-level labels follow the collision rule of `05` over all top-level groups, using the container's basename for repo groups.
-- In a missing worktree, session rows and exited agents are disabled: resuming would fail with `cwd does not exist` (F2). A live agent stays usable. `SessionRows` disables a session with `layout.missing` on every list, the share screen's included, unless a live agent holds it (`ownedBy`).
+- In a missing worktree, session rows and exited agents are disabled: resuming would fail with `cwd does not exist` (F2). Their `×` still deletes them ([`07-delete-sessions.md`](07-delete-sessions.md)). A live agent stays usable. `SessionRows` disables a session with `layout.missing` on every list, the share screen's included, unless a live agent holds it (`ownedBy`).
 - Every repo group header, on every surface, offers "New worktree" (`NewWorktreeButton`); worktree sub-group headers of linked and missing worktrees offer "Remove worktree" (`RemoveWorktreeButton`), and missing ones show `MissingMark`. All three live in `features/worktrees/worktree-actions.tsx`.
 
 ### Sidebar
@@ -134,13 +134,13 @@ interface WorktreeGroup<T> {
 ```
 ┌ [+ New conversation]  [search…]   ┐
 │ pi-code                    [⑂+][+]│  repo: container name · new worktree · new here
-│     Notes on the layout       1d  │  container-folder session
+│     Notes on the layout    1d [×] │  container-folder session
 │   main  ⎇ main                [+] │  main checkout: branch (live only) · new here
 │   ● Release checklist      5m [×] │
 │   worktree-support  ⎇ wt   [+][🗑] │  linked worktree: new here · remove
-│     Design worktrees          2h  │
-│   old-spike  missing          [🗑] │  missing: remove only; rows disabled
-│     Try the thing             3d  │
+│     Design worktrees       2h [×] │
+│   old-spike  missing          [🗑] │  missing: remove only; rows disabled but deletable
+│     Try the thing          3d [×] │
 │ dotfiles                      [+] │  plain clone: flat folder group
 └ ⚙                                 ┘
 ```

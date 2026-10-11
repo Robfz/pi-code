@@ -1,7 +1,7 @@
 /**
  * Session catalog: read-only over pi's sessions dir (`<agentDir>/sessions/--<cwd>--/*.jsonl`,
- * docs/session-format.md); worktree removal deletes files through `session-files.ts`. Only header
- * `cwd`s are trusted; directory names are lossy.
+ * docs/session-format.md); session deletion and worktree removal delete listed files through
+ * `session-files.ts`. Only header `cwd`s are trusted; directory names are lossy.
  */
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";

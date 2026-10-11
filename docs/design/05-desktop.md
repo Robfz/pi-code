@@ -140,9 +140,9 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 ```
 ┌ [+ New conversation]  [search…]   ┐
 │ pi-code   ⎇ main              [+] │  group: folder label · branch (live only) · new here
-│   ● Desktop design doc      2m [×]│  live row: mark · title · activity · close
+│   ● Desktop design doc      2m [×]│  live row: mark · title · activity · stop or delete
 │   ◌ Fix flaky test          now[×]│  working: spinner replaces the mark
-│     Refactor catalog          3d  │  on-disk session
+│     Refactor catalog        3d [×]│  on-disk session: delete
 │ Kepi/phoenix                  [+] │
 │ phoenix/phoenix               [+] │
 └ ⚙                                 ┘
@@ -151,9 +151,10 @@ Tree, diff, share, settings and `/sessions` are routes rendered in the content a
 - **Rows** = every agent in `live.agents` (the registry, exited included) plus window sessions no agent holds (matched by `agent.sessionFile`). Title: agent `sessionName` / session `name`, else `firstMessage`, else "New conversation". Activity = the session's `updatedAt`; for an agent, the later of that and its `startedAt` (as in Idle sweep).
 - **Groups** by cwd, ordered by their most recent row; rows by activity. Label = folder basename, with the parent's basename prepended (`Kepi/phoenix`) when two displayed groups share a basename. The header shows `branches[cwd]` when the folder has a live row.
 - **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`, or while the row's resume is in flight; exited agents show no mark. A compact attention icon follows the title: finished, failed, needs input (Home's colors; Home keeps its text badges), labelled for assistive tech and in its tooltip. Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
-- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id`, then `drop`; it asks for confirmation when the agent is streaming or awaiting input (`attention: "input"`), and is disabled while the request is in flight. Selecting a live row navigates to it; selecting an exited agent's row restarts it (`POST /api/agents/:id/restart`) and then navigates to it; selecting a session row resumes it (`useOpenAgent`). A failed restart or resume shows a toast.
+- **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on every row, through `useStopOrDelete` ([`07-delete-sessions.md`](07-delete-sessions.md)): on a live row (labelled "Stop or delete {title} ({folder})") it opens the "Stop or delete {title}?" dialog (Cancel, Stop → `DELETE /api/agents/:id`, Delete → `DELETE /api/sessions`); on an exited agent's or a session row (labelled "Delete {title} ({folder})") it deletes at once. A stopped or deleted agent is then `drop`ped, and the `×` is disabled while its request is in flight. Stopping or deleting the route's agent navigates to `/`. Selecting a live row navigates to it; selecting an exited agent's row restarts it (`POST /api/agents/:id/restart`) and then navigates to it; selecting a session row resumes it (`useOpenAgent`). A failed restart or resume shows a toast.
+- Home and `/sessions` rows follow the same `×` rule (a session held by an agent follows that agent's), and the conversation header's `⋮` offers Stop and Delete.
 - **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on their row title and cwd path. The previous results stay on screen while the next query loads; clearing the field shows the window at once. While the field has text, a themed × button clears it and refocuses the field (the browser's native cancel button is hidden).
-- A conversation closed while on screen shows "Conversation closed" in the content area with the New conversation button.
+- A conversation closed while on screen by something other than its own Stop or Delete (the idle sweep, worktree removal, another tab) shows "Conversation closed" in the content area with the New conversation button.
 
 ### Layout
 

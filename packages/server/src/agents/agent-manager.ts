@@ -14,7 +14,7 @@ import type {
 } from "@pi-code/protocol";
 import { layoutOf } from "../catalog/layout.ts";
 import { readSessionHeader } from "../catalog/sessions.ts";
-import { ApiError } from "../errors.ts";
+import { ApiError, isApiError } from "../errors.ts";
 import { isInside } from "../paths.ts";
 import { AgentHost, type AgentHostOptions, type HostExit } from "./agent-host.ts";
 import { AgentPipeline, type AttentionTrigger, type PipelineOptions } from "./pipeline.ts";
@@ -325,6 +325,19 @@ export class AgentManager extends EventEmitter<AgentManagerEvents> {
       this.agents.delete(id);
       this.emit("closed", id);
     }
+  }
+
+  /** Closes every agent, exited ones included, that `match`es; returns how many matched. */
+  async closeWhere(match: (agent: Agent) => boolean): Promise<number> {
+    const ids = [...this.agents.values()].filter(match).map((a) => a.id);
+    await Promise.all(
+      ids.map((id) =>
+        this.close(id).catch((e: unknown) => {
+          if (!isApiError(e, "agent_not_found")) throw e; // closed meanwhile
+        }),
+      ),
+    );
+    return ids.length;
   }
 
   /** Closes every agent in parallel (shutdown). */

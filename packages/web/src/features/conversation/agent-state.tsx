@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { LoaderIcon, PowerIcon, RotateCcwIcon, ShieldQuestionIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -11,7 +10,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { closeAgent, errorMessage, restartAgent, trustAgent } from "@/lib/api";
+import { useStopOrDelete } from "@/features/sessions/stop-or-delete";
+import { errorMessage, restartAgent, trustAgent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
 import { selectAgent } from "@/store/selectors";
@@ -86,10 +86,11 @@ export function TrustSheet({ container }: { container?: HTMLElement | null }) {
 
 /** Loading, starting and exited states shown in place of (or before) the transcript. */
 export function AgentStatePanel() {
-  const navigate = useNavigate();
   const agent = useConversation(selectAgent);
   const hydrated = useConversation((s) => s.hydrated);
-  const [busy, setBusy] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const stopOrDelete = useStopOrDelete();
+  const busy = restarting || stopOrDelete.pending({ agent });
 
   if (!hydrated || agent.status === "starting") {
     return (
@@ -106,24 +107,13 @@ export function AgentStatePanel() {
   if (agent.status !== "exited") return null;
 
   async function restart() {
-    setBusy(true);
+    setRestarting(true);
     try {
       await restartAgent(agent.id);
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function close() {
-    setBusy(true);
-    try {
-      await closeAgent(agent.id);
-      void navigate({ to: "/" });
-    } catch (error) {
-      toast.error(errorMessage(error));
-      setBusy(false);
+      setRestarting(false);
     }
   }
 
@@ -141,8 +131,13 @@ export function AgentStatePanel() {
         </pre>
       )}
       <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void close()}>
-          <PowerIcon /> Close
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => stopOrDelete.stop(agent)}
+        >
+          <PowerIcon /> Stop
         </Button>
         <Button size="sm" disabled={busy} onClick={() => void restart()}>
           <RotateCcwIcon /> Restart

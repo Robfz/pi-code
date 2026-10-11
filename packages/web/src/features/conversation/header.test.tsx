@@ -75,6 +75,7 @@ beforeEach(() => {
   useConversationUi.getState().reset();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.info).mockClear();
+  vi.mocked(toast.error).mockClear();
 });
 
 afterEach(() => {
@@ -176,17 +177,52 @@ describe("ConversationHeader menu", () => {
     await waitFor(() => expect(screen.queryByTestId("rename-sheet")).toBeNull());
   });
 
-  it("Close → DELETE and back home", async () => {
+  const deletes = (calls: FetchCall[]) =>
+    calls.filter((c) => c.method === "DELETE").map((c) => ({ url: c.url, body: c.body }));
+
+  it("Stop → DELETE /api/agents/:id and back home", async () => {
     const { calls } = stubFetch((call) => (call.method === "DELETE" ? [204, null] : undefined));
     const { user, router } = await renderHeader();
     await router.navigate({ to: "/agents/$agentId", params: { agentId: "a1" } });
-    await menu(user, /Close conversation/);
-    await waitFor(() =>
-      expect(calls.filter((c) => c.method === "DELETE").map((c) => c.url)).toEqual([
-        "/api/agents/a1",
-      ]),
-    );
+    await menu(user, /Stop/);
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(deletes(calls)).toEqual([{ url: "/api/agents/a1", body: undefined }]);
+  });
+
+  it("Delete → DELETE /api/sessions with the agent's session file, without asking, and back home", async () => {
+    const { calls } = stubFetch((call) => (call.method === "DELETE" ? [204, null] : undefined));
+    const store = hydratedStore({ agent: makeAgent({ sessionFile: "/s/a1.jsonl" }) });
+    const { router } = await renderWithStore(<ConversationHeader />, store);
+    await router.navigate({ to: "/agents/$agentId", params: { agentId: "a1" } });
+    await menu(userEvent.setup(), /Delete/);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/a1.jsonl" } }]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Delete takes the live overview's session file over the snapshot's", async () => {
+    const { calls } = stubFetch((call) => (call.method === "DELETE" ? [204, null] : undefined));
+    const store = hydratedStore({ agent: makeAgent({ sessionFile: "/s/old.jsonl" }) });
+    const { registry } = await renderWithStore(<ConversationHeader />, store);
+    registry.live.setState({ agents: { a1: makeAgent({ sessionFile: "/s/new.jsonl" }) } });
+    await menu(userEvent.setup(), /Delete/);
+    await waitFor(() =>
+      expect(deletes(calls)).toEqual([{ url: "/api/sessions", body: { file: "/s/new.jsonl" } }]),
+    );
+  });
+
+  it("toasts a failed Delete and stays", async () => {
+    stubFetch((call) =>
+      call.method === "DELETE"
+        ? [400, { error: { code: "session_not_listed", message: "Kept the file" } }]
+        : undefined,
+    );
+    const store = hydratedStore({ agent: makeAgent({ sessionFile: "/s/a1.jsonl" }) });
+    const { router } = await renderWithStore(<ConversationHeader />, store);
+    await router.navigate({ to: "/agents/$agentId", params: { agentId: "a1" } });
+    await menu(userEvent.setup(), /Delete/);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Kept the file"));
+    expect(router.state.location.pathname).toBe("/agents/a1");
   });
 
   it("session actions are disabled until the agent is ready", async () => {
@@ -199,8 +235,7 @@ describe("ConversationHeader menu", () => {
       "aria-disabled",
       "true",
     );
-    expect(screen.getByRole("menuitem", { name: /Close conversation/ })).not.toHaveAttribute(
-      "aria-disabled",
-    );
+    expect(screen.getByRole("menuitem", { name: /Stop/ })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("menuitem", { name: /Delete/ })).not.toHaveAttribute("aria-disabled");
   });
 });

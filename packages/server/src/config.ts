@@ -13,7 +13,7 @@ export interface Config {
   piBin: string;
   /** pi-code's own data (VAPID keys, push subscriptions). */
   dataDir: string;
-  /** pi's agent dir (read-only: sessions, trust.json). */
+  /** pi's agent dir (sessions, trust.json); written only to delete session files. */
   agentDir: string;
   /** `$HOME`; agents' cwds must resolve inside it. */
   home: string;
