@@ -104,7 +104,7 @@ describe("references in messages", () => {
 
   it("colors references in assistant text, not bare paths or code blocks", async () => {
     await renderApp({ desktop: true });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     await waitFor(() =>
       expect(references(assistant).map((ref) => ref.textContent)).toEqual([
         "@src/a.ts:2",
@@ -131,7 +131,7 @@ describe("references in messages", () => {
 
   it("Enter on a reference in a reply opens it; a version-named one shows a toast", async () => {
     await renderApp({ desktop: true });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     const versioned = await waitFor(() => {
       const ref = references(assistant)[1];
       if (!ref) throw new Error("no reference");
@@ -149,7 +149,7 @@ describe("references in messages", () => {
 
   it("a click navigates to the review page at those lines on phones", async () => {
     const { router } = await renderApp({ desktop: false });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     const ref = await within(assistant).findByText("@src/a.ts:2");
     await userEvent.setup().click(ref);
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1/diff"));

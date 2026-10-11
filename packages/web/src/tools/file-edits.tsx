@@ -5,14 +5,30 @@
  */
 
 import type { EditToolDetails } from "@pi-code/protocol";
+import { FilePenIcon, FilePlusIcon } from "lucide-react";
 import { useMemo } from "react";
 import { allAddedPatch, countPatchLines } from "@/components/diff";
 import { SelectableDiff } from "@/features/review/selectable-diff";
-import { toolResultText } from "@/lib/content";
+import { lineCount, toolResultText } from "@/lib/content";
 import { cwdRelative } from "@/lib/paths";
 import { useConversation } from "@/store/context";
-import { argPath, asRecord, ErrorOutput, isActive, Muted, Notice, Pending, str } from "./common";
-import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
+import {
+  argPath,
+  asRecord,
+  ErrorOutput,
+  isActive,
+  Notice,
+  Pending,
+  plural,
+  statusVerb,
+  str,
+} from "./common";
+import {
+  registerToolRenderer,
+  type ToolLabel,
+  type ToolRenderer,
+  type ToolRendererProps,
+} from "./registry";
 
 function editPatch(result: ToolRendererProps["result"]): string | undefined {
   const patch = (result?.details as Partial<EditToolDetails> | undefined)?.patch;
@@ -34,24 +50,22 @@ function ToolDiff({ patch, path, fileName }: { patch: string; path: string; file
 
 function Counts({ additions, deletions }: { additions: number; deletions: number }) {
   return (
-    <span className="font-sans tabular-nums">
-      {" "}
-      <span className="text-diff-add">+{additions}</span>{" "}
+    <span className="inline-flex gap-1 tabular-nums">
+      <span className="text-diff-add">+{additions}</span>
       <span className="text-diff-del">−{deletions}</span>
     </span>
   );
 }
 
-function EditSummary({ args, result, isError }: ToolRendererProps) {
+function editLabel({ args, status, result, isError }: ToolRendererProps): ToolLabel {
   const path = argPath(args);
   const patch = isError ? undefined : editPatch(result);
-  const counts = useMemo(() => (patch ? countPatchLines(patch) : undefined), [patch]);
-  return (
-    <span className="font-mono">
-      {path}
-      {counts && <Counts {...counts} />}
-    </span>
-  );
+  return {
+    icon: FilePenIcon,
+    verb: statusVerb(status, "Editing", "Edited", "Edit failed"),
+    target: path ? { kind: "path", text: path } : undefined,
+    meta: patch && <Counts {...countPatchLines(patch)} />,
+  };
 }
 
 function editCount(args: unknown): number {
@@ -73,27 +87,17 @@ function EditBody({ args, status, result, isError }: ToolRendererProps) {
   return <ToolDiff patch={patch} path={path ?? ""} fileName={path} />;
 }
 
-export const editRenderer: ToolRenderer = { Summary: EditSummary, Body: EditBody };
+export const editRenderer: ToolRenderer = { label: editLabel, Body: EditBody };
 
-function lineCount(content: string): number {
-  if (content === "") return 0;
-  return content.replace(/\n$/, "").split("\n").length;
-}
-
-function WriteSummary({ args }: ToolRendererProps) {
+function writeLabel({ args, status }: ToolRendererProps): ToolLabel {
   const path = argPath(args);
   const content = str(args, "content");
-  return (
-    <span className="font-mono">
-      {path}
-      {content !== undefined && (
-        <Muted className="font-sans">
-          {" "}
-          · {lineCount(content)} {lineCount(content) === 1 ? "line" : "lines"}
-        </Muted>
-      )}
-    </span>
-  );
+  return {
+    icon: FilePlusIcon,
+    verb: statusVerb(status, "Writing", "Wrote", "Write failed"),
+    target: path ? { kind: "path", text: path } : undefined,
+    meta: content !== undefined ? `· ${plural(lineCount(content), "line", "lines")}` : undefined,
+  };
 }
 
 function WriteBody({ args, status, result, isError }: ToolRendererProps) {
@@ -110,7 +114,7 @@ function WriteBody({ args, status, result, isError }: ToolRendererProps) {
  * pi's write result carries no details, so a new file can't be told from an overwrite; the
  * content always shows as an all-added diff.
  */
-export const writeRenderer: ToolRenderer = { Summary: WriteSummary, Body: WriteBody };
+export const writeRenderer: ToolRenderer = { label: writeLabel, Body: WriteBody };
 
 registerToolRenderer("edit", editRenderer);
 registerToolRenderer("write", writeRenderer);

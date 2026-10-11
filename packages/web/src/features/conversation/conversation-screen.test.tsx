@@ -49,14 +49,15 @@ describe("ConversationScreen live rendering", () => {
       cursor,
       (e) => e.type === "pi" && e.event.type === "message_end" && e.event.message.role === "user",
     );
-    expect(within(screen.getByTestId("live")).getByTestId("user-message")).toBeInTheDocument();
+    const pending = within(screen.getByTestId("live-turn")).getByTestId("user-message");
+    expect(pending).toHaveClass("opacity-70");
 
     playUntil(store, events, cursor, isPi("tool_execution_start"));
     const liveTool = screen.getAllByTestId("tool-call").at(-1);
     expect(liveTool).toHaveAttribute("data-status", "running");
 
     playUntil(store, events, cursor, () => false);
-    expect(screen.queryByTestId("streaming-message")).toBeNull();
+    expect(screen.queryByTestId("live-turn")).toBeNull();
     const transcript = screen.getByTestId("transcript");
     expect(
       within(transcript)
@@ -67,7 +68,8 @@ describe("ConversationScreen live rendering", () => {
       expect(el).toHaveAttribute("data-status", "done");
     }
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
-    expect(within(screen.getByTestId("live")).queryByTestId("user-message")).toBeNull();
+    expect(screen.getAllByTestId("user-message")).toHaveLength(1);
+    expect(screen.getByTestId("user-message")).not.toHaveClass("opacity-70");
   });
 
   it("shows the streaming assistant text before it is committed (plain-answer)", async () => {
@@ -84,13 +86,13 @@ describe("ConversationScreen live rendering", () => {
         e.event.type === "message_update" &&
         e.event.assistantMessageEvent.type === "text_delta",
     );
-    const streaming = screen.getByTestId("streaming-message");
+    const streaming = within(screen.getByTestId("live-turn")).getByTestId("assistant-text");
     expect(streaming.textContent?.length).toBeGreaterThan(0);
     playUntil(store, events, cursor, () => false);
-    expect(screen.queryByTestId("streaming-message")).toBeNull();
-    expect(
-      within(screen.getByTestId("transcript")).getAllByTestId("assistant-message"),
-    ).toHaveLength(1);
+    expect(screen.queryByTestId("live-turn")).toBeNull();
+    expect(within(screen.getByTestId("transcript")).getAllByTestId("assistant-text")).toHaveLength(
+      1,
+    );
   });
 
   it("shows queued steering / follow-up messages (steer-followup)", async () => {

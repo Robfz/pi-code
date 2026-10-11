@@ -6,7 +6,8 @@
  * Tools without a renderer fall back to the generic one.
  */
 
-import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
 
 export type ToolStatus =
   /** Assistant is still streaming the call's arguments. */
@@ -37,14 +38,26 @@ export interface ToolRendererProps {
   expanded: boolean;
   /** Proxied curator URL from a `curator` event, if any. */
   curatorUrl?: string;
+  /** Execution time: the committed result's, else the live run's. */
+  durationMs?: number;
+  /** When execution started (the live run's, server clock). */
+  startedAt?: number;
+}
+
+/** What a tool row shows (`docs/design/09-ui-overhaul.md`, "Tool rows"). */
+export interface ToolLabel {
+  icon: LucideIcon;
+  /** Present tense while running or streaming, past tense when done, "… failed" on error. */
+  verb: string;
+  target?: { kind: "path" | "code" | "text"; text: string };
+  meta?: ReactNode;
 }
 
 export interface ToolRenderer {
-  /** One-line summary next to the tool name (collapsed and expanded). */
-  Summary?: ComponentType<ToolRendererProps>;
+  label(props: ToolRendererProps): ToolLabel;
   /** Body shown when expanded. */
   Body: ComponentType<ToolRendererProps>;
-  /** Show the body while running even when collapsed (e.g. streaming output). */
+  /** Expanded while running (Balanced): `bash` and the fallback renderer only. */
   expandWhileRunning?: boolean;
 }
 

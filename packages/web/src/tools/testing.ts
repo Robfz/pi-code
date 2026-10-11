@@ -88,3 +88,25 @@ export function fixtureEditPatch(): string {
   if (typeof patch !== "string") throw new Error("tool-calls fixture: edit has no details.patch");
   return patch;
 }
+
+/** What a tool row shows (`ToolRow`): its icon's lucide name, verb, target, meta and tail. */
+export function rowParts(row: HTMLElement) {
+  const head = row.firstElementChild as HTMLElement;
+  const slot = (name: string) => head.querySelector<HTMLElement>(`[data-slot="${name}"]`);
+  const svg = slot("row-icon")?.querySelector("svg");
+  return {
+    icon: [...(svg?.classList ?? [])].find((c) => c.startsWith("lucide-"))?.slice("lucide-".length),
+    verb: slot("row-verb")?.textContent ?? undefined,
+    shimmer: slot("row-verb")?.classList.contains("shimmer") ?? false,
+    target: slot("row-target")?.textContent ?? undefined,
+    meta: slot("row-meta")?.textContent ?? undefined,
+    tail: slot("row-tail")?.textContent ?? undefined,
+  };
+}
+
+/** The open body of a tool row. */
+export function rowBody(row: HTMLElement): HTMLElement {
+  const body = row.querySelector<HTMLElement>('[data-slot="collapsible-content"]');
+  if (!body) throw new Error("the row has no open body");
+  return body;
+}

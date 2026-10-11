@@ -4,7 +4,8 @@
  * agent, task, status, duration, usage, nested tool calls and markdown output.
  */
 
-import { CheckIcon, CircleAlertIcon, LoaderIcon, XIcon } from "lucide-react";
+import { BotIcon, CheckIcon, CircleAlertIcon, LoaderIcon, XIcon } from "lucide-react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { toolResultText } from "@/lib/content";
@@ -15,10 +16,29 @@ import {
   type SubagentUsage,
   subagentDetails,
 } from "@/lib/subagent-details";
-import { formatTokens } from "@/lib/time";
+import { formatDuration, formatTokens } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { argPath, asRecord, isActive, Muted, Notice, str, truncate } from "./common";
-import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
+import {
+  asRecord,
+  isActive,
+  Muted,
+  Notice,
+  plural,
+  type Rec,
+  statusVerb,
+  str,
+  truncate,
+} from "./common";
+import {
+  getToolRenderer,
+  registerToolRenderer,
+  type ToolLabel,
+  type ToolRenderer,
+  type ToolRendererProps,
+  type ToolResultPayload,
+  type ToolStatus,
+} from "./registry";
+import { errorLine, ToolRow } from "./tool-row";
 
 export type AgentStatus = "running" | "done" | "failed";
 
@@ -35,12 +55,6 @@ export function agentStatus(result: SubagentResult, callActive: boolean): AgentS
   return "done";
 }
 
-export function formatDuration(ms: number): string {
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  return `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
-}
-
 /** "2 turns ↑3.9k ↓218 $0.0051 ctx:2.1k" (the extension's TUI usage line, minus duration/model). */
 export function formatUsage(usage: Partial<SubagentUsage> | undefined): string {
   if (!usage) return "";
@@ -55,7 +69,7 @@ export function formatUsage(usage: Partial<SubagentUsage> | undefined): string {
   return parts.join(" ");
 }
 
-type Part = { type?: string; text?: string; name?: string; arguments?: unknown };
+type Part = { type?: string; text?: string; id?: string; name?: string; arguments?: unknown };
 
 function assistantParts(messages: unknown[]): Part[] {
   const parts: Part[] = [];
@@ -77,36 +91,63 @@ export function finalOutput(messages: unknown[]): string {
 }
 
 export interface NestedToolCall {
+  id: string;
   name: string;
-  hint: string;
+  args: unknown;
+  /** From the agent's `toolResult` message, once it has one. */
+  result?: ToolResultPayload;
+  isError: boolean;
 }
 
-/** One-line description of a nested tool call (like the extension's `formatToolCall`). */
-function toolCallHint(name: string, args: unknown): string {
-  const path = argPath(args);
-  switch (name) {
-    case "bash":
-      return `$ ${truncate(str(args, "command") ?? "…", 60)}`;
-    case "read":
-    case "write":
-    case "edit":
-    case "ls":
-      return path ?? (name === "ls" ? "." : "…");
-    case "grep":
-      return `/${str(args, "pattern") ?? ""}/ in ${path ?? "."}`;
-    case "find":
-      return `${str(args, "pattern") ?? "*"} in ${path ?? "."}`;
-    default: {
-      const json = JSON.stringify(args ?? {});
-      return json.length > 60 ? `${json.slice(0, 59)}…` : json;
-    }
-  }
-}
-
+/** The agent's tool calls, each with its result when the agent's messages hold it. */
 export function nestedToolCalls(messages: unknown[]): NestedToolCall[] {
+  const results = new Map<string, Rec>();
+  for (const message of messages) {
+    const m = asRecord(message);
+    const id = str(m, "toolCallId");
+    if (m?.role === "toolResult" && id) results.set(id, m);
+  }
   return assistantParts(messages)
     .filter((p) => p.type === "toolCall" && typeof p.name === "string")
-    .map((p) => ({ name: p.name as string, hint: toolCallHint(p.name as string, p.arguments) }));
+    .map((p) => {
+      const id = p.id ?? "";
+      const result = results.get(id);
+      return {
+        id,
+        name: p.name as string,
+        args: p.arguments,
+        result: result && {
+          content: Array.isArray(result.content) ? result.content : [],
+          details: result.details,
+        },
+        isError: result?.isError === true,
+      };
+    });
+}
+
+/** A nested call as a body-less row, labelled by its tool's renderer. */
+function NestedToolRow({ call, agentRunning }: { call: NestedToolCall; agentRunning: boolean }) {
+  let status: ToolStatus = agentRunning ? "running" : "done";
+  if (call.result) status = call.isError ? "error" : "done";
+  const props: ToolRendererProps = {
+    toolCallId: call.id,
+    toolName: call.name,
+    args: call.args,
+    status,
+    result: call.result,
+    isError: call.isError,
+    expanded: false,
+  };
+  return (
+    <ToolRow
+      data-testid="nested-tool-call"
+      data-tool={call.name}
+      data-status={status}
+      label={getToolRenderer(call.name).label(props)}
+      status={status}
+      error={status === "error" ? errorLine(call.result) : undefined}
+    />
+  );
 }
 
 function StatusIcon({ status }: { status: AgentStatus }) {
@@ -159,25 +200,29 @@ function AgentCard({
         )}
       </div>
       {result.task && (
-        <details className="text-xs">
-          <summary className="cursor-pointer truncate text-muted-foreground select-none">
-            {truncate(result.task.replace(/\{previous\}/g, "").trim(), 120)}
-          </summary>
-          <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+        <CollapsibleRow
+          label={
+            <span className="truncate text-xs text-muted-foreground">
+              {truncate(result.task.replace(/\{previous\}/g, "").trim(), 120)}
+            </span>
+          }
+        >
+          <p className="pb-1 text-xs whitespace-pre-wrap break-words text-muted-foreground">
             {result.task}
           </p>
-        </details>
+        </CollapsibleRow>
       )}
       {tools.length > 0 && (
-        <ul data-testid="subagent-tools" className="flex flex-col gap-0.5 font-mono text-xs">
+        <div data-testid="subagent-tools" className="flex flex-col">
           {tools.map((tool, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: calls in order, names may repeat
-            <li key={i} className="truncate">
-              <Muted>→ </Muted>
-              {tool.name} <Muted>{tool.hint}</Muted>
-            </li>
+            <NestedToolRow
+              // biome-ignore lint/suspicious/noArrayIndexKey: calls in order; ids may be missing
+              key={i}
+              call={tool}
+              agentRunning={status === "running"}
+            />
           ))}
-        </ul>
+        </div>
       )}
       {failure && (
         <p className="flex items-start gap-1 text-xs text-destructive">
@@ -256,23 +301,20 @@ function progressLabel(details: SubagentDetails, active: boolean): string {
   return statuses[0] ?? (active ? "running" : "done");
 }
 
-function SubagentSummary(props: ToolRendererProps) {
+function subagentLabel(props: ToolRendererProps): ToolLabel {
   const details = currentDetails(props);
-  const active = isActive(props.status);
-  const { mode, tasks } = argTasks(props.args);
-  const effectiveMode = details?.mode ?? mode;
-  const agents =
-    details && details.results.length > 0
-      ? [...new Set(details.results.map((r) => r.agent))]
-      : [...new Set(tasks.map((t) => t.agent))];
-  const label = details && details.results.length > 0 ? progressLabel(details, active) : undefined;
-  return (
-    <span className="text-muted-foreground">
-      <span className="text-foreground">{effectiveMode}</span>
-      {agents.length > 0 && ` · ${agents.join(", ")}`}
-      {label && ` · ${label}`}
-    </span>
-  );
+  const results = details?.results ?? [];
+  const count = results.length > 0 ? results.length : argTasks(props.args).tasks.length;
+  const progress =
+    details && results.length > 0 && details.mode !== "single"
+      ? progressLabel(details, isActive(props.status))
+      : undefined;
+  return {
+    icon: BotIcon,
+    verb: statusVerb(props.status, "Running", "Ran", "Agents failed"),
+    target: count > 0 ? { kind: "text", text: plural(count, "agent", "agents") } : undefined,
+    meta: progress && `· ${progress}`,
+  };
 }
 
 function SubagentBody(props: ToolRendererProps) {
@@ -328,10 +370,6 @@ function SubagentBody(props: ToolRendererProps) {
   );
 }
 
-export const subagentRenderer: ToolRenderer = {
-  Summary: SubagentSummary,
-  Body: SubagentBody,
-  expandWhileRunning: true,
-};
+export const subagentRenderer: ToolRenderer = { label: subagentLabel, Body: SubagentBody };
 
 registerToolRenderer(SPAWN_TOOL_NAME, subagentRenderer);

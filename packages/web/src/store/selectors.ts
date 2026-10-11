@@ -14,7 +14,7 @@ import {
 import { SPAWN_TOOL_NAME, subagentCost } from "@/lib/subagent-details";
 import type { ConversationState } from "./conversation-store";
 
-function memoByIdentity<K extends object, V>(compute: (key: K) => V): (key: K) => V {
+export function memoByIdentity<K extends object, V>(compute: (key: K) => V): (key: K) => V {
   const cache = new WeakMap<K, V>();
   return (key) => {
     let value = cache.get(key);

@@ -1,14 +1,15 @@
 import { splitFileBlocks, type UserMessage } from "@pi-code/protocol";
 import { FileTextIcon } from "lucide-react";
 import { useState } from "react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { CodeRefText } from "@/features/review/code-ref-text";
 import { baseName, contentImages, contentText, imageSrc } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
 /**
- * User text + image thumbnails (content may be a string or a content array). Leading `<file>`
- * blocks (attached text files) render as collapsed chips that expand to the file's content. Line
- * references in the text are clickable.
+ * A full-width box: image thumbnails, then leading `<file>` blocks (attached text files) as
+ * collapsed rows that expand to the file's content, then the text (content may be a string or a
+ * content array). Line references in the text are clickable.
  */
 export function UserMessageView({
   message,
@@ -24,7 +25,7 @@ export function UserMessageView({
     <div
       data-testid="user-message"
       className={cn(
-        "ml-auto flex max-w-[92%] flex-col gap-2 rounded-2xl rounded-br-sm bg-secondary px-3 py-2 text-sm text-secondary-foreground",
+        "flex w-full min-w-0 flex-col gap-2 rounded-[10px] border bg-user-message px-[15px] pt-[11px] pb-3 text-prose text-foreground",
         pending && "opacity-70",
       )}
     >
@@ -51,23 +52,21 @@ export function UserMessageView({
         </div>
       )}
       {files.map((file, index) => (
-        <details
+        <CollapsibleRow
           // biome-ignore lint/suspicious/noArrayIndexKey: file blocks have no id
           key={index}
           data-testid="file-attachment"
-          className="min-w-0 rounded-md border bg-background/50"
+          icon={<FileTextIcon />}
+          label={
+            <span title={file.name} className="truncate">
+              {baseName(file.name)}
+            </span>
+          }
         >
-          <summary
-            title={file.name}
-            className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-xs select-none"
-          >
-            <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono">{baseName(file.name)}</span>
-          </summary>
-          <pre className="max-h-64 overflow-auto border-t px-2 py-1.5 font-mono text-xs">
+          <pre className="mt-0.5 mb-1 max-h-64 overflow-auto rounded-lg border bg-card px-3 py-2 font-mono text-xs">
             {file.text}
           </pre>
-        </details>
+        </CollapsibleRow>
       ))}
       {body !== "" && (
         <div className="whitespace-pre-wrap break-words">

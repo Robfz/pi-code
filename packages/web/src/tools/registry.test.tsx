@@ -1,9 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { WrenchIcon } from "lucide-react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useUiPrefs } from "@/store/ui-prefs";
 import { genericToolRenderer } from "./generic";
 import { getToolRenderer, registerToolRenderer, type ToolRendererProps } from "./index";
+import { rowBody, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
 
 const base: Omit<ToolRendererProps, "expanded" | "status" | "isError"> = {
@@ -19,10 +21,11 @@ afterEach(() => {
 describe("tool renderers", () => {
   it("falls back to the generic renderer and honours registrations", () => {
     expect(getToolRenderer("nope")).toBe(genericToolRenderer);
-    const custom = { Body: () => <p>custom body</p> };
+    const label = () => ({ icon: WrenchIcon, verb: "Custom" });
+    const custom = { label, Body: () => <p>custom body</p> };
     registerToolRenderer("custom_tool", custom);
     expect(getToolRenderer("custom_tool")).toBe(custom);
-    const mcp = { Body: () => <p>mcp</p> };
+    const mcp = { label, Body: () => <p>mcp</p> };
     registerToolRenderer((name) => name.startsWith("srv_"), mcp);
     expect(getToolRenderer("srv_list")).toBe(mcp);
   });
@@ -36,12 +39,19 @@ describe("tool renderers", () => {
         result={{ content: [{ type: "text", text: "3 things found" }] }}
       />,
     );
-    expect(screen.getByText("mystery")).toBeInTheDocument();
-    expect(screen.getByText("find things")).toBeInTheDocument(); // summary hint
+    expect(rowParts(screen.getByTestId("tool-call"))).toMatchObject({
+      icon: "wrench",
+      verb: "mystery",
+      shimmer: false,
+      target: "find things", // the first string argument
+      meta: undefined,
+    });
     expect(screen.queryByText("3 things found")).toBeNull();
-    await userEvent.setup().click(screen.getByRole("button", { expanded: false }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { expanded: false }));
     expect(screen.getByText("3 things found")).toBeInTheDocument();
-    expect(screen.getByText("Arguments")).toBeInTheDocument();
+    expect(screen.queryByText(/"limit": 3/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Arguments" }));
     expect(screen.getByText(/"limit": 3/)).toBeInTheDocument();
   });
 
@@ -55,7 +65,10 @@ describe("tool renderers", () => {
       />,
     );
     expect(screen.getByTestId("tool-call")).toHaveAttribute("data-status", "running");
-    expect(screen.getByLabelText("Running")).toBeInTheDocument();
+    expect(rowParts(screen.getByTestId("tool-call"))).toMatchObject({
+      verb: "mystery",
+      shimmer: true,
+    });
     expect(screen.getByText(/tick\s+tock/)).toBeInTheDocument();
   });
 
@@ -68,9 +81,14 @@ describe("tool renderers", () => {
         result={{ content: [{ type: "text", text: "Command aborted" }] }}
       />,
     );
-    expect(screen.getByLabelText("Failed")).toBeInTheDocument();
+    const row = screen.getByTestId("tool-call");
+    expect(rowParts(row)).toMatchObject({
+      icon: "circle-alert",
+      verb: "mystery failed",
+      meta: "Command aborted",
+    });
     await userEvent.setup().click(screen.getByRole("button", { expanded: false }));
-    expect(screen.getByText("Command aborted")).toHaveClass("text-destructive");
+    expect(within(rowBody(row)).getByText("Command aborted")).toHaveClass("text-destructive");
   });
 
   it("the global toggle expands every tool", () => {

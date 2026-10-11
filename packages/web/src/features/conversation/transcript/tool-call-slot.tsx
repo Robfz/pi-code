@@ -12,7 +12,7 @@ function asPayload(result: unknown): ToolResultPayload | undefined {
 
 /**
  * One tool call, paired with its committed `toolResult` (by `toolCallId`) or, until that is
- * committed, with the live `ToolRun`. Subscribes only to this call's slices.
+ * committed, with the live `ToolRun` (and its timing). Subscribes only to this call's slices.
  *
  * While the assistant streams the call, only the raw `argsText` is shown (no re-parsing of
  * partial JSON on every delta); parsed `args` arrive with `toolcall_end` (`block.call`).
@@ -68,6 +68,8 @@ export function ToolCallSlot({
       result={result}
       isError={isError}
       curatorUrl={curatorUrl}
+      durationMs={committed ? committed.durationMs : live?.durationMs}
+      startedAt={committed ? undefined : live?.startedAt}
     />
   );
 }

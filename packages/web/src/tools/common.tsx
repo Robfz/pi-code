@@ -9,7 +9,7 @@ import { contentImages, imageSrc, toolResultText } from "@/lib/content";
 import { asRecord, str } from "@/lib/record";
 import { cn } from "@/lib/utils";
 import { OutputBlock } from "./generic";
-import type { ToolRendererProps } from "./registry";
+import type { ToolRendererProps, ToolStatus } from "./registry";
 
 export { asRecord, num, type Rec, str } from "@/lib/record";
 
@@ -147,8 +147,24 @@ export function Pending({ label = "Running…" }: { label?: string }) {
 }
 
 /** Whether the call is still going (arguments streaming or executing). */
-export function isActive(status: ToolRendererProps["status"]): boolean {
+export function isActive(status: ToolStatus): boolean {
   return status === "running" || status === "streaming";
+}
+
+/** A row's verb for the call's status. */
+export function statusVerb(
+  status: ToolStatus,
+  running: string,
+  done: string,
+  failed: string,
+): string {
+  if (status === "error") return failed;
+  return isActive(status) ? running : done;
+}
+
+/** "1 match", "3 matches". */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** An `http(s)://` URL: the only kind tool / extension data may turn into a link. */

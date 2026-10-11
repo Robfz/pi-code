@@ -1,5 +1,5 @@
-import { activeBranch, type SessionEntry } from "@pi-code/protocol";
-import { screen, waitFor, within } from "@testing-library/react";
+import { activeBranch, initialLiveState, type SessionEntry } from "@pi-code/protocol";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { fixtureNames, fixtureTranscript, makeAgent } from "@/test/fixtures";
@@ -28,9 +28,16 @@ describe.each(fixtureNames())("transcript of fixture %s", (name) => {
     expect(within(root).queryAllByTestId("user-message")).toHaveLength(
       count(branch, isRole("user")),
     );
-    expect(within(root).queryAllByTestId("assistant-message")).toHaveLength(
-      count(branch, isRole("assistant")),
+    const texts = branch.flatMap((e) =>
+      e.type === "message" && e.message.role === "assistant"
+        ? e.message.content.filter((c) => c.type === "text" && c.text.trim() !== "")
+        : [],
     );
+    expect(within(root).queryAllByTestId("assistant-text")).toHaveLength(texts.length);
+    // A turn per user message, plus one for what comes before the first.
+    const users = count(branch, isRole("user"));
+    const turns = within(root).queryAllByTestId("turn");
+    expect(turns.length === users || turns.length === users + 1).toBe(true);
     expect(within(root).queryAllByTestId("bash-execution")).toHaveLength(
       count(branch, isRole("bashExecution")),
     );
@@ -188,7 +195,76 @@ describe("transcript rendering details", () => {
     };
     await renderWithStore(<Transcript />, hydratedStore({ transcript }));
     expect(screen.getByTestId("assistant-error")).toHaveTextContent("overloaded_error");
-    expect(screen.getByTestId("thinking")).not.toHaveAttribute("open");
+    expect(within(screen.getByTestId("thinking")).getByRole("button")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
     expect(screen.getByText("answer").tagName).toMatch(/STRONG|SPAN/);
+  });
+});
+
+describe("the live turn", () => {
+  it("appends streaming blocks to the last turn; a pending user message starts a new one", async () => {
+    const transcript = fixtureTranscript("plain-answer");
+    const store = hydratedStore({ agent: makeAgent(), transcript });
+    await renderWithStore(<Transcript />, store);
+    expect(screen.queryByTestId("live-turn")).toBeNull();
+    const committed = screen.getAllByTestId("turn").at(-1) as HTMLElement;
+    expect(within(committed).getAllByTestId("assistant-text")).toHaveLength(1);
+
+    act(() => {
+      store.setState((s) => ({
+        live: {
+          ...s.live,
+          run: { active: true },
+          streaming: {
+            timestamp: 99,
+            blocks: {
+              0: { type: "thinking", text: "still thinking", done: false },
+              1: { type: "text", text: "more to say", done: false },
+            },
+          },
+        },
+      }));
+    });
+    const live = screen.getByTestId("live-turn");
+    // The last committed turn continues with the streaming blocks.
+    expect(within(live).getAllByTestId("user-message")).toHaveLength(1);
+    expect(within(live).getAllByTestId("assistant-text")).toHaveLength(2);
+    expect(within(live).getByText("more to say")).toBeInTheDocument();
+    expect(
+      within(within(live).getAllByTestId("thinking").at(-1) as HTMLElement).getByText("Thinking"),
+    ).toHaveClass("shimmer");
+
+    act(() => {
+      store.setState((s) => ({
+        live: {
+          ...s.live,
+          streaming: undefined,
+          pendingUser: { role: "user", content: "and another thing", timestamp: 100 },
+        },
+      }));
+    });
+    const turns = screen.getAllByTestId(/^(live-)?turn$/);
+    const pending = turns.at(-1) as HTMLElement;
+    expect(pending).toHaveAttribute("data-testid", "live-turn");
+    expect(within(pending).getByTestId("user-message")).toHaveTextContent("and another thing");
+    expect(within(pending).getByTestId("user-message")).toHaveClass("opacity-70");
+    expect(turns.at(-2)).toHaveAttribute("data-testid", "turn");
+    expect(screen.queryByText("more to say")).toBeNull();
+  });
+
+  it("shows running tools with no committed or streaming call (after a reload)", async () => {
+    const store = hydratedStore({
+      transcript: fixtureTranscript("plain-answer"),
+      live: {
+        ...initialLiveState(),
+        run: { active: true },
+        tools: { t9: { toolName: "bash", args: { command: "sleep 9" }, status: "running" } },
+      },
+    });
+    await renderWithStore(<Transcript />, store);
+    const live = screen.getByTestId("live-turn");
+    expect(within(live).getByTestId("tool-call")).toHaveAttribute("data-status", "running");
   });
 });

@@ -21,6 +21,7 @@ import {
 import { contentText } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import { asRecord, num, str } from "./common";
+import { BodySection } from "./generic";
 
 function Card({
   icon: Icon,
@@ -78,12 +79,11 @@ function WebSearchResultsCard(props: CustomMessageRendererProps) {
         : "Search results";
   return (
     <Card icon={SearchIcon} title={total !== undefined ? `${title} · ${total} sources` : title}>
-      <details>
-        <summary className="cursor-pointer text-muted-foreground select-none">Show results</summary>
+      <BodySection title="Show results">
         <div className="max-h-96 overflow-auto">
           <Markdown text={text(props)} className="text-xs" />
         </div>
-      </details>
+      </BodySection>
     </Card>
   );
 }
@@ -131,10 +131,9 @@ function McpUiIntentCard(props: CustomMessageRendererProps) {
 function McpUiContextCard(props: CustomMessageRendererProps) {
   return (
     <Card icon={PlugIcon} title={<>UI context submitted{origin(props)}</>}>
-      <details>
-        <summary className="cursor-pointer text-muted-foreground select-none">Show context</summary>
+      <BodySection title="Show context">
         <p className="whitespace-pre-wrap break-words">{text(props)}</p>
-      </details>
+      </BodySection>
     </Card>
   );
 }

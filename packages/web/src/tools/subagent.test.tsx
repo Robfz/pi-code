@@ -3,10 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { SubagentResult } from "@/lib/subagent-details";
 import { agentStatus, formatUsage } from "./subagent";
-import { fixtureToolCall, propsAt } from "./testing";
+import { fixtureToolCall, propsAt, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
 
-const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
+const row = () => screen.getByTestId("tool-call");
+const header = () => row().firstElementChild as HTMLElement;
+const expand = () => userEvent.setup().click(header());
+const label = () => rowParts(row());
 
 describe("subagent (subagent fixture)", () => {
   const call = fixtureToolCall("subagent", "spawn");
@@ -16,18 +19,27 @@ describe("subagent (subagent fixture)", () => {
     expect(call.result).toBeDefined();
   });
 
-  it("shows the task before any details arrive", () => {
+  it("shows the task before any details arrive", async () => {
     render(<ToolCallView {...propsAt(call, "start")} />);
-    expect(header()).toHaveTextContent("single · tiny");
+    expect(label()).toMatchObject({
+      icon: "bot",
+      verb: "Running",
+      shimmer: true,
+      target: "1 agent",
+      meta: undefined,
+    });
+    expect(header()).toHaveAttribute("aria-expanded", "false");
+    await expand();
     expect(screen.getByText("Read a.txt and reply with its contents")).toBeInTheDocument();
     expect(screen.getByText("Starting…")).toBeInTheDocument();
   });
 
-  it("live: a running card that picks up nested tool calls and output", () => {
+  it("live: a running card that picks up nested tool calls as rows, and output", async () => {
     const { rerender } = render(<ToolCallView {...propsAt(call, { update: 0 })} />);
+    await expand();
     const card = () => screen.getByTestId("subagent-card");
     expect(card()).toHaveAttribute("data-status", "running");
-    expect(header()).toHaveTextContent("single · tiny · running");
+    expect(label()).toMatchObject({ verb: "Running", target: "1 agent" });
     expect(within(card()).getByText("tiny")).toBeInTheDocument();
     expect(within(card()).getByText("project")).toBeInTheDocument();
     expect(within(card()).getByText("Running…")).toBeInTheDocument();
@@ -36,27 +48,43 @@ describe("subagent (subagent fixture)", () => {
     // Update 2: first turn done, the read call is visible.
     rerender(<ToolCallView {...propsAt(call, { update: 2 })} />);
     expect(card()).toHaveAttribute("data-status", "running");
-    const tools = within(card()).getByTestId("subagent-tools");
-    expect(tools).toHaveTextContent("→ read a.txt");
+    const nested = within(card()).getAllByTestId("nested-tool-call");
+    expect(nested).toHaveLength(1);
+    // Running until the agent's messages hold its result.
+    expect(rowParts(nested[0] as HTMLElement)).toMatchObject({
+      icon: "file-text",
+      verb: "Reading",
+      shimmer: true,
+      target: "a.txt",
+    });
+    // Body-less: no toggle.
+    expect(within(nested[0] as HTMLElement).queryByRole("button")).toBeNull();
     expect(card()).toHaveTextContent("1 turn ↑1.9k ↓171 $0.0028 ctx:2.1k");
 
     // Update 4: the answer streams in, still no duration.
     rerender(<ToolCallView {...propsAt(call, { update: 4 })} />);
     expect(card()).toHaveAttribute("data-status", "running");
     expect(within(card()).getByText(/The contents of a\.txt/)).toBeInTheDocument();
+    expect(rowParts(within(card()).getByTestId("nested-tool-call"))).toMatchObject({
+      verb: "Read",
+      shimmer: false,
+    });
   });
 
   it("final: done card with duration, usage and markdown output (collapsed until expanded)", async () => {
     render(<ToolCallView {...propsAt(call, "end")} />);
-    expect(header()).toHaveTextContent("single · tiny · done");
+    expect(label()).toMatchObject({ verb: "Ran", shimmer: false, target: "1 agent" });
     expect(screen.queryByTestId("subagent-card")).toBeNull();
-    await userEvent.setup().click(header());
+    await expand();
     const card = screen.getByTestId("subagent-card");
     expect(card).toHaveAttribute("data-status", "done");
     expect(within(card).getByLabelText("Done")).toBeInTheDocument();
     expect(within(card).getByText("19.5s")).toBeInTheDocument();
     expect(card).toHaveTextContent("2 turns ↑4.1k ↓224 $0.0052 ctx:2.2k · claude-haiku-4-5");
-    expect(within(card).getByTestId("subagent-tools")).toHaveTextContent("read a.txt");
+    expect(rowParts(within(card).getByTestId("nested-tool-call"))).toMatchObject({
+      verb: "Read",
+      target: "a.txt",
+    });
     expect(await within(card).findByText(/alpha: the first file/)).toBeInTheDocument();
   });
 });
@@ -74,7 +102,67 @@ function result(patch: Partial<SubagentResult>): SubagentResult {
 }
 
 describe("subagent modes", () => {
-  it("parallel: placeholders run until each task finishes", () => {
+  it("nested calls without a result run while their agent does", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "n1", name: "bash", arguments: { command: "ls" } }],
+      },
+    ];
+    const props = {
+      toolCallId: "n",
+      toolName: "spawn",
+      args: { agent: "scout", task: "look" },
+      isError: false,
+    };
+    const { rerender } = render(
+      <ToolCallView
+        {...props}
+        status="running"
+        partialResult={{
+          content: [],
+          details: { mode: "single", results: [result({ messages, durationMs: undefined })] },
+        }}
+      />,
+    );
+    await expand();
+    const nested = () => rowParts(screen.getByTestId("nested-tool-call"));
+    expect(nested()).toMatchObject({ icon: "square-terminal", verb: "Running", shimmer: true });
+    rerender(
+      <ToolCallView
+        {...props}
+        status="done"
+        result={{
+          content: [],
+          details: {
+            mode: "single",
+            results: [
+              result({
+                durationMs: 10,
+                messages: [
+                  ...messages,
+                  {
+                    role: "toolResult",
+                    toolCallId: "n1",
+                    content: [{ type: "text", text: "boom" }],
+                    isError: true,
+                  },
+                ],
+              }),
+            ],
+          },
+        }}
+      />,
+    );
+    expect(nested()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Command failed",
+      target: "ls",
+      meta: "boom",
+    });
+  });
+
+  it("parallel: placeholders run until each task finishes", async () => {
     const details = {
       mode: "parallel",
       agentScope: "user",
@@ -107,7 +195,12 @@ describe("subagent modes", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("parallel · scout, worker · 1/2 done, 1 running");
+    expect(label()).toMatchObject({
+      verb: "Running",
+      target: "2 agents",
+      meta: "· 1/2 done, 1 running",
+    });
+    await expand();
     const cards = screen.getAllByTestId("subagent-card");
     expect(cards.map((c) => c.dataset.status)).toEqual(["done", "running"]);
     expect(within(cards[0] as HTMLElement).getByText("found it")).toBeInTheDocument();
@@ -146,8 +239,13 @@ describe("subagent modes", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("chain · planner, worker · 1/2 steps");
-    await userEvent.setup().click(header());
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Agents failed",
+      target: "2 agents",
+      meta: "· 1/2 steps · Chain stopped at step 2 (worker): model overloaded",
+    });
+    await expand();
     const cards = screen.getAllByTestId("subagent-card");
     expect(cards.map((c) => c.dataset.status)).toEqual(["done", "failed"]);
     expect(within(cards[0] as HTMLElement).getByText("Step 1")).toBeInTheDocument();
@@ -171,7 +269,7 @@ describe("subagent modes", () => {
         }}
       />,
     );
-    await userEvent.setup().click(header());
+    await expand();
     expect(screen.getByText("Invalid parameters. Provide exactly one mode.")).toBeInTheDocument();
   });
 

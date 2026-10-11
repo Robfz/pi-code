@@ -1,21 +1,15 @@
-import type { StreamingBlock } from "@pi-code/protocol";
+import type { StreamingBlock, StreamingMessage, ToolRun } from "@pi-code/protocol";
 import { CircleAlertIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Markdown } from "@/components/markdown";
 import { useConversation } from "@/store/context";
 import {
   selectActiveBranch,
   selectBash,
   selectBranchToolCallIds,
-  selectPendingUser,
   selectRun,
-  selectStreaming,
-  selectTools,
 } from "@/store/selectors";
+import { blockKey, type Step } from "@/store/turns";
 import { BashExecutionView, bashFromResult } from "./bash-execution";
-import { Thinking } from "./thinking";
-import { ToolCallSlot } from "./tool-call-slot";
-import { UserMessageView } from "./user-message";
 
 function sortedBlocks(blocks: Record<number, StreamingBlock>): [number, StreamingBlock][] {
   return Object.entries(blocks)
@@ -23,54 +17,87 @@ function sortedBlocks(blocks: Record<number, StreamingBlock>): [number, Streamin
     .sort((a, b) => a[0] - b[0]);
 }
 
-/** The assistant message in flight. Only this subtree re-renders on token deltas. */
-export function StreamingMessage() {
-  const streaming = useConversation(selectStreaming);
-  if (streaming === undefined) return null;
-  const blocks = sortedBlocks(streaming.blocks);
-  return (
-    <div data-testid="streaming-message" className="flex min-w-0 flex-col gap-2">
-      {blocks.map(([index, block]) => {
-        switch (block.type) {
-          case "text":
-            return <Markdown key={index} text={block.text} streaming={!block.done} />;
-          case "thinking":
-            return <Thinking key={index} text={block.text} live={!block.done} />;
-          case "toolCall":
-            return (
-              <ToolCallSlot
-                key={block.id || `pending-${index}`}
-                toolCallId={block.id}
-                toolName={block.name}
-                args={block.call?.arguments}
-                argsText={block.argsText}
-                streaming={block.call === undefined}
-              />
-            );
-          default:
-            return null;
-        }
-      })}
-    </div>
-  );
+/** The steps of the assistant message in flight. */
+function streamingSteps(streaming: StreamingMessage | undefined): Step[] {
+  if (streaming === undefined) return [];
+  return sortedBlocks(streaming.blocks).flatMap(([index, block]): Step[] => {
+    const key = blockKey(streaming.timestamp, index);
+    switch (block.type) {
+      case "text":
+        return block.text.trim() === ""
+          ? []
+          : [{ kind: "text", key, text: block.text, streaming: !block.done }];
+      case "thinking":
+        return block.done && block.text.trim() === ""
+          ? []
+          : [
+              {
+                kind: "thinking",
+                key,
+                text: block.text,
+                redacted: false,
+                live: !block.done,
+                startedAt: block.startedAt,
+                endedAt: block.endedAt,
+              },
+            ];
+      case "toolCall":
+        return [
+          {
+            kind: "tool",
+            key: block.id || `pending-${index}`,
+            toolCallId: block.id,
+            toolName: block.name,
+            args: block.call?.arguments,
+            argsText: block.argsText,
+            streaming: block.call === undefined,
+          },
+        ];
+      default:
+        return [];
+    }
+  });
 }
 
-/** Tools running with no call in the transcript or the streaming message (e.g. after reload). */
-function OrphanTools() {
-  const tools = useConversation(selectTools);
-  const committedIds = useConversation(selectBranchToolCallIds);
-  const streamingIds = useConversation((s) =>
-    Object.values(s.live.streaming?.blocks ?? {})
-      .flatMap((b) => (b.type === "toolCall" ? [b.id] : []))
-      .join("\n"),
+const NO_TOOLS: Record<string, ToolRun> = {};
+const NO_IDS = new Set<string>();
+const NO_STEPS: Step[] = [];
+
+/**
+ * What the live turn adds to its committed steps: the streaming message's blocks, then tools
+ * running with no call in the transcript or the streaming message (e.g. after a reload).
+ * `enabled` only for the transcript's last turn; the others subscribe to constants, so token
+ * deltas re-render that turn alone.
+ */
+export function useLiveSteps(enabled: boolean): { active: boolean; steps: Step[] } {
+  const active = useConversation(
+    (s) =>
+      enabled &&
+      (s.live.run.active || s.live.streaming !== undefined || s.live.pendingUser !== undefined),
   );
-  const orphans = useMemo(() => {
-    const streamingSet = new Set(streamingIds.split("\n"));
-    return Object.entries(tools).filter(([id]) => !committedIds.has(id) && !streamingSet.has(id));
-  }, [tools, committedIds, streamingIds]);
-  return orphans.map(([id, run]) => (
-    <ToolCallSlot key={id} toolCallId={id} toolName={run.toolName} args={run.args} />
-  ));
+  const streaming = useConversation((s) => (enabled ? s.live.streaming : undefined));
+  const tools = useConversation((s) => (enabled ? s.live.tools : NO_TOOLS));
+  const committedIds = useConversation((s) => (enabled ? selectBranchToolCallIds(s) : NO_IDS));
+  const steps = useMemo(() => {
+    const fromStreaming = streamingSteps(streaming);
+    const streamingIds = new Set(
+      fromStreaming.flatMap((step) => (step.kind === "tool" ? [step.toolCallId] : [])),
+    );
+    const orphans = Object.entries(tools)
+      .filter(([id]) => !committedIds.has(id) && !streamingIds.has(id))
+      .map(
+        ([id, run]): Step => ({
+          kind: "tool",
+          key: id,
+          toolCallId: id,
+          toolName: run.toolName,
+          args: run.args,
+        }),
+      );
+    const all = [...fromStreaming, ...orphans];
+    return all.length > 0 ? all : NO_STEPS;
+  }, [streaming, tools, committedIds]);
+  return { active, steps };
 }
 
 /** `!` / `!!` commands in flight (committed as `bashExecution` entries when done). */
@@ -145,14 +172,10 @@ function RunStatus() {
   return null;
 }
 
-/** Live, not-yet-committed part of the conversation. */
+/** After the turns: `!cmd` runs in flight and the run's status. */
 export function LiveSection() {
-  const pendingUser = useConversation(selectPendingUser);
   return (
     <div data-testid="live" className="flex flex-col gap-4 empty:hidden">
-      {pendingUser && <UserMessageView message={pendingUser} pending />}
-      <StreamingMessage />
-      <OrphanTools />
       <BashRuns />
       <RunStatus />
     </div>

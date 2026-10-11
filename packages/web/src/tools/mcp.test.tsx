@@ -1,13 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { genericToolRenderer } from "./generic";
 import { getToolRenderer } from "./index";
 import { describeMcpCall, isMcpNamespaceTool, mcpRenderer } from "./mcp";
+import { rowBody, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
 
-const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
+const row = () => screen.getByTestId("tool-call");
+const header = () => row().firstElementChild as HTMLElement;
 const expand = () => userEvent.setup().click(header());
+const showArguments = () =>
+  userEvent.setup().click(screen.getByRole("button", { name: "Arguments" }));
 
 describe("mcp renderers", () => {
   it("routes mcp and mcp__<server> tools to the MCP renderer", () => {
@@ -18,8 +22,23 @@ describe("mcp renderers", () => {
     expect(getToolRenderer("linear_list_issues")).toBe(genericToolRenderer);
   });
 
-  it("namespace tool: server · tool, arguments and JSON result", async () => {
-    render(
+  it("namespace tool: running row, then server · tool, arguments and JSON result", async () => {
+    const { rerender } = render(
+      <ToolCallView
+        toolCallId="m1"
+        toolName="mcp__linear"
+        args={{ tool: "list_issues", args: { team: "ENG", limit: 5 } }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(rowParts(row())).toMatchObject({
+      icon: "plug",
+      verb: "Calling",
+      shimmer: true,
+      target: "linear · list_issues",
+    });
+    rerender(
       <ToolCallView
         toolCallId="m1"
         toolName="mcp__linear"
@@ -32,9 +51,14 @@ describe("mcp renderers", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("mcp__linearlinear · list_issues");
+    expect(rowParts(row())).toMatchObject({
+      verb: "Called",
+      shimmer: false,
+      target: "linear · list_issues",
+      meta: undefined,
+    });
     await expand();
-    expect(screen.getByText("Arguments")).toBeInTheDocument();
+    await showArguments();
     expect(screen.getByText(/"team": "ENG"/)).toBeInTheDocument();
     expect(screen.getByText(/"id": "ENG-1"/)).toBeInTheDocument();
   });
@@ -70,9 +94,16 @@ describe("mcp renderers", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("nope");
+    expect(rowParts(row())).toMatchObject({
+      icon: "circle-alert",
+      verb: "Call failed",
+      target: "nope",
+      meta: 'Tool "nope" not found.',
+    });
     await expand();
-    expect(screen.getByText('Tool "nope" not found.')).toHaveClass("text-destructive");
+    expect(within(rowBody(row())).getByText('Tool "nope" not found.')).toHaveClass(
+      "text-destructive",
+    );
   });
 
   it("unrecognised namespace call falls back to the generic rendering", async () => {
@@ -86,7 +117,11 @@ describe("mcp renderers", () => {
         result={{ content: [{ type: "text", text: "mcp__weird requires a `tool` parameter" }] }}
       />,
     );
-    expect(header()).toHaveTextContent("something odd"); // generic summary hint
+    expect(rowParts(row())).toMatchObject({
+      icon: "wrench",
+      verb: "mcp__weird",
+      target: "something odd", // the generic label
+    });
     await expand();
     expect(screen.getByText("Arguments")).toBeInTheDocument();
     expect(screen.getByText("mcp__weird requires a `tool` parameter")).toBeInTheDocument();
@@ -107,6 +142,7 @@ describe("mcp renderers", () => {
       />,
     );
     await expand();
+    await showArguments();
     expect(screen.getByText(/"nodeId": "1:2"/)).toBeInTheDocument();
     expect(screen.getByText("node data")).toBeInTheDocument();
   });
