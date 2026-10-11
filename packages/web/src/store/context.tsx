@@ -1,5 +1,5 @@
 import type { AgentInfo } from "@pi-code/protocol";
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { ConversationState, ConversationStore } from "./conversation-store";
@@ -28,6 +28,17 @@ export function useConversationStore(): ConversationStore {
 /** Subscribe to a slice of the current conversation (`useConversation(s => s.live.streaming)`). */
 export function useConversation<T>(selector: (state: ConversationState) => T): T {
   return useStore(useConversationStore(), selector);
+}
+
+const noSubscription = () => () => {};
+
+/** The current conversation's cwd; "" outside a conversation (a row rendered on its own). */
+export function useConversationCwd(): string {
+  const store = useContext(ConversationStoreContext);
+  return useSyncExternalStore(
+    store?.subscribe ?? noSubscription,
+    () => store?.getState().agent.cwd ?? "",
+  );
 }
 
 const LiveRegistryContext = createContext<LiveRegistry | null>(null);

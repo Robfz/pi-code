@@ -1,0 +1,127 @@
+/*
+ * The diff viewer on the design's tokens (`docs/design/09-ui-overhaul.md`): `--card` rows,
+ * hairline borders, `diff-add` / `diff-del` tints, and the Vitesse colours of the transcript's
+ * code blocks instead of the library's GitHub highlighting. Imported right after the library's
+ * stylesheet, so equal selectors win by order.
+ */
+.diff-tailwindcss-wrapper[data-theme] .diff-style-root {
+  --diff-border--: var(--border);
+  --diff-plain-content--: var(--card);
+  --diff-plain-lineNumber--: var(--card);
+  --diff-plain-lineNumber-color--: var(--faint-foreground);
+  --diff-expand-content--: var(--card);
+  --diff-expand-lineNumber--: var(--card);
+  --diff-expand-lineNumber-color--: var(--faint-foreground);
+  --diff-empty-content--: var(--card);
+  --diff-add-content--: color-mix(in oklab, var(--diff-add) 10%, var(--card));
+  --diff-add-lineNumber--: color-mix(in oklab, var(--diff-add) 16%, var(--card));
+  --diff-add-content-highlight--: color-mix(in oklab, var(--diff-add) 28%, var(--card));
+  --diff-del-content--: color-mix(in oklab, var(--diff-del) 10%, var(--card));
+  --diff-del-lineNumber--: color-mix(in oklab, var(--diff-del) 16%, var(--card));
+  --diff-del-content-highlight--: color-mix(in oklab, var(--diff-del) 28%, var(--card));
+  --diff-hunk-content--: color-mix(in oklab, var(--foreground) 4%, var(--card));
+  --diff-hunk-lineNumber--: color-mix(in oklab, var(--foreground) 6%, var(--card));
+  --diff-hunk-lineNumber-hover--: var(--muted-foreground);
+  --diff-hunk-content-color--: var(--muted-foreground);
+}
+
+/* Vitesse light / dark (the mockup's syntax tokens). */
+.diff-tailwindcss-wrapper[data-theme="light"] {
+  --vt-fg: #393a34;
+  --vt-keyword: #1e754f;
+  --vt-string: #b56959;
+  --vt-function: #59873a;
+  --vt-comment: #a0ada0;
+  --vt-number: #2f798a;
+  --vt-property: #998418;
+  --vt-variable: #b07d48;
+  --vt-type: #2e8f82;
+  --vt-punctuation: #999999;
+}
+.diff-tailwindcss-wrapper[data-theme="dark"] {
+  --vt-fg: #dbd7cacc;
+  --vt-keyword: #4d9375;
+  --vt-string: #c98a7d;
+  --vt-function: #80a665;
+  --vt-comment: #758575;
+  --vt-number: #4c9a91;
+  --vt-property: #b8a965;
+  --vt-variable: #bd976a;
+  --vt-type: #5da994;
+  --vt-punctuation: #666f78;
+}
+.diff-tailwindcss-wrapper[data-theme] [data-state="diff"],
+.diff-tailwindcss-wrapper[data-theme] [data-state="plain"],
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-subst,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-emphasis,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-strong {
+  color: var(--vt-fg);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs {
+  color: var(--vt-fg);
+  background: none;
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-doctag,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-keyword,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-meta .hljs-keyword,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-template-tag,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-template-variable,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-variable.language_,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-literal,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-selector-tag {
+  color: var(--vt-keyword);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-type,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-built_in,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-title.class_,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-title.class_.inherited__,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-name {
+  color: var(--vt-type);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-title,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-title.function_,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-section {
+  color: var(--vt-function);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-string,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-regexp,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-meta .hljs-string,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-quote {
+  color: var(--vt-string);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-number,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-symbol,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-bullet {
+  color: var(--vt-number);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-attr,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-attribute,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-property,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-selector-attr,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-selector-class,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-selector-id,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-selector-pseudo,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-meta {
+  color: var(--vt-property);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-variable,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-params {
+  color: var(--vt-variable);
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-comment,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-code,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-formula {
+  color: var(--vt-comment);
+  font-style: italic;
+}
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-punctuation,
+.diff-tailwindcss-wrapper[data-theme] .diff-line-syntax-raw .hljs-operator {
+  color: var(--vt-punctuation);
+}
+
+/* Wrapped lines break between words where they can (the library sets `break-all` inline). */
+.diff-tailwindcss-wrapper .diff-line-content-item {
+  /* biome-ignore lint/complexity/noImportantStyles: only !important beats the inline style */
+  word-break: normal !important;
+  overflow-wrap: anywhere;
+}

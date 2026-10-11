@@ -89,7 +89,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const longest = Math.max(2, ...(code.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(longest + 1);
   return (
-    <div className="max-h-96 overflow-auto" data-testid="code-block" data-lang={lang}>
+    <div className="tool-code max-h-96 overflow-auto" data-testid="code-block" data-lang={lang}>
       <Markdown text={`${fence}${lang}\n${code.replace(/\n$/, "")}\n${fence}`} />
     </div>
   );

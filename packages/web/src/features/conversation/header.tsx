@@ -56,7 +56,7 @@ function DensityMenu() {
           <ChevronDownIcon className="-ml-0.5 size-3 text-faint-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-62 rounded-xl p-[5px]">
+      <DropdownMenuContent align="end" className="w-70 rounded-xl p-[5px]">
         <DropdownMenuLabel className="px-2 pt-1.5 pb-1 font-normal text-faint-foreground">
           Transcript density
         </DropdownMenuLabel>

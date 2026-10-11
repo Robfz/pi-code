@@ -55,8 +55,8 @@ export function OutputBlock({ text, error = false }: { text: string; error?: boo
   return (
     <pre
       className={cn(
-        "max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-xs",
-        error && "bg-destructive/10 text-destructive",
+        "max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.6] text-subtle-foreground",
+        error && "text-destructive",
       )}
     >
       {text}

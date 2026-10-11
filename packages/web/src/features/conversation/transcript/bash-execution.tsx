@@ -68,7 +68,7 @@ export function BashExecutionView({
       {hasBody && (
         <div className="mt-0.5 mb-2 flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5">
           {lines > 0 && (
-            <pre className="max-h-96 overflow-auto font-mono text-xs whitespace-pre-wrap break-words">
+            <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-[1.6] tracking-[-0.01em] whitespace-pre-wrap break-words text-subtle-foreground">
               {output}
             </pre>
           )}

@@ -62,7 +62,7 @@ No component uses raw palette classes (`emerald-*`, `amber-*`, `red-*`, `green-*
 
 ## Typography
 
-Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontsource-variable/geist-mono`) for code, commands and search patterns. File paths in tool rows are sans. Both are bundled and precached by the service worker (the `woff2` precache glob), so text looks the same on every device and offline.
+Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontsource-variable/geist-mono`) for code, commands and search patterns. File paths in tool rows are sans. Text renders with grayscale antialiasing (`antialiased` on `body`). Both are bundled and precached by the service worker (the `woff2` precache glob), so text looks the same on every device and offline.
 
 ```css
 --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
@@ -89,7 +89,7 @@ Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontso
 
 ## Code and links
 
-- Shiki themes are `vitesse-light` / `vitesse-dark` (`lib/code-highlighter.ts`).
+- Shiki themes are `vitesse-light` / `vitesse-dark` (`lib/code-highlighter.ts`). The diff viewer (`components/diff/diff-theme.css`) uses the same Vitesse colours for its highlighting, `--card` rows, hairline borders and `diff-add` / `diff-del` tints; wrapped diff lines break between words where they can.
 - Code blocks (Streamdown's `[data-streamdown="code-block"]`) sit on `--card` with a hairline border and 8px radius, under a 32px header holding the language (12px muted) and a copy button; the body is 13px mono, line height 1.6, scrolling horizontally.
 - Inline code is a mono chip: 0.875em on `--chip`, 5px radius.
 - Links are `text-link`, underlined on hover.
@@ -167,10 +167,10 @@ A full-column-width box: `--user-message` surface, 1px hairline, 10px radius, 11
 
 - **Icon:** 14px lucide, `faint-foreground`.
 - **Verb:** weight 500, `foreground`. Running or streaming: present tense with `shimmer`. Done: past tense, quiet. Failed: the icon becomes `CircleAlert` and the verb turns `status-error` ("Edit failed").
-- **Target:** a path is its basename in `foreground` followed by its directory in `faint-foreground` (directory hidden below 1024px); a command or pattern is mono 12.5px `subtle-foreground`; other text is `foreground`. Truncated with an ellipsis.
+- **Target:** a path is its basename in `foreground` followed by its directory in `faint-foreground` (directory hidden below 1024px; relative to the conversation's folder when inside it); a command or pattern is mono 12.5px `subtle-foreground`; other text is `foreground`. Truncated with an ellipsis.
 - **Meta:** `muted-foreground`, tabular numbers; `+n −m` in diff colours. A failed call appends the first line of its error.
 - **Duration:** `faint-foreground` 12px in the tail: committed calls use `toolResult.durationMs`, live ones `ToolRun.durationMs`, running ones the elapsed time since `ToolRun.startedAt`; none when unknown.
-- **Body:** the renderer's `Body` in a bordered `--card` surface, 8px radius. A call with a curator URL shows its Review button under the row while collapsed.
+- **Body:** the renderer's `Body` in a bordered `--card` surface, 8px radius, without nested boxes. `read` code and `edit` / `write` diffs fill it edge to edge (no inner frame or header; the copy button shows on hover); `bash` is one terminal surface: the command after a faint `$`, the output in `subtle-foreground`, then `exit N` (faint, `status-error` when non-zero). A call with a curator URL shows its Review button under the row while collapsed.
 
 Each renderer describes its row through `label()`:
 

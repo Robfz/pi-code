@@ -2,6 +2,8 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FileTextIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConversationStoreProvider } from "@/store/context";
+import { hydratedStore } from "@/test/render";
 import type { ToolLabel, ToolStatus } from "./registry";
 import { rowParts } from "./testing";
 import { ToolRow } from "./tool-row";
@@ -39,6 +41,27 @@ describe("ToolRow", () => {
     });
     // The directory is faint and hidden below 1024px.
     expect(screen.getByText("src")).toHaveClass("text-faint-foreground", "hidden", "lg:inline");
+  });
+
+  it("reads a path inside the conversation's folder relative to it", () => {
+    const store = hydratedStore();
+    const cwd = store.getState().agent.cwd;
+    render(
+      <ConversationStoreProvider store={store}>
+        <ToolRow
+          data-testid="row"
+          label={{ ...label, target: { kind: "path", text: `${cwd}/src/tools/foo.ts` } }}
+          status="done"
+        />
+        <ToolRow
+          data-testid="outside"
+          label={{ ...label, target: { kind: "path", text: "/etc/hosts" } }}
+          status="done"
+        />
+      </ConversationStoreProvider>,
+    );
+    expect(rowParts(row()).target).toBe("foo.tssrc/tools");
+    expect(rowParts(screen.getByTestId("outside")).target).toBe("hosts/etc");
   });
 
   it("a failed call: alert icon, red verb, the error's first line after the meta", () => {

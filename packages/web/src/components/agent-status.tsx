@@ -3,7 +3,7 @@ import {
   CircleDashedIcon,
   CircleIcon,
   CircleXIcon,
-  LoaderIcon,
+  LoaderCircleIcon,
   type LucideIcon,
   MessageCircleQuestionIcon,
 } from "lucide-react";
@@ -20,7 +20,10 @@ const DOT: Record<Exclude<AgentStatusKind, "working" | "closed">, string> = {
 
 const BADGE: Record<AgentStatusKind, { icon: LucideIcon; className: string }> = {
   input: { icon: MessageCircleQuestionIcon, className: "text-status-input" },
-  working: { icon: LoaderIcon, className: "text-status-working [&>svg]:text-muted-foreground" },
+  working: {
+    icon: LoaderCircleIcon,
+    className: "text-status-working [&>svg]:text-muted-foreground",
+  },
   failed: { icon: CircleXIcon, className: "text-status-error" },
   finished: { icon: CircleCheckIcon, className: "text-status-done" },
   closed: { icon: CircleDashedIcon, className: "text-muted-foreground" },
@@ -34,7 +37,7 @@ export function StatusMark({ status }: { status: AgentStatusKind }) {
   if (status === "working") {
     return (
       <span role="img" aria-label={label} title={label} className="flex">
-        <LoaderIcon aria-hidden className="size-3 animate-spin text-muted-foreground" />
+        <LoaderCircleIcon aria-hidden className="size-3 animate-spin text-muted-foreground" />
       </span>
     );
   }

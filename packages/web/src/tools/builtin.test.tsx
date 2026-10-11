@@ -150,7 +150,7 @@ describe("bash", () => {
     await expand();
     expect(screen.getByText("tick")).toBeInTheDocument();
     expect(screen.getByText("(timeout 10s)")).toBeInTheDocument();
-    expect(screen.getByText("exit 0")).toBeInTheDocument();
+    expect(screen.getByText("exit 0")).toHaveClass("text-faint-foreground");
   });
 
   it("aborted command (abort fixture)", async () => {
@@ -182,6 +182,7 @@ describe("bash", () => {
     });
     await expand();
     expect(within(body()).getByText("oops")).not.toHaveClass("text-destructive");
+    expect(within(body()).getByText("exit 2")).toHaveClass("text-status-error");
   });
 
   it("bashOutcome", () => {

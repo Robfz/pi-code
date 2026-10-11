@@ -94,8 +94,8 @@ function Row({
     <li
       data-testid="sidebar-row"
       className={cn(
-        "flex min-w-0 items-center rounded-md hover:bg-muted/60",
-        current && "bg-muted font-medium",
+        "flex min-w-0 items-center rounded-md text-subtle-foreground hover:bg-accent hover:text-foreground",
+        current && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
       )}
     >
       {live ? (
@@ -166,13 +166,13 @@ function Group({
           nested ? "pt-1.5" : "pt-3",
         )}
       >
-        {/* The label keeps its width (truncating only past the whole line); the branch gets the rest. */}
+        {/* The branch gives way first; the label truncates only once the branch is gone. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <ListingGroupIcon kind={kind} />
           <Heading
             id={headingId}
             className={cn(
-              "max-w-full shrink-0 truncate text-foreground/80",
+              "min-w-0 truncate text-foreground/80",
               nested ? "font-normal" : "font-medium",
             )}
             title={path}
@@ -180,7 +180,10 @@ function Group({
             {label}
           </Heading>
           {branch !== undefined && (
-            <span className="flex min-w-0 items-center gap-0.5 overflow-hidden" title="Branch">
+            <span
+              className="flex min-w-0 shrink-1000 items-center gap-0.5 overflow-hidden"
+              title="Branch"
+            >
               <GitBranchIcon aria-hidden className="size-3 shrink-0" />
               <span className="truncate font-mono">{branch}</span>
             </span>

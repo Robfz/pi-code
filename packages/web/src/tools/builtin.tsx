@@ -11,8 +11,8 @@ import {
   SquareTerminalIcon,
   TextSearchIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { toolResultText } from "@/lib/content";
+import { cn } from "@/lib/utils";
 import {
   argPath,
   CodeBlock,
@@ -66,14 +66,30 @@ function ReadBody({ args, status, result, isError }: ToolRendererProps) {
   if (isError) return <ErrorOutput result={result} />;
   const images = resultImages(result);
   const { body, notice } = splitNotice(toolResultText(result));
+  const code = body !== "" && (images.length === 0 || body.trim() !== "");
+  if (!code) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Images images={images} />
+        {body === "" && images.length === 0 && <Notice>Empty file</Notice>}
+        {notice && <Notice>{notice}</Notice>}
+      </div>
+    );
+  }
+  // The code fills the body edge to edge; images and the notice keep the body's padding.
   return (
-    <div className="flex flex-col gap-2">
-      <Images images={images} />
-      {body !== "" && (images.length === 0 || body.trim() !== "") && (
-        <CodeBlock code={body} lang={langFromPath(argPath(args))} />
+    <div data-flush className="flex flex-col">
+      {images.length > 0 && (
+        <div className="border-b px-3 py-2.5">
+          <Images images={images} />
+        </div>
       )}
-      {body === "" && images.length === 0 && <Notice>Empty file</Notice>}
-      {notice && <Notice>{notice}</Notice>}
+      <CodeBlock code={body} lang={langFromPath(argPath(args))} />
+      {notice && (
+        <div className="border-t px-3 py-1.5">
+          <Notice>{notice}</Notice>
+        </div>
+      )}
     </div>
   );
 }
@@ -113,12 +129,12 @@ export function bashOutcome(
   return { output: text };
 }
 
-function OutcomeBadge({ outcome }: { outcome: BashOutcome }) {
-  if (outcome.kind === "aborted") return <Badge variant="outline">aborted</Badge>;
-  if (outcome.kind === "timeout") return <Badge variant="destructive">timed out</Badge>;
-  return (
-    <Badge variant={outcome.code === 0 ? "secondary" : "destructive"}>exit {outcome.code}</Badge>
-  );
+function outcomeText(outcome: BashOutcome): string {
+  if (outcome.kind === "aborted") return "aborted";
+  if (outcome.kind === "timeout") {
+    return outcome.seconds !== undefined ? `timed out after ${outcome.seconds}s` : "timed out";
+  }
+  return `exit ${outcome.code}`;
 }
 
 function bashLabel({ args, status, result, isError }: ToolRendererProps): ToolLabel {
@@ -141,11 +157,13 @@ function BashBody({ args, status, partialResult, result, isError }: ToolRenderer
     ? { outcome: undefined, output: text }
     : bashOutcome(text, isError);
   const details = (live ? undefined : result?.details) as BashToolDetails | undefined;
-  const shown = output.replace(/\n$/, "");
+  const shown = output.replace(/\n+$/, "");
+  const failed = outcome !== undefined && !(outcome.kind === "exit" && outcome.code === 0);
+  // One terminal surface: the command, its output and the outcome, without nested boxes.
   return (
-    <div className="flex flex-col gap-2">
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs">
-        <Muted>$ </Muted>
+    <div className="flex flex-col gap-1.5 font-mono text-[12.5px] leading-[1.6] tracking-[-0.01em]">
+      <pre className="whitespace-pre-wrap break-words text-foreground">
+        <span className="text-faint-foreground">$ </span>
         {command}
         {timeout !== undefined && <Muted> (timeout {timeout}s)</Muted>}
       </pre>
@@ -153,14 +171,14 @@ function BashBody({ args, status, partialResult, result, isError }: ToolRenderer
         <OutputBlock text={shown} error={!live && isError && outcome === undefined} />
       )}
       {shown === "" && live && isActive(status) && <Pending label="Waiting for output…" />}
-      {shown === "" && !live && <Notice>No output</Notice>}
+      {shown === "" && !live && <p className="text-faint-foreground">No output</p>}
       {outcome && (
-        <div className="flex items-center gap-2">
-          <OutcomeBadge outcome={outcome} />
-          {outcome.kind === "timeout" && outcome.seconds !== undefined && (
-            <Notice>after {outcome.seconds}s</Notice>
-          )}
-        </div>
+        <p
+          data-testid="bash-outcome"
+          className={cn(failed ? "text-status-error" : "text-faint-foreground")}
+        >
+          {outcomeText(outcome)}
+        </p>
       )}
       {details?.truncation?.truncated && (
         <Notice>
@@ -241,7 +259,7 @@ function SearchBody({ status, result, isError }: ToolRendererProps) {
       ) : (
         <ul
           data-testid="result-list"
-          className="max-h-80 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs"
+          className="max-h-80 overflow-auto font-mono text-xs leading-[1.6] text-subtle-foreground"
         >
           {items.map((item, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: result lines may repeat

@@ -82,7 +82,7 @@ export function Thinking({
       bodyClassName="lg:pl-0"
     >
       <div className="mt-0.5 mb-2.5 ml-1.5 border-l border-input py-0.5 pl-[15px] text-sm leading-[1.6] whitespace-pre-wrap break-words text-muted-foreground">
-        {text}
+        {text.trim()}
       </div>
     </CollapsibleRow>
   );

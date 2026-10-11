@@ -1,4 +1,4 @@
-import { FolderIcon, GitBranchIcon, LoaderIcon } from "lucide-react";
+import { FolderIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { baseName } from "@/lib/content";
 import { formatCost } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -62,7 +62,8 @@ export function RunIndicator() {
       data-testid="run-indicator"
       className="flex shrink-0 items-center gap-1.5 text-foreground"
     >
-      <LoaderIcon aria-hidden className="size-[11px] animate-spin text-muted-foreground" /> Working
+      <LoaderCircleIcon aria-hidden className="size-[11px] animate-spin text-muted-foreground" />{" "}
+      Working
     </span>
   );
 }

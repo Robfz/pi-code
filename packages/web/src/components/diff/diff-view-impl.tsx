@@ -4,6 +4,7 @@
  */
 
 import "@git-diff-view/react/styles/diff-view-pure.css";
+import "./diff-theme.css";
 import {
   DiffModeEnum,
   DiffView,

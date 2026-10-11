@@ -161,7 +161,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
   }
   html {
     @apply font-sans;
@@ -238,6 +238,15 @@
   font-size: 1em;
   line-height: 1.5;
 }
+.markdown ul,
+.markdown ol {
+  padding-left: 1.35em;
+  list-style-position: outside;
+}
+.markdown li {
+  margin: 0.3em 0;
+  padding: 0 0 0 0.15em;
+}
 .markdown li::marker {
   color: var(--faint-foreground);
 }
@@ -247,6 +256,8 @@
   background: var(--chip);
   font-size: 0.875em;
   letter-spacing: -0.01em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 /* A line reference inside inline code takes the code chip's metrics. */
 .markdown code [data-code-ref] {
@@ -317,4 +328,45 @@
 }
 .markdown > :last-child {
   margin-bottom: 0;
+}
+
+/*
+ * Tool bodies (`tools/tool-row.tsx`). Code and diffs fill the body edge to edge: the body drops
+ * its padding for a `[data-flush]` child (the read body) or a diff viewer, and neither draws a
+ * frame of its own inside the body's.
+ */
+[data-slot="tool-body"]:has(> [data-flush], > [data-testid="diff-viewer"]) {
+  padding: 0;
+}
+[data-slot="tool-body"] > [data-testid="diff-viewer"] {
+  border: 0;
+  border-radius: 0;
+}
+.tool-code [data-streamdown="code-block"] {
+  position: relative;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.tool-code [data-streamdown="code-block-header"] {
+  display: none;
+}
+/* The copy button floats over the code's top right corner, shown on hover. */
+.tool-code [data-streamdown="code-block-header"] + div:not([data-streamdown]) {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.tool-code:hover [data-streamdown="code-block-header"] + div:not([data-streamdown]),
+.tool-code:focus-within [data-streamdown="code-block-header"] + div:not([data-streamdown]) {
+  opacity: 1;
+}
+.tool-code [data-streamdown="code-block-body"] {
+  padding: 10px 14px;
+  font-size: 12.5px;
 }

@@ -2,10 +2,11 @@ import { CircleAlertIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { toolResultText } from "@/lib/content";
-import { splitPath } from "@/lib/paths";
+import { cwdRelative, splitPath } from "@/lib/paths";
 import { formatDuration, formatSeconds } from "@/lib/time";
 import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
+import { useConversationCwd } from "@/store/context";
 import { CuratorButton, isActive } from "./common";
 import type { ToolLabel, ToolResultPayload, ToolStatus } from "./registry";
 
@@ -32,18 +33,21 @@ export function errorLine(result: ToolResultPayload | undefined): string | undef
     .find((line) => line !== "");
 }
 
+function PathTarget({ path }: { path: string }) {
+  // Directories inside the conversation's folder read relative to it.
+  const { base, dir } = splitPath(cwdRelative(path, useConversationCwd()));
+  return (
+    <span data-slot="row-target" className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
+      <span className="shrink-0 text-foreground">{base}</span>
+      {dir && (
+        <span className="hidden min-w-0 truncate text-faint-foreground lg:inline">{dir}</span>
+      )}
+    </span>
+  );
+}
+
 function Target({ target }: { target: NonNullable<ToolLabel["target"]> }) {
-  if (target.kind === "path") {
-    const { base, dir } = splitPath(target.text);
-    return (
-      <span data-slot="row-target" className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
-        <span className="shrink-0 text-foreground">{base}</span>
-        {dir && (
-          <span className="hidden min-w-0 truncate text-faint-foreground lg:inline">{dir}</span>
-        )}
-      </span>
-    );
-  }
+  if (target.kind === "path") return <PathTarget path={target.text} />;
   if (target.kind === "code") {
     return (
       <span
@@ -128,7 +132,10 @@ export function ToolRow({
       }
     >
       {children !== undefined && children !== null && (
-        <div className="mt-0.5 mb-2 min-w-0 overflow-hidden rounded-lg border bg-card px-3 py-2.5">
+        <div
+          data-slot="tool-body"
+          className="mt-0.5 mb-2 min-w-0 overflow-hidden rounded-lg border bg-card px-3 py-2.5"
+        >
           {children}
         </div>
       )}
