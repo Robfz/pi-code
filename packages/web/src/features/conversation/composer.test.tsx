@@ -1,7 +1,8 @@
-import { initialLiveState, type LiveState } from "@pi-code/protocol";
+import { formatFileBlock, initialLiveState, type LiveState } from "@pi-code/protocol";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useDrafts } from "@/store/drafts";
 import { makeAgent } from "@/test/fixtures";
 import { hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { Composer } from "./composer";
@@ -19,6 +20,20 @@ afterEach(() => {
 });
 
 describe("Composer", () => {
+  it("has a round Attach file button and a Send button enabled by a draft", async () => {
+    stubFetch();
+    await renderWithStore(<Composer />, hydratedStore());
+    expect(screen.getByRole("button", { name: "Attach file" })).toHaveClass("rounded-full");
+    expect(screen.getByTitle("Model and thinking")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toHaveClass("rounded-full", "disabled:bg-chip");
+    expect(send).toBeDisabled();
+    await userEvent.setup().type(screen.getByRole("textbox", { name: "Message" }), "hi");
+    expect(send).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Queue" })).toBeNull();
+  });
+
   it("sends a prompt when idle and clears the text", async () => {
     const { calls } = stubFetch(() => [200, { data: undefined }]);
     await renderWithStore(<Composer />, hydratedStore());
@@ -77,6 +92,57 @@ describe("Composer", () => {
   describe("while running", () => {
     const running = () => hydratedStore({ live: live({ run: { active: true } }) });
 
+    it("shows Stop alone with an empty draft", async () => {
+      stubFetch();
+      await renderWithStore(<Composer />, running());
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: "Queue" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    });
+
+    it("shows Queue, Stop and Steer, in that order, once the draft has text", async () => {
+      stubFetch();
+      await renderWithStore(<Composer />, running());
+      await userEvent.setup().type(screen.getByRole("textbox", { name: "Message" }), "x");
+      const queue = screen.getByRole("button", { name: "Queue" });
+      const stop = screen.getByRole("button", { name: "Stop" });
+      const steer = screen.getByRole("button", { name: "Steer" });
+      expect(queue.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(stop.compareDocumentPosition(steer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows Queue and Steer for an attachment alone and sends it with each", async () => {
+      const { calls } = stubFetch();
+      await renderWithStore(<Composer />, running());
+      const attach = () =>
+        act(() =>
+          useDrafts
+            .getState()
+            .setAttachments("a1", [{ key: "f1", name: "a.txt", kind: "text", text: "A" }]),
+        );
+      attach();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Queue" }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Queue" })).toBeNull());
+      attach();
+      await user.click(screen.getByRole("button", { name: "Steer" }));
+      await waitFor(() =>
+        expect(rpcBodies(calls)).toEqual([
+          {
+            type: "prompt",
+            message: formatFileBlock({ name: "a.txt", text: "A" }),
+            streamingBehavior: "followUp",
+          },
+          {
+            type: "prompt",
+            message: formatFileBlock({ name: "a.txt", text: "A" }),
+            streamingBehavior: "steer",
+          },
+        ]),
+      );
+    });
+
     it("steers and queues with streamingBehavior", async () => {
       const { calls } = stubFetch();
       await renderWithStore(<Composer />, running());
@@ -85,9 +151,9 @@ describe("Composer", () => {
       expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
 
       await user.type(box, "go left");
-      await user.click(screen.getByRole("button", { name: /Steer/ }));
+      await user.click(screen.getByRole("button", { name: "Steer" }));
       await user.type(box, "then this");
-      await user.click(screen.getByRole("button", { name: /Queue/ }));
+      await user.click(screen.getByRole("button", { name: "Queue" }));
       await user.type(box, "enter steers{Enter}");
       await user.type(box, "alt queues{Alt>}{Enter}{/Alt}");
       await waitFor(() =>
@@ -108,7 +174,7 @@ describe("Composer", () => {
       expect(screen.queryByRole("button", { name: /Stop & edit/ })).toBeNull();
     });
 
-    it("Stop & edit clears the queue, aborts, and restores the queued texts", async () => {
+    it("Stop & edit, at the end of the queue display, clears the queue, aborts, and restores the queued texts", async () => {
       const { calls } = stubFetch((call) => {
         const body = call.body as { type?: string } | undefined;
         if (body?.type === "clear_queue") {
@@ -134,7 +200,9 @@ describe("Composer", () => {
       const user = userEvent.setup();
       const box = screen.getByRole("textbox", { name: "Message" });
       await user.type(box, "draft");
-      await user.click(screen.getByRole("button", { name: /Stop & edit/ }));
+      const stopAndEdit = screen.getByRole("button", { name: /Stop & edit/ });
+      expect(screen.getByTestId("queue").nextElementSibling).toBe(stopAndEdit);
+      await user.click(stopAndEdit);
       await waitFor(() =>
         expect(rpcBodies(calls)).toEqual([{ type: "clear_queue" }, { type: "abort" }]),
       );
