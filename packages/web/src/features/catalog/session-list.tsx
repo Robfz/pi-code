@@ -1,4 +1,4 @@
-import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
+import { type AgentInfo, recencyOf, type SessionSummary } from "@pi-code/protocol";
 import { LoaderIcon, MessageSquareIcon } from "lucide-react";
 import { useMemo } from "react";
 import { StatusBadge } from "@/components/agent-status";
@@ -10,7 +10,7 @@ import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useLive } from "@/store/context";
 import { GroupedListing } from "./grouped-listing";
-import { epochMs, groupListing } from "./listing-groups";
+import { groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
 
 type OpenAgent = ReturnType<typeof useOpenAgent>;
@@ -33,10 +33,11 @@ function HolderBadge({ session }: { session: SessionSummary }) {
 }
 
 /**
- * Sessions as tappable rows: name (or first message), first message, project, last update, the
- * holding agent's status when an agent already has it. Tapping resumes it through `open`; a
- * session whose folder is missing can't be resumed unless an agent still has it. With `folder`,
- * each row gets a `×` (`StopOrDeleteButton`, following the holding agent's rule when one has it).
+ * Sessions as tappable rows: name (or first message), first message, project, last prompt (else
+ * creation), the holding agent's status when an agent already has it. Tapping resumes it through
+ * `open`; a session whose folder is missing can't be resumed unless an agent still has it. With
+ * `folder`, each row gets a `×` (`StopOrDeleteButton`, following the holding agent's rule when one
+ * has it).
  */
 function SessionRows({
   sessions,
@@ -58,6 +59,7 @@ function SessionRows({
       {sessions.map((session) => {
         const title = session.name ?? session.firstMessage ?? "Empty session";
         const pending = pendingFile?.sessionFile === session.file;
+        const { at } = recencyOf(session);
         return (
           <li
             key={session.file}
@@ -102,8 +104,8 @@ function SessionRows({
                       <span aria-hidden>·</span>
                     </>
                   )}
-                  <time dateTime={session.updatedAt} className="shrink-0">
-                    {formatRelative(session.updatedAt)}
+                  <time dateTime={new Date(at).toISOString()} className="shrink-0">
+                    {formatRelative(at)}
                   </time>
                 </span>
               </span>
@@ -153,7 +155,7 @@ export function GroupedSessionList({
       groupListing(sessions, {
         cwd: (session) => session.cwd,
         layout: (session) => session.layout,
-        activity: (session) => epochMs(session.updatedAt),
+        recency: (session) => recencyOf(session),
       }),
     [sessions],
   );

@@ -7,6 +7,7 @@ import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { StreamHub } from "../live/stream-hub.ts";
+import { SidebarStateStore } from "../store/sidebar-state.ts";
 import { fakePiCommand, isAlive } from "../testing/stub-process.ts";
 import {
   AgentManager,
@@ -42,13 +43,15 @@ beforeEach(() => {
   records = [];
   makeManager();
   const catalog = new SessionCatalog({ agentDir: join(root, "agent") });
+  const sidebar = new SidebarStateStore(join(root, "data"));
   app = createApp({
     hostname: HOSTNAME,
     port: PORT,
     staticDir: root,
     manager,
     catalog,
-    hub: new StreamHub({ manager, catalog }),
+    hub: new StreamHub({ manager, catalog, sidebar }),
+    sidebar,
     piVersion: async () => "test",
   });
 });

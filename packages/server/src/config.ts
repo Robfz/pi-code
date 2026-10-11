@@ -11,7 +11,7 @@ export interface Config {
   hostname: string;
   /** pi executable. */
   piBin: string;
-  /** pi-code's own data (VAPID keys, push subscriptions). */
+  /** pi-code's own data (VAPID keys, push subscriptions, sidebar state). */
   dataDir: string;
   /** pi's agent dir (sessions, trust.json); written only to delete session files. */
   agentDir: string;

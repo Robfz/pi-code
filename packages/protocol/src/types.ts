@@ -62,17 +62,31 @@ export interface SessionSummary {
   createdAt: string;
   /** Last entry timestamp. */
   updatedAt: string;
+  /** Timestamp of the last user message; absent before the first prompt. */
+  lastPromptAt?: string;
   parentSession?: string;
   /** Agent that has this session open in the web UI. */
   ownedBy?: AgentId;
   /** Absent outside a layout repo. */
   layout?: RepoLayout;
+  /** The cwd is not a directory on disk, as of the latest scan. */
+  missing?: true;
 }
+
+/**
+ * A session as the live stream carries it: without `ownedBy` (it would go stale; clients match
+ * agents by `sessionFile`) or `updatedAt` (it moves on every write, which would send a `catalog`
+ * frame for nothing a client shows).
+ */
+export type StreamedSession = Omit<SessionSummary, "ownedBy" | "updatedAt">;
 
 export interface ProjectSummary {
   cwd: string;
   sessionCount: number;
-  updatedAt: string;
+  /** The latest `lastPromptAt` of its sessions; absent when none has a prompt. */
+  lastPromptAt?: string;
+  /** The latest `createdAt` of its sessions. */
+  createdAt: string;
   isGitRepo: boolean;
   /** Absent outside a layout repo. */
   layout?: RepoLayout;
@@ -125,6 +139,24 @@ export interface DirSuggestion {
 
 export interface DirsResponse {
   dirs: DirSuggestion[];
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+
+/** The sidebar's pins and collapsed groups, kept on the server and shared by every client. */
+export interface SidebarState {
+  /** Pinned layout repos (their container paths). */
+  pinned: string[];
+  /** Collapsed groups: folder cwds, repo containers and worktree cwds. */
+  collapsed: string[];
+}
+
+/** `PATCH /api/sidebar`: path → whether it is pinned / collapsed; other paths are unchanged. */
+export type SidebarPatch = { [K in keyof SidebarState]?: Record<string, boolean> };
+
+export interface SidebarResponse {
+  sidebar: SidebarState;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +256,11 @@ export type StreamFrame =
   | {
       type: "baseline";
       agents: AgentInfo[];
-      /** Sessions updated within the last 7 days, most recent first, without `ownedBy`. */
-      sessions: SessionSummary[];
+      /** Every session, most recently prompted first. */
+      sessions: StreamedSession[];
       /** cwd → branch, for folders with a live agent inside a git work tree. */
       branches: Record<string, string>;
+      sidebar: SidebarState;
     }
   /** An opened agent's event; `seq` duplicates its pair in the SSE `id:`. */
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent }
@@ -236,8 +269,10 @@ export type StreamFrame =
   /** Any agent's info changed (or a new agent). */
   | { type: "agent"; agent: AgentInfo }
   | { type: "agent_closed"; agentId: AgentId }
-  /** The 7-day session window; replaces the previous one. */
-  | { type: "catalog"; sessions: SessionSummary[] }
+  /** Every session, as in `baseline`; replaces the previous list. */
+  | { type: "catalog"; sessions: StreamedSession[] }
+  /** The sidebar state changed; replaces the previous one. */
+  | { type: "sidebar"; sidebar: SidebarState }
   /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
   | { type: "branch"; cwd: string; branch: string | null };
 

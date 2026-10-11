@@ -45,7 +45,7 @@ interface SessionSummary { /* … */ layout?: RepoLayout }
 interface ProjectSummary { /* … */ layout?: RepoLayout }
 ```
 
-These three types feed every listing surface (frames, `GET /api/sessions`, `GET /api/projects`), so a field on each needs no new frame or query; an agent in a fresh worktree, with no session file yet (F9), is placed by its own `AgentInfo`. The hub's window diff covers `layout`, so a worktree turning `missing` sends `catalog`, and the registry's listing comparison refetches `sessions` and `projects`.
+These three types feed every listing surface (frames, `GET /api/sessions`, `GET /api/projects`), so a field on each needs no new frame or query; an agent in a fresh worktree, with no session file yet (F9), is placed by its own `AgentInfo`. The hub's session list diff covers `layout`, so a worktree turning `missing` sends `catalog`, and the registry refetches `sessions` and `projects`.
 
 ## Server
 
@@ -107,11 +107,11 @@ Codes in `API_ERROR_STATUS`:
 
 ### Grouping model
 
-`features/catalog/listing-groups.ts` groups any items with a `cwd`, an optional `layout` and an activity time. The sidebar (`SidebarRow`, which carries `layout`), Home (`AgentInfo`, `SessionSummary`), `/sessions` (`SessionSummary`) and the picker (`ProjectSummary`) all use it:
+`features/catalog/listing-groups.ts` groups any items with a `cwd`, an optional `layout` and a `Recency` (`@pi-code/protocol`, `{ prompted, at }`: the last prompt's time, else the creation's; [`05-desktop.md`](05-desktop.md), "Ordering"). The sidebar (`SidebarRow`, which carries `layout`), Home (`AgentInfo`, `SessionSummary`), `/sessions` (`SessionSummary`) and the picker (`ProjectSummary`) all use it:
 
 ```ts
 type ListingGroup<T> =
-  | { kind: "folder"; cwd: string; label: string; items: T[] }               // as in 05
+  | { kind: "folder"; cwd: string; label: string; missing: boolean; items: T[] } // missing: any item's `ListingKeys.missing`
   | { kind: "repo"; repo: string; label: string; items: T[]; worktrees: WorktreeGroup<T>[] };
 
 interface WorktreeGroup<T> {
@@ -124,8 +124,9 @@ interface WorktreeGroup<T> {
 ```
 
 - An agent's `layout` (`agentLayout`) is its session's from the latest catalog scan, which turns `missing` when the folder goes, else its own from creation.
-- Items with `layout` group under `layout.repo`. `role: "container"` items go in the repo group's own `items`, directly under its header. The others go in one `WorktreeGroup` per cwd: the main checkout first, then the rest by most recent item. Items without `layout` form folder groups by cwd, as in `05`.
-- Top-level groups are ordered by their most recent item, items within a group by activity. Top-level labels follow the collision rule of `05` over all top-level groups, using the container's basename for repo groups.
+- Items with `layout` group under `layout.repo`. `role: "container"` items go in the repo group's own `items`, directly under its header. The others go in one `WorktreeGroup` per cwd: the main checkout first, then the rest by their first item. Items without `layout` form folder groups by cwd, as in `05`; the optional `missing` key marks a folder group gone (the sidebar passes its rows' `missing`, from `SessionSummary.missing`).
+- Items are ordered by `compareRecency` (prompted first, newest prompt first; then the rest, newest created first), and groups by their first item, so groups without any prompt come last. Top-level labels follow the collision rule of `05` over all top-level groups, using the container's basename for repo groups.
+- The `repos` option adds an empty repo group, after the others, for each listed container without items; the sidebar passes its pinned repos, so a pinned repo with no conversations keeps its header and its label still takes part in the collision rule.
 - In a missing worktree, session rows and exited agents are disabled: resuming would fail with `cwd does not exist` (F2). Their `×` still deletes them ([`08-delete-sessions.md`](08-delete-sessions.md)). A live agent stays usable. `SessionRows` disables a session with `layout.missing` on every list, the share screen's included, unless a live agent holds it (`ownedBy`).
 - Every repo group header, on every surface, offers "New worktree" (`NewWorktreeButton`); worktree sub-group headers of linked and missing worktrees offer "Remove worktree" (`RemoveWorktreeButton`), and missing ones show `MissingMark`. All three live in `features/worktrees/worktree-actions.tsx`.
 
@@ -133,7 +134,7 @@ interface WorktreeGroup<T> {
 
 ```
 ┌ [+ New conversation]  [search…]   ┐
-│ pi-code                    [⑂+][+]│  repo: container name · new worktree · new here
+│ pi-code                 [⚲][⑂+][+]│  repo: container name · pin · new worktree · new here
 │     Notes on the layout    1d [×] │  container-folder session
 │   main  ⎇ main                [+] │  main checkout: branch (live only) · new here
 │   ● Release checklist      5m [×] │
@@ -146,6 +147,7 @@ interface WorktreeGroup<T> {
 ```
 
 - The branch chip sits on whichever header owns the cwd (folder group or worktree sub-group), shown only while that folder has a live row. Every `+` starts a conversation in its own header's folder; the repo header's folder is the container.
+- The repo group and each linked worktree sub-group collapse on their own; the main checkout's sub-group hides only with its repo, and a missing worktree's doesn't collapse. Collapsed state is kept by path (the container, the worktree's cwd) and forgotten when the folder goes. Only repo groups have the pin toggle; pinned repos sort first, by label ([`05-desktop.md`](05-desktop.md), "Sidebar").
 - Search results go through the same model; agent rows are filtered as in `05`.
 
 ### Home and `/sessions`
@@ -170,7 +172,7 @@ Recent projects render through the model. A repo group's container (when it has 
 
 1. Confirm: "Remove {label}? Deletes {path} and its conversations (moved to the Trash) and closes the live ones; the branch is kept." Asked on every removal because a phone mis-tap would otherwise lose session files, which `unlink` deletes for good when `trash` fails.
 2. `DELETE /api/worktrees { path }`. On `409 worktree_dirty` a second dialog follows: "Remove {label} anyway? {label} has uncommitted changes or submodules. Changes will be lost." Confirming retries with `force: true`. Both confirm buttons are disabled while a removal runs.
-3. Success → toast, and the `sessions` and `projects` queries are invalidated (the `catalog` frame covers only the 7-day window). Listings follow through `agent_closed` and `catalog` frames; a conversation on screen shows "Conversation closed". Failures → toast with the server's message.
+3. Success → toast, and the `sessions` and `projects` queries are invalidated. Listings follow through `agent_closed` and `catalog` frames; a conversation on screen shows "Conversation closed". Failures → toast with the server's message.
 
 ## Tests
 

@@ -1,12 +1,22 @@
-import type { AgentInfo } from "@pi-code/protocol";
+import type { AgentInfo, SidebarPatch } from "@pi-code/protocol";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { GitBranchIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  GitBranchIcon,
+  LoaderIcon,
+  PinIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+  XIcon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { StatusMark } from "@/components/agent-status";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
@@ -26,8 +36,14 @@ import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
-import { useLive } from "@/store/context";
-import { buildSidebarGroups, liveBranch, type SidebarRow } from "./sidebar-model";
+import { useLive, useLiveRegistry } from "@/store/context";
+import {
+  allRows,
+  buildSidebarGroups,
+  hiddenMarks,
+  liveBranch,
+  type SidebarRow,
+} from "./sidebar-model";
 
 /** Delay before the search text queries `GET /api/sessions?q=`. */
 export const SEARCH_DEBOUNCE_MS = 200;
@@ -81,10 +97,10 @@ function Row({
         {row.title}
       </span>
       <time
-        dateTime={new Date(row.activity).toISOString()}
+        dateTime={new Date(row.recency.at).toISOString()}
         className="shrink-0 text-xs text-muted-foreground"
       >
-        {formatRelative(new Date(row.activity).toISOString(), now)}
+        {formatRelative(row.recency.at, now)}
       </time>
     </>
   );
@@ -134,6 +150,13 @@ function Row({
   );
 }
 
+/** A collapsible group's state, and what its header shows of the rows it hides. */
+interface Collapse {
+  collapsed: boolean;
+  onToggle(): void;
+  hidden: readonly SidebarRow[];
+}
+
 function Group({
   label,
   path,
@@ -141,6 +164,7 @@ function Group({
   branch,
   missing = false,
   nested = false,
+  collapse,
   actions,
   children,
 }: {
@@ -152,72 +176,120 @@ function Group({
   missing?: boolean;
   /** A checkout inside a repo group. */
   nested?: boolean;
+  /** Absent: the group can't collapse. */
+  collapse?: Collapse | undefined;
   actions: ReactNode;
   children: ReactNode;
 }) {
-  const headingId = useId();
+  const labelId = useId();
   const Heading = nested ? "h3" : "h2";
+  const collapsed = collapse?.collapsed === true;
+  const marks = collapsed ? hiddenMarks(collapse.hidden) : [];
+  const title = (
+    <>
+      <ListingGroupIcon kind={kind} />
+      <span
+        id={labelId}
+        className={cn(
+          "min-w-0 truncate text-foreground/80",
+          nested ? "font-normal" : "font-medium",
+        )}
+        title={path}
+      >
+        {label}
+      </span>
+      {branch !== undefined && (
+        <span
+          className="flex min-w-0 shrink-1000 items-center gap-0.5 overflow-hidden"
+          title="Branch"
+        >
+          <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+          <span className="truncate font-mono">{branch}</span>
+        </span>
+      )}
+      {missing && <MissingMark />}
+      {marks.map((status) => (
+        <span key={status} className="flex shrink-0 items-center">
+          <StatusMark status={status} />
+        </span>
+      ))}
+    </>
+  );
+  // The branch gives way first; the label truncates only once the branch is gone.
+  const titleClass = "flex min-w-0 flex-1 items-center gap-2";
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a folder of links, not a form <fieldset>
-    <div role="group" aria-labelledby={headingId} className="flex flex-col gap-0.5">
+    <Collapsible
+      open={!collapsed}
+      onOpenChange={() => collapse?.onToggle()}
+      role="group"
+      aria-labelledby={labelId}
+      className="flex flex-col gap-0.5"
+    >
       <div
         className={cn(
           "flex min-w-0 items-center gap-2 pr-1 pb-0.5 pl-2 text-xs text-muted-foreground",
           nested ? "pt-1.5" : "pt-3",
         )}
       >
-        {/* The branch gives way first; the label truncates only once the branch is gone. */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ListingGroupIcon kind={kind} />
-          <Heading
-            id={headingId}
-            className={cn(
-              "min-w-0 truncate text-foreground/80",
-              nested ? "font-normal" : "font-medium",
-            )}
-            title={path}
-          >
-            {label}
-          </Heading>
-          {branch !== undefined && (
-            <span
-              className="flex min-w-0 shrink-1000 items-center gap-0.5 overflow-hidden"
-              title="Branch"
+        <Heading className="flex min-w-0 flex-1">
+          {collapse ? (
+            // Only the title toggles: the actions beside it are buttons of their own.
+            <CollapsibleTrigger
+              className={cn(
+                titleClass,
+                "group/header cursor-pointer rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+              )}
             >
-              <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-              <span className="truncate font-mono">{branch}</span>
-            </span>
+              {title}
+              {/* Shown while collapsed, and on hover or focus while open. */}
+              <ChevronRightIcon
+                aria-hidden
+                className={cn(
+                  "size-[13px] shrink-0 text-faint-foreground transition-[opacity,transform] duration-150 group-data-[state=open]/header:rotate-90",
+                  !collapsed &&
+                    "opacity-0 group-hover/header:opacity-100 group-focus-visible/header:opacity-100",
+                )}
+              />
+            </CollapsibleTrigger>
+          ) : (
+            <span className={titleClass}>{title}</span>
           )}
-          {missing && <MissingMark />}
-        </div>
+        </Heading>
         {actions}
       </div>
-      {children}
-    </div>
+      {/* The 2px bleed keeps the rows' focus rings clear of the clip the animation needs. */}
+      <CollapsibleContent className="-m-0.5 overflow-hidden p-0.5 duration-150 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+        <div className="flex flex-col gap-0.5">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
 /**
  * Conversations grouped by folder or repo (`groupListing`), with New conversation, search,
- * per-folder `+`, New and Remove worktree on repo groups, Stop or Delete on every row (`×`) and
- * settings in the footer. `action` goes before New conversation (the shell's toggle, the sheet's
- * close); `onSelect` runs whenever a row, `+` or a new conversation is picked.
+ * per-folder `+`, Pin and New worktree on repo groups, Remove worktree on linked ones, Stop or
+ * Delete on every row (`×`) and settings in the footer. Group headers collapse, except the main
+ * checkout's; pins and collapsed groups are the server's `sidebar` state. `action` goes before
+ * New conversation (the shell's toggle, the sheet's close); `onSelect` runs whenever a row, `+`
+ * or a new conversation is picked.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
-  const { loaded, agents, sessions, branches } = useLive(
+  const { loaded, agents, sessions, branches, sidebar } = useLive(
     useShallow((s) => ({
       loaded: s.loaded,
       agents: s.agents,
       sessions: s.sessions,
       branches: s.branches,
+      sidebar: s.sidebar,
     })),
   );
+  const registry = useLiveRegistry();
   const currentId = useParams({ strict: false }).agentId;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [text, setText] = useState("");
   const trimmed = text.trim();
   const debounced = useDebouncedValue(trimmed, SEARCH_DEBOUNCE_MS);
-  // Clearing the field shows the window at once; typing waits for the debounce.
+  // Clearing the field shows every session at once; typing waits for the debounce.
   const query = trimmed === "" ? "" : debounced;
   const searching = query !== "";
   const search = useQuery({
@@ -245,15 +317,47 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
 
   const groups = useMemo(() => {
     const allAgents = Object.values(agents);
-    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions });
+    const { pinned } = sidebar;
+    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions, pinned });
     const results = search.data ?? [];
     return buildSidebarGroups({
       agents: allAgents,
       sessions: results,
       known: [...sessions, ...results],
       query,
+      pinned,
     });
-  }, [agents, sessions, searching, query, search.data]);
+  }, [agents, sessions, sidebar, searching, query, search.data]);
+
+  const setSidebar = (patch: SidebarPatch) => {
+    registry.setSidebar(patch).catch((error: unknown) => {
+      toast.error(errorMessage(error));
+    });
+  };
+  const collapsed = new Set(sidebar.collapsed);
+  // Search shows every match: no group collapses until the field clears, the state untouched.
+  const collapse = (path: string, hidden: readonly SidebarRow[]): Collapse | undefined =>
+    searching
+      ? undefined
+      : {
+          collapsed: collapsed.has(path),
+          onToggle: () => setSidebar({ collapsed: { [path]: !collapsed.has(path) } }),
+          hidden,
+        };
+  const pinned = new Set(sidebar.pinned);
+
+  /** Pins or unpins a repo; filled while pinned. */
+  const pin = (repo: string, name: string) => (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      aria-label={`Pin ${name}`}
+      aria-pressed={pinned.has(repo)}
+      onClick={() => setSidebar({ pinned: { [repo]: !pinned.has(repo) } })}
+    >
+      <PinIcon className={cn(pinned.has(repo) && "fill-current")} />
+    </Button>
+  );
 
   /** `+`: a new conversation in `cwd`; `name` tells same-labelled folders apart. */
   const newHere = (cwd: string, name: string) => (
@@ -374,6 +478,8 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
               label={group.label}
               path={group.cwd}
               branch={liveBranch(branches, group.cwd, group.items)}
+              // A missing folder keeps no state (it would be pruned at once).
+              collapse={group.missing ? undefined : collapse(group.cwd, group.items)}
               actions={newHere(group.cwd, group.label)}
             >
               {rowList(group.items, group.label, false)}
@@ -384,8 +490,10 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
               kind="repo"
               label={group.label}
               path={group.repo}
+              collapse={collapse(group.repo, allRows(group))}
               actions={
                 <>
+                  {pin(group.repo, group.label)}
                   <NewWorktreeButton
                     compact
                     repo={{ path: group.repo, label: group.label }}
@@ -409,6 +517,12 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
                         path={worktree.cwd}
                         branch={liveBranch(branches, worktree.cwd, worktree.items)}
                         missing={worktree.missing}
+                        // A missing folder keeps no state (it would be pruned at once).
+                        collapse={
+                          worktree.role === "worktree" && !worktree.missing
+                            ? collapse(worktree.cwd, worktree.items)
+                            : undefined
+                        }
                         actions={
                           <>
                             {!worktree.missing && newHere(worktree.cwd, name)}

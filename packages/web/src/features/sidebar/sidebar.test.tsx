@@ -1,8 +1,11 @@
 import {
   type AgentInfo,
+  applySidebarPatch,
   initialLiveState,
   type RepoLayout,
   type SessionSummary,
+  type SidebarPatch,
+  type SidebarState,
 } from "@pi-code/protocol";
 import {
   createMemoryHistory,
@@ -38,6 +41,9 @@ function session(patch: Partial<SessionSummary> & { file: string }): SessionSumm
 
 const recent = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
 
+/** The server's sidebar state, as `PATCH /api/sidebar` leaves it (every path exists). */
+let serverSidebar: SidebarState = { pinned: [], collapsed: [] };
+
 async function renderSidebar(
   path = "/",
   handler: (call: FetchCall) => [number, unknown] | undefined = () => undefined,
@@ -46,6 +52,10 @@ async function renderSidebar(
   const fetchStub = stubFetch((call) => {
     const answer = handler(call);
     if (answer) return answer;
+    if (call.url === "/api/sidebar" && call.method === "PATCH") {
+      serverSidebar = applySidebarPatch(serverSidebar, call.body as SidebarPatch);
+      return [200, { sidebar: serverSidebar }];
+    }
     const match = /^\/api\/agents\/([^/]+)\/snapshot$/.exec(call.url);
     if (match) return [200, makeSnapshot({ agent: makeAgent({ id: match[1] }) })];
     if (call.url === "/api/sessions") return [200, { sessions: [] }];
@@ -61,8 +71,10 @@ function baseline(
   agents: AgentInfo[],
   sessions: SessionSummary[] = [],
   branches: Record<string, string> = {},
+  sidebar: SidebarState = { pinned: [], collapsed: [] },
 ) {
-  sendFrame({ type: "baseline", agents, sessions, branches });
+  serverSidebar = sidebar;
+  sendFrame({ type: "baseline", agents, sessions, branches, sidebar });
 }
 
 /**
@@ -95,7 +107,7 @@ const titles = (group: string) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Sidebar", () => {
-  it("lists agents and free sessions by folder, most recent first", async () => {
+  it("lists agents and free sessions by folder, most recently prompted first", async () => {
     await renderSidebar();
     baseline(
       [
@@ -103,7 +115,7 @@ describe("Sidebar", () => {
           id: "a1",
           cwd: "/home/me/pi-code",
           sessionName: "Desktop design doc",
-          startedAt: recent(2),
+          startedAt: recent(0),
           sessionFile: "f1",
         }),
         makeAgent({
@@ -114,18 +126,24 @@ describe("Sidebar", () => {
         }),
       ],
       [
-        session({ file: "f1", cwd: "/home/me/pi-code", name: "Held", updatedAt: recent(1) }),
+        session({
+          file: "f1",
+          cwd: "/home/me/pi-code",
+          name: "Held",
+          lastPromptAt: recent(3),
+          updatedAt: recent(1),
+        }),
         session({
           file: "f2",
           cwd: "/home/me/pi-code",
           name: "Refactor catalog",
-          updatedAt: recent(60 * 72),
+          lastPromptAt: recent(60 * 72),
         }),
         session({
           file: "f3",
           cwd: "/home/me/phoenix/phoenix",
           firstMessage: "Old phoenix",
-          updatedAt: recent(60 * 24),
+          lastPromptAt: recent(60 * 24),
         }),
       ],
       { "/home/me/pi-code": "main", "/home/me/phoenix/phoenix": "stale" },
@@ -134,14 +152,15 @@ describe("Sidebar", () => {
     const groups = within(nav())
       .getAllByRole("group")
       .map((g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent);
-    expect(groups).toEqual(["pi-code", "Kepi/phoenix", "phoenix/phoenix"]);
+    // Kepi/phoenix holds only a never-prompted agent: it comes last.
+    expect(groups).toEqual(["pi-code", "phoenix/phoenix", "Kepi/phoenix"]);
     expect(titles("pi-code")).toEqual(["Desktop design doc", "Refactor catalog"]);
     expect(within(nav()).queryByText("Held")).toBeNull();
     const piCode = within(nav()).getByRole("group", { name: "pi-code" });
     expect(within(piCode).getByText("main")).toBeInTheDocument();
     expect(within(nav()).queryByText("stale")).toBeNull();
-    // The agent's activity is its session's last write, later than its start.
-    expect(within(row("Desktop design doc")).getByText("1m ago")).toBeInTheDocument();
+    // The agent's time is its session's last prompt, not its start or the agent's output.
+    expect(within(row("Desktop design doc")).getByText("3m ago")).toBeInTheDocument();
   });
 
   it("marks rows per status", async () => {
@@ -688,17 +707,17 @@ describe("Sidebar with layout repos", () => {
   });
 
   /** A layout repo with every kind of folder, plus a plain clone. */
-  function layoutBaseline() {
+  function layoutBaseline(sidebar?: SidebarState) {
     baseline(
       [
         makeAgent({
           id: "main-agent",
           cwd: `${R}/main`,
           sessionName: "Release checklist",
-          startedAt: recent(5),
+          sessionFile: "mf",
           layout: layout("main"),
         }),
-        // A fresh worktree: no session file yet.
+        // A fresh worktree: no session file yet, so no prompt.
         makeAgent({
           id: "fresh-agent",
           cwd: `${R}/fresh`,
@@ -709,8 +728,8 @@ describe("Sidebar with layout repos", () => {
           id: "gone-live",
           cwd: `${R}/old-spike`,
           sessionName: "Still running",
-          // A minute after "Try the thing", so the order doesn't hang on a millisecond.
-          startedAt: recent(60 * 24 * 3 - 1),
+          sessionFile: "gl",
+          isStreaming: true,
           layout: layout("worktree"),
         }),
         makeAgent({
@@ -718,40 +737,55 @@ describe("Sidebar with layout repos", () => {
           cwd: `${R}/old-spike`,
           sessionName: "Exited there",
           status: "exited",
+          attention: "failed",
           startedAt: recent(60 * 24 * 4),
           layout: layout("worktree"),
         }),
       ],
       [
         session({
+          file: "mf",
+          cwd: `${R}/main`,
+          lastPromptAt: recent(5),
+          layout: layout("main"),
+        }),
+        session({
           file: "c1",
           cwd: R,
           name: "Notes on the layout",
-          updatedAt: recent(60 * 24),
+          lastPromptAt: recent(60 * 24),
           layout: layout("container"),
         }),
         session({
           file: "w1",
           cwd: `${R}/worktree-support`,
           name: "Design worktrees",
-          updatedAt: recent(120),
+          lastPromptAt: recent(120),
           layout: layout("worktree"),
+        }),
+        session({
+          file: "gl",
+          cwd: `${R}/old-spike`,
+          // A minute after "Try the thing", so the order doesn't hang on a millisecond.
+          lastPromptAt: recent(60 * 24 * 3 - 1),
+          layout: layout("worktree", true),
         }),
         session({
           file: "m1",
           cwd: `${R}/old-spike`,
           name: "Try the thing",
-          updatedAt: recent(60 * 24 * 3),
+          lastPromptAt: recent(60 * 24 * 3),
           layout: layout("worktree", true),
         }),
         session({
           file: "d1",
           cwd: "/home/me/dotfiles",
           name: "Dotfiles",
-          updatedAt: recent(60 * 24 * 5),
+          lastPromptAt: recent(60 * 24 * 5),
         }),
       ],
       { [`${R}/main`]: "main", [`${R}/worktree-support`]: "wt", [`${R}/fresh`]: "fresh" },
+      sidebar,
     );
   }
 
@@ -774,11 +808,12 @@ describe("Sidebar with layout repos", () => {
       .getAllByRole("group")
       .filter((g) => g.parentElement?.closest("[role=group]") === null);
     expect(topLevel.map(groupName)).toEqual(["pi-code", "dotfiles"]);
+    // The worktree without a prompt yet comes last.
     expect(within(repo()).getAllByRole("group").map(groupName)).toEqual([
       "main",
-      "fresh",
       "worktree-support",
       "old-spike",
+      "fresh",
     ]);
     expect(ownTitles(repo())).toEqual(["Notes on the layout"]);
     // The agent with no session yet is placed by its own layout.
@@ -789,7 +824,7 @@ describe("Sidebar with layout repos", () => {
       "Exited there",
     ]);
     // Branches show on checkouts with a live agent.
-    expect(within(worktree("main")).getByText("main", { selector: "span" })).toBeInTheDocument();
+    expect(within(worktree("main")).getByTitle("Branch")).toHaveTextContent("main");
     expect(within(worktree("fresh")).getByTitle("Branch")).toHaveTextContent("fresh");
     expect(within(worktree("worktree-support")).queryByTitle("Branch")).toBeNull();
   });
@@ -803,16 +838,23 @@ describe("Sidebar with layout repos", () => {
         .getAllByRole("button")
         .filter((b) => b.closest("[role=group]") === group && b.closest("li") === null)
         .map((b) => b.getAttribute("aria-label"));
-    expect(buttons(repo())).toEqual(["New worktree in pi-code", "New conversation in pi-code"]);
+    // The collapse toggle (the header's title) first, unlabelled: it reads as the title.
+    expect(buttons(repo())).toEqual([
+      null,
+      "Pin pi-code",
+      "New worktree in pi-code",
+      "New conversation in pi-code",
+    ]);
     expect(buttons(worktree("main"))).toEqual(["New conversation in pi-code/main"]);
     expect(buttons(worktree("worktree-support"))).toEqual([
+      null,
       "New conversation in pi-code/worktree-support",
       "Remove worktree pi-code/worktree-support",
     ]);
     expect(buttons(worktree("old-spike"))).toEqual(["Remove worktree pi-code/old-spike"]);
     expect(within(worktree("old-spike")).getByText("missing")).toBeInTheDocument();
     const dotfiles = within(nav()).getByRole("group", { name: "dotfiles" });
-    expect(buttons(dotfiles)).toEqual(["New conversation in dotfiles"]);
+    expect(buttons(dotfiles)).toEqual([null, "New conversation in dotfiles"]);
   });
 
   it("disables session rows and exited agents in a missing worktree, not live agents", async () => {
@@ -823,7 +865,8 @@ describe("Sidebar with layout repos", () => {
       within(row("Try the thing")).getByRole("button", { name: /^Try the thing/ }),
     ).toBeDisabled();
     expect(
-      within(row("Exited there")).getByRole("button", { name: /^Exited there/ }),
+      // Its Failed mark leads the name.
+      within(row("Exited there")).getByRole("button", { name: /^Failed\s*Exited there/ }),
     ).toBeDisabled();
     // Their × still deletes.
     expect(
@@ -951,5 +994,229 @@ describe("Sidebar with layout repos", () => {
     await userEvent.setup().type(within(nav()).getByRole("searchbox"), "worktree");
     expect(await within(nav()).findByText("Old worktree talk")).toBeInTheDocument();
     expect(ownTitles(worktree("worktree-support"))).toEqual(["Old worktree talk"]);
+  });
+
+  /** The group's collapse toggle: the button on its own header with `aria-expanded`. */
+  const toggle = (group: HTMLElement) =>
+    within(group)
+      .queryAllByRole("button")
+      .find((b) => b.closest("[role=group]") === group && b.hasAttribute("aria-expanded"));
+  const patches = (calls: FetchCall[]) =>
+    calls.filter((c) => c.url === "/api/sidebar").map((c) => c.body);
+  const topLevelNames = () =>
+    within(nav())
+      .getAllByRole("group")
+      .filter((g) => g.parentElement?.closest("[role=group]") === null)
+      .map(groupName);
+
+  it("collapses repo, folder and worktree groups from their headers, not from their actions", async () => {
+    const { calls } = await renderSidebar();
+    layoutBaseline();
+    await within(nav()).findByText("Design worktrees");
+    const user = userEvent.setup();
+    expect(toggle(worktree("main"))).toBeUndefined();
+    expect(toggle(worktree("old-spike"))).toBeUndefined();
+
+    await user.click(within(repo()).getByRole("button", { name: "Pin pi-code" }));
+    expect(toggle(repo())).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(toggle(worktree("worktree-support")) as HTMLElement);
+    await waitFor(() =>
+      expect(toggle(worktree("worktree-support"))).toHaveAttribute("aria-expanded", "false"),
+    );
+    expect(within(nav()).queryByText("Design worktrees")).toBeNull();
+    await user.click(toggle(worktree("worktree-support")) as HTMLElement);
+    expect(await within(nav()).findByText("Design worktrees")).toBeInTheDocument();
+
+    const dotfiles = within(nav()).getByRole("group", { name: "dotfiles" });
+    await user.click(toggle(dotfiles) as HTMLElement);
+    await waitFor(() => expect(within(nav()).queryByText("Dotfiles")).toBeNull());
+    await user.click(toggle(repo()) as HTMLElement);
+    await waitFor(() => expect(within(repo()).queryAllByRole("group")).toEqual([]));
+    expect(patches(calls)).toEqual([
+      { pinned: { [R]: true } },
+      { collapsed: { [`${R}/worktree-support`]: true } },
+      { collapsed: { [`${R}/worktree-support`]: false } },
+      { collapsed: { "/home/me/dotfiles": true } },
+      { collapsed: { [R]: true } },
+    ]);
+  });
+
+  it("follows the sidebar state other clients set", async () => {
+    await renderSidebar();
+    layoutBaseline();
+    await within(nav()).findByText("Dotfiles");
+    sendFrame({ type: "sidebar", sidebar: { pinned: [], collapsed: ["/home/me/dotfiles"] } });
+    expect(within(nav()).queryByText("Dotfiles")).toBeNull();
+  });
+
+  it("offers no collapse toggle on a folder that is gone", async () => {
+    await renderSidebar();
+    baseline(
+      [makeAgent({ id: "gone-agent", cwd: "/home/me/gone", sessionFile: "g1" })],
+      [
+        session({ file: "g1", cwd: "/home/me/gone", name: "Held", missing: true }),
+        session({ file: "g2", cwd: "/home/me/gone", name: "Gone folder", missing: true }),
+        session({ file: "d1", cwd: "/home/me/dotfiles", name: "Dotfiles" }),
+      ],
+    );
+    await within(nav()).findByText("Gone folder");
+    expect(toggle(within(nav()).getByRole("group", { name: "gone" }))).toBeUndefined();
+    expect(toggle(within(nav()).getByRole("group", { name: "dotfiles" }))).toBeDefined();
+  });
+
+  it("shows the hidden rows' spinner and most urgent attention on a collapsed header", async () => {
+    await renderSidebar();
+    layoutBaseline({ pinned: [], collapsed: [R, "/home/me/dotfiles"] });
+    await within(nav()).findByRole("group", { name: "pi-code" });
+    const marks = (group: HTMLElement) =>
+      within(group)
+        .queryAllByRole("img")
+        .map((img) => img.getAttribute("aria-label"));
+    expect(within(nav()).queryByText("Release checklist")).toBeNull();
+    // "Still running" streams in old-spike; "Exited there" failed.
+    expect(marks(repo())).toEqual(["Working", "Failed"]);
+    expect(within(repo()).getByRole("img", { name: "Failed" })).toHaveClass(
+      "rounded-full",
+      "bg-status-error",
+    );
+    expect(marks(within(nav()).getByRole("group", { name: "dotfiles" }))).toEqual([]);
+  });
+
+  it("shows collapsed groups open, not collapsible, while searching, leaving the state as it was", async () => {
+    const { calls } = await renderSidebar("/", (call) =>
+      call.url === "/api/sessions" && call.search !== ""
+        ? [
+            200,
+            {
+              sessions: [
+                session({
+                  file: "w1",
+                  cwd: `${R}/worktree-support`,
+                  name: "Design worktrees",
+                  layout: layout("worktree"),
+                }),
+              ],
+            },
+          ]
+        : undefined,
+    );
+    layoutBaseline({ pinned: [], collapsed: [R, `${R}/worktree-support`] });
+    await within(nav()).findByRole("group", { name: "pi-code" });
+    expect(within(nav()).queryByText("Design worktrees")).toBeNull();
+    const user = userEvent.setup();
+    await user.type(within(nav()).getByRole("searchbox"), "design");
+    expect(await within(nav()).findByText("Design worktrees")).toBeInTheDocument();
+    expect(toggle(repo())).toBeUndefined();
+    await user.clear(within(nav()).getByRole("searchbox"));
+    expect(within(nav()).queryByText("Design worktrees")).toBeNull();
+    expect(patches(calls)).toEqual([]);
+  });
+
+  it("uncollapses the groups of the conversation it opens", async () => {
+    const { calls } = await renderSidebar("/agents/main-agent");
+    layoutBaseline({ pinned: [], collapsed: [R, "/home/me/dotfiles"] });
+    expect(await within(nav()).findByText("Release checklist")).toBeInTheDocument();
+    expect(patches(calls)).toEqual([{ collapsed: { [R]: false } }]);
+    expect(within(nav()).queryByText("Dotfiles")).toBeNull();
+    // Collapsing it again while it's open sticks.
+    await userEvent.setup().click(toggle(repo()) as HTMLElement);
+    await waitFor(() => expect(within(nav()).queryByText("Release checklist")).toBeNull());
+  });
+
+  it("uncollapses the plain folder of the conversation it opens", async () => {
+    const { calls } = await renderSidebar("/agents/dot-agent");
+    const dotfiles = "/home/me/dotfiles";
+    baseline(
+      [makeAgent({ id: "dot-agent", cwd: dotfiles, sessionName: "Dotfiles", sessionFile: "d1" })],
+      [session({ file: "d1", cwd: dotfiles, lastPromptAt: recent(5) })],
+      {},
+      { pinned: [], collapsed: [dotfiles] },
+    );
+    expect(await within(nav()).findByText("Dotfiles")).toBeInTheDocument();
+    expect(patches(calls)).toEqual([{ collapsed: { [dotfiles]: false } }]);
+  });
+
+  it.each([
+    ["its own layout", layout("worktree")],
+    ["its session's layout", undefined],
+  ])("uncollapses a linked worktree and its repo, the repo taken from %s", async (_, own) => {
+    const { calls } = await renderSidebar("/agents/wt-agent");
+    const wt = `${R}/worktree-support`;
+    baseline(
+      [
+        makeAgent({
+          id: "wt-agent",
+          cwd: wt,
+          sessionName: "Design worktrees",
+          sessionFile: "w1",
+          ...(own ? { layout: own } : {}),
+        }),
+      ],
+      [session({ file: "w1", cwd: wt, lastPromptAt: recent(5), layout: layout("worktree") })],
+      {},
+      { pinned: [], collapsed: [R, wt] },
+    );
+    expect(await within(nav()).findByText("Design worktrees")).toBeInTheDocument();
+    expect(patches(calls)).toEqual([{ collapsed: { [wt]: false, [R]: false } }]);
+  });
+
+  it("lists pinned repos first by label, empty ones with their header actions", async () => {
+    const { calls } = await renderSidebar();
+    const empty = "/home/me/Dev/empty-repo";
+    baseline(
+      [],
+      [
+        session({ file: "a", cwd: "/home/me/alpha", name: "Alpha", lastPromptAt: recent(1) }),
+        session({
+          file: "m",
+          cwd: `${R}/main`,
+          name: "Main talk",
+          lastPromptAt: recent(60),
+          layout: layout("main"),
+        }),
+      ],
+      {},
+      { pinned: [empty], collapsed: [] },
+    );
+    await within(nav()).findByText("Main talk");
+    expect(topLevelNames()).toEqual(["empty-repo", "alpha", "pi-code"]);
+    const emptyGroup = within(nav()).getByRole("group", { name: "empty-repo" });
+    expect(within(emptyGroup).getByRole("button", { name: "Pin empty-repo" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(emptyGroup).getByRole("button", { name: "New worktree in empty-repo" }),
+    ).toBeInTheDocument();
+    expect(
+      within(emptyGroup).getByRole("button", { name: "New conversation in empty-repo" }),
+    ).toBeInTheDocument();
+
+    const pin = within(repo()).getByRole("button", { name: "Pin pi-code" });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    await userEvent.setup().click(pin);
+    await waitFor(() => expect(topLevelNames()).toEqual(["empty-repo", "pi-code", "alpha"]));
+    expect(within(repo()).getByRole("button", { name: "Pin pi-code" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(patches(calls)).toEqual([{ pinned: { [R]: true } }]);
+  });
+
+  it("puts a pin back and toasts when the server refuses", async () => {
+    await renderSidebar("/", (call) =>
+      call.url === "/api/sidebar"
+        ? [500, { error: { code: "internal", message: "Disk full" } }]
+        : undefined,
+    );
+    layoutBaseline();
+    await within(nav()).findByText("Release checklist");
+    await userEvent.setup().click(within(repo()).getByRole("button", { name: "Pin pi-code" }));
+    expect(await screen.findByText("Disk full")).toBeInTheDocument();
+    expect(within(repo()).getByRole("button", { name: "Pin pi-code" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 });

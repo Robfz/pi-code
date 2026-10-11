@@ -87,7 +87,13 @@ export function sendFrame(frame: StreamFrame) {
   });
 }
 
-/** A baseline listing `agents`, with no sessions or branches. */
+/** A baseline listing `agents`, with no sessions, branches, pins or collapsed groups. */
 export function sendBaseline(agents: AgentInfo[]) {
-  sendFrame({ type: "baseline", agents, sessions: [], branches: {} });
+  sendFrame({
+    type: "baseline",
+    agents,
+    sessions: [],
+    branches: {},
+    sidebar: { pinned: [], collapsed: [] },
+  });
 }

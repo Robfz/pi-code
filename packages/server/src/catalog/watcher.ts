@@ -1,5 +1,5 @@
 /**
- * Watches pi's sessions dir (TUI sessions included) so the catalog window follows it
+ * Watches pi's sessions dir (TUI sessions included) so the streamed session list follows it
  * (design/05-desktop.md, "Session watcher").
  */
 import { existsSync, watch } from "node:fs";

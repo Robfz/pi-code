@@ -57,17 +57,28 @@ interface SessionSummary {
   firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks
   createdAt: string;
   updatedAt: string;             // last entry timestamp
+  lastPromptAt?: string;         // last user message's timestamp; absent before the first prompt
   parentSession?: string;
   ownedBy?: AgentId;             // open in the web UI
   layout?: RepoLayout;           // absent outside a layout repo; as of the latest scan
+  missing?: true;                // the cwd is not a directory on disk, as of the latest scan
 }
+
+// A session as the live stream carries it: `ownedBy` would go stale, `updatedAt` moves on every write.
+type StreamedSession = Omit<SessionSummary, "ownedBy" | "updatedAt">;
 
 interface ProjectSummary {
   cwd: string;
   sessionCount: number;
-  updatedAt: string;
+  lastPromptAt?: string;         // the latest of its sessions'; absent when none has a prompt
+  createdAt: string;             // the latest of its sessions'
   isGitRepo: boolean;
   layout?: RepoLayout;
+}
+
+interface SidebarState {
+  pinned: string[];              // pinned layout repos (container paths)
+  collapsed: string[];           // collapsed groups: folder cwds, repo containers, worktree cwds
 }
 
 interface GitStatus { branch: string | null; dirty: boolean }
@@ -95,12 +106,14 @@ type BashResult = /* pi bash response data */;
 
 ## Catalog
 
+Listings are ordered by the last user prompt: prompted entries first, newest prompt first, then the never-prompted ones, newest created first ([`05-desktop.md`](05-desktop.md), "Ordering").
+
 ### `GET /api/projects`
-→ `200 { projects: ProjectSummary[] }`, most recent first.
+→ `200 { projects: ProjectSummary[] }`, most recently prompted first.
 
 ### `GET /api/sessions?cwd=<abs path>&q=<text>`
-Both optional. `cwd` keeps the sessions whose header `cwd` equals it; `q` keeps those whose `cwd` path or `name` contains it, case-insensitively. Without either, all sessions across projects, whatever their age.
-→ `200 { sessions: SessionSummary[] }`, most recent first.
+Both optional. `cwd` keeps the sessions whose header `cwd` equals it; `q` keeps those whose `cwd` path or `name` contains it, case-insensitively. Without either, all sessions across projects.
+→ `200 { sessions: SessionSummary[] }`, most recently prompted first.
 
 ### `GET /api/fs/dirs?prefix=<path>`
 Directory autocomplete under `$HOME`. `prefix` may start with `~`.
@@ -115,6 +128,18 @@ interface DeleteSessionBody {
 }
 ```
 → `204`, also when the file doesn't exist (already deleted, or a new conversation pi hasn't written yet). Errors: `400 invalid_body` (`file` missing, empty or not absolute), `400 session_not_listed` (the file exists but isn't a listed session; it is kept, and the message says when an agent was stopped), `500 internal` naming a file that couldn't be deleted.
+
+## Sidebar
+
+### `PATCH /api/sidebar`
+Sets pins and collapsed groups ([`05-desktop.md`](05-desktop.md), "Sidebar state"), path by path; paths not in the body keep their flag, so the request is idempotent.
+```ts
+interface SidebarPatch {
+  pinned?: Record<string, boolean>;     // absolute path → pinned
+  collapsed?: Record<string, boolean>;  // absolute path → collapsed
+}
+```
+→ `200 { sidebar: SidebarState }`, the state after the change; a path whose directory doesn't exist is not added. Every change also goes to every stream as a `sidebar` frame. `400 invalid_body` for another shape, a relative path or a non-boolean flag.
 
 ## Agents
 
@@ -178,7 +203,7 @@ GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
 - `Last-Event-ID`: the same `agentId:seq,…` format (EventSource sends the last `id:` on reconnect). `open` decides which agents are streamed; for each, a cursor from `Last-Event-ID` wins over the query's. Header cursors for agents not in `open` are ignored.
 - Per agent, a cursor replays the events after it when it is a non-negative integer, not ahead of the agent's log, and its successor is still in the log's ring buffer (a caught-up cursor replays nothing). Otherwise that agent gets a `resync` frame and streams live from the log's current `seq`; the other agents are unaffected.
 
-The response waits for the first catalog scan after startup. Then it writes `retry: 2000`, the `baseline` frame, per opened agent (in `open` order) its replayed `event` frames or its `resync`, then live frames. Replay and subscription happen in one synchronous block, so no event falls between them. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`) lets clients detect a dead stream; it is not a frame and isn't replayed. A connection with 20,000 live frames queued (a stalled socket; replay isn't counted) is ended, and the client reconnects.
+The response waits for the first catalog scan and the sidebar state load after startup. Then it writes `retry: 2000`, the `baseline` frame, per opened agent (in `open` order) its replayed `event` frames or its `resync`, then live frames. Replay and subscription happen in one synchronous block, so no event falls between them. Every 15 s a named `ping` event (`event: ping`, `data: {}`, no `id:`) lets clients detect a dead stream; it is not a frame and isn't replayed. A connection with 20,000 live frames queued (a stalled socket; replay isn't counted) is ended, and the client reconnects.
 
 Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `id: <CursorList>`: the `agentId:seq` pair of every opened agent whose position is established, in `open` order, as of that frame, so the last received `id:` is a complete resume point. A resyncing agent joins the list with its `resync` frame (at the log's `seq`); an agent whose log closes (the agent was removed) leaves it, and its events stop.
 
@@ -187,19 +212,20 @@ Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `
 type CursorList = string;
 
 type StreamFrame =
-  | { type: "baseline"; agents: AgentInfo[]; sessions: SessionSummary[]; branches: Record<string, string> }
+  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarState }
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent } // opened agents only
   | { type: "resync"; agentId: AgentId }                  // the cursor can't be replayed: refetch the snapshot
   | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
   | { type: "agent_closed"; agentId: AgentId }
-  | { type: "catalog"; sessions: SessionSummary[] }       // the 7-day window; replaces the previous one
-  | { type: "branch"; cwd: string; branch: string | null }; // null: no longer tracked
+  | { type: "catalog"; sessions: StreamedSession[] }      // every session; replaces the previous list
+  | { type: "branch"; cwd: string; branch: string | null } // null: no longer tracked
+  | { type: "sidebar"; sidebar: SidebarState };           // replaces the previous state
 ```
 
-- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session whose `updatedAt` is within the last 7 days, most recent first, without `ownedBy` (clients match agents by `sessionFile`). `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree.
+- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
-- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included) or the hourly tick changes the window (a session's `layout` included); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
 
 ## Events
 

@@ -2,7 +2,13 @@ import type { SessionSummary } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
 import { groupPath } from "@/features/catalog/listing-groups";
 import { makeAgent } from "@/test/fixtures";
-import { agentMatches, buildSidebarGroups, liveBranch } from "./sidebar-model";
+import {
+  agentMatches,
+  allRows,
+  buildSidebarGroups,
+  hiddenMarks,
+  liveBranch,
+} from "./sidebar-model";
 
 function session(patch: Partial<SessionSummary> & { file: string }): SessionSummary {
   return {
@@ -18,13 +24,14 @@ const at = (day: number, hour = 0) =>
   `2026-01-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:00:00.000Z`;
 
 describe("buildSidebarGroups", () => {
-  it("groups by cwd, groups by their most recent row, rows by activity", () => {
+  it("groups by cwd, groups by their latest prompt, rows by their last prompt", () => {
     const groups = buildSidebarGroups({
-      agents: [makeAgent({ id: "a1", cwd: "/home/me/alpha", startedAt: at(3) })],
+      agents: [makeAgent({ id: "a1", cwd: "/home/me/alpha", sessionFile: "f1" })],
       sessions: [
-        session({ file: "s1", cwd: "/home/me/beta", updatedAt: at(5) }),
-        session({ file: "s2", cwd: "/home/me/alpha", updatedAt: at(4), name: "Newer" }),
-        session({ file: "s3", cwd: "/home/me/beta", updatedAt: at(1), firstMessage: "hi" }),
+        session({ file: "f1", cwd: "/home/me/alpha", lastPromptAt: at(3) }),
+        session({ file: "s1", cwd: "/home/me/beta", lastPromptAt: at(5) }),
+        session({ file: "s2", cwd: "/home/me/alpha", lastPromptAt: at(4), name: "Newer" }),
+        session({ file: "s3", cwd: "/home/me/beta", lastPromptAt: at(1), firstMessage: "hi" }),
       ],
     });
     expect(groups.map(groupPath)).toEqual(["/home/me/beta", "/home/me/alpha"]);
@@ -34,24 +41,89 @@ describe("buildSidebarGroups", () => {
     expect(groups[1]?.items[0]?.title).toBe("Newer");
   });
 
-  it("takes an agent's activity as the later of its start and its session's update", () => {
+  it("orders by prompts only: opening, restarting and agent output move nothing", () => {
     const groups = buildSidebarGroups({
       agents: [
-        // Restarted today on an old session.
+        // Restarted today on a session last prompted on day 2.
         makeAgent({ id: "old", sessionFile: "f-old", startedAt: at(9) }),
-        // Started long ago, session written recently.
+        // The agent wrote on day 10, after its last prompt.
         makeAgent({ id: "busy", sessionFile: "f-busy", startedAt: at(1) }),
+        // Opened today, never prompted, no session file yet.
+        makeAgent({ id: "fresh", startedAt: at(11) }),
       ],
       sessions: [
-        session({ file: "f-old", updatedAt: at(2) }),
-        session({ file: "f-busy", updatedAt: at(10) }),
-        session({ file: "f-free", updatedAt: at(5) }),
+        session({ file: "f-old", lastPromptAt: at(2), updatedAt: at(2) }),
+        session({ file: "f-busy", lastPromptAt: at(3), updatedAt: at(10) }),
+        session({ file: "f-free", lastPromptAt: at(5), updatedAt: at(5) }),
+        // Written but never prompted (created on day 4).
+        session({ file: "f-empty", createdAt: at(4), updatedAt: at(4) }),
       ],
     });
     const rows = groups[0]?.items ?? [];
-    expect(rows.map((r) => r.key)).toEqual(["busy", "old", "f-free"]);
-    expect(rows[0]?.activity).toBe(Date.parse(at(10)));
-    expect(rows[1]?.activity).toBe(Date.parse(at(9)));
+    expect(rows.map((r) => r.key)).toEqual(["f-free", "busy", "old", "fresh", "f-empty"]);
+    expect(rows.map((r) => r.recency)).toEqual([
+      { prompted: true, at: Date.parse(at(5)) },
+      { prompted: true, at: Date.parse(at(3)) },
+      { prompted: true, at: Date.parse(at(2)) },
+      { prompted: false, at: Date.parse(at(11)) },
+      { prompted: false, at: Date.parse(at(4)) },
+    ]);
+  });
+
+  it("puts groups without any prompt last, by their newest creation", () => {
+    const groups = buildSidebarGroups({
+      agents: [makeAgent({ id: "fresh", cwd: "/home/me/new", startedAt: at(9) })],
+      sessions: [
+        session({ file: "1", cwd: "/home/me/old", lastPromptAt: at(1) }),
+        session({ file: "2", cwd: "/home/me/empty", createdAt: at(8) }),
+      ],
+    });
+    expect(groups.map(groupPath)).toEqual(["/home/me/old", "/home/me/new", "/home/me/empty"]);
+  });
+
+  it("lists pinned repos first by label, case-insensitive and numeric-aware", () => {
+    const repo = (name: string) => `/home/me/${name}`;
+    const layout = (name: string) => ({ repo: repo(name), role: "main" as const });
+    const groups = buildSidebarGroups({
+      agents: [],
+      sessions: [
+        session({ file: "1", cwd: "/home/me/recent", lastPromptAt: at(9) }),
+        session({ file: "2", cwd: `${repo("app10")}/main`, layout: layout("app10") }),
+        session({ file: "3", cwd: `${repo("App9")}/main`, layout: layout("App9") }),
+        session({ file: "4", cwd: `${repo("zeta")}/main`, layout: layout("zeta") }),
+        session({ file: "5", cwd: `${repo("beta")}/main`, layout: layout("beta") }),
+      ],
+      pinned: [repo("zeta"), repo("app10"), repo("App9"), repo("empty")],
+    });
+    expect(groups.map((g) => g.label)).toEqual([
+      "App9",
+      "app10",
+      "empty",
+      "zeta",
+      "recent",
+      "beta",
+    ]);
+    // The pinned repo with no conversations has an empty group.
+    expect(groups[2]).toMatchObject({ kind: "repo", items: [], worktrees: [] });
+  });
+
+  it("sorts pinned repos by their displayed label, collision prefix included", () => {
+    const groups = buildSidebarGroups({
+      agents: [],
+      sessions: [session({ file: "1", cwd: "/home/me/b/tool", lastPromptAt: at(1) })],
+      pinned: ["/home/me/z/tool", "/home/me/a/tool"],
+    });
+    expect(groups.map((g) => g.label)).toEqual(["a/tool", "z/tool", "b/tool"]);
+  });
+
+  it("adds no empty pinned repo to search results", () => {
+    const groups = buildSidebarGroups({
+      agents: [],
+      sessions: [],
+      pinned: ["/home/me/repo"],
+      query: "x",
+    });
+    expect(groups).toEqual([]);
   });
 
   it("hides session rows held by an agent and titles the agent from its session", () => {
@@ -88,9 +160,9 @@ describe("buildSidebarGroups", () => {
     const groups = buildSidebarGroups({
       agents: [],
       sessions: [
-        session({ file: "1", cwd: "/home/me/Kepi/phoenix", updatedAt: at(3) }),
-        session({ file: "2", cwd: "/home/me/phoenix/phoenix", updatedAt: at(2) }),
-        session({ file: "3", cwd: "/home/me/pi-code/", updatedAt: at(1) }),
+        session({ file: "1", cwd: "/home/me/Kepi/phoenix", lastPromptAt: at(3) }),
+        session({ file: "2", cwd: "/home/me/phoenix/phoenix", lastPromptAt: at(2) }),
+        session({ file: "3", cwd: "/home/me/pi-code/", lastPromptAt: at(1) }),
       ],
     });
     expect(groups.map((g) => g.label)).toEqual(["Kepi/phoenix", "phoenix/phoenix", "pi-code"]);
@@ -157,6 +229,48 @@ describe("buildSidebarGroups", () => {
       ["spike", true],
     ]);
     expect(group.worktrees[1]?.items[0]?.layout?.missing).toBe(true);
+  });
+
+  it("marks a folder missing from its sessions, an agent's included", () => {
+    const groups = buildSidebarGroups({
+      agents: [makeAgent({ id: "a1", cwd: "/home/me/gone", sessionFile: "f1" })],
+      sessions: [
+        session({ file: "f1", cwd: "/home/me/gone", missing: true }),
+        session({ file: "s1", cwd: "/home/me/here" }),
+      ],
+    });
+    expect(groups.map((g) => g.kind === "folder" && [g.label, g.missing])).toEqual([
+      ["gone", true],
+      ["here", false],
+    ]);
+    expect(groups[0]?.items.map((r) => [r.key, r.missing])).toEqual([["a1", true]]);
+  });
+});
+
+describe("hiddenMarks", () => {
+  it("marks Working while any hidden row works, then the most urgent attention", () => {
+    const groups = buildSidebarGroups({
+      agents: [
+        makeAgent({ id: "1", attention: "finished" }),
+        makeAgent({ id: "2", attention: "failed", status: "exited" }),
+        makeAgent({ id: "3", status: "starting" }),
+      ],
+      sessions: [session({ file: "s" })],
+    });
+    const rows = groups.flatMap(allRows);
+    expect(hiddenMarks(rows)).toEqual(["working", "failed"]);
+    expect(hiddenMarks(rows.filter((r) => r.key !== "2"))).toEqual(["working", "finished"]);
+    const asking = buildSidebarGroups({
+      agents: [makeAgent({ id: "4", attention: "input", isStreaming: true })],
+      sessions: [],
+    }).flatMap(allRows);
+    expect(hiddenMarks([...rows, ...asking])).toEqual(["working", "input"]);
+    const trust = buildSidebarGroups({
+      agents: [makeAgent({ id: "5", status: "awaiting_trust" })],
+      sessions: [],
+    }).flatMap(allRows);
+    expect(hiddenMarks(trust)).toEqual(["input"]);
+    expect(hiddenMarks(rows.filter((r) => r.key === "s"))).toEqual([]);
   });
 });
 

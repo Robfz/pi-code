@@ -4,7 +4,14 @@
  * a sub-group per checkout.
  */
 
-import type { AgentInfo, RepoLayout, SessionSummary } from "@pi-code/protocol";
+import {
+  type AgentInfo,
+  compareRecency,
+  type Recency,
+  type RepoLayout,
+  recencyOf,
+  type StreamedSession,
+} from "@pi-code/protocol";
 import { baseName } from "@/lib/content";
 
 export interface WorktreeGroup<T> {
@@ -17,30 +24,42 @@ export interface WorktreeGroup<T> {
   items: T[];
 }
 
-export type ListingGroup<T> =
-  | { kind: "folder"; cwd: string; label: string; items: T[] }
-  | {
-      kind: "repo";
-      /** The container folder. */
-      repo: string;
-      label: string;
-      /** The container's own items. */
-      items: T[];
-      /** The main checkout first, then the others by most recent item. */
-      worktrees: WorktreeGroup<T>[];
-    };
+export interface RepoGroup<T> {
+  kind: "repo";
+  /** The container folder. */
+  repo: string;
+  label: string;
+  /** The container's own items. */
+  items: T[];
+  /** The main checkout first, then the others by their first item (`compareRecency`). */
+  worktrees: WorktreeGroup<T>[];
+}
+
+export interface FolderGroup<T> {
+  kind: "folder";
+  cwd: string;
+  label: string;
+  /** Some item says the folder is gone (`ListingKeys.missing`). */
+  missing: boolean;
+  items: T[];
+}
+
+export type ListingGroup<T> = FolderGroup<T> | RepoGroup<T>;
 
 export interface ListingKeys<T> {
   cwd(item: T): string;
   layout(item: T): RepoLayout | undefined;
-  /** Epoch ms. */
-  activity(item: T): number;
+  recency(item: T): Recency;
+  /** The item's folder is gone; read outside a layout (checkouts use `layout.missing`). */
+  missing?(item: T): boolean;
 }
 
-/** Epoch ms of an ISO time; 0 when absent or unparsable. */
-export function epochMs(iso: string | undefined): number {
-  const ms = iso === undefined ? Number.NaN : Date.parse(iso);
-  return Number.isNaN(ms) ? 0 : ms;
+/**
+ * An agent's recency: its session's, or, before its session file is listed, its start (a
+ * conversation without a file has no prompt yet).
+ */
+export function agentRecency(agent: AgentInfo, session: StreamedSession | undefined): Recency {
+  return session === undefined ? recencyOf({ createdAt: agent.startedAt }) : recencyOf(session);
 }
 
 function parentName(path: string): string {
@@ -54,7 +73,7 @@ function parentName(path: string): string {
  */
 export function agentLayout(
   agent: AgentInfo,
-  sessionsByFile: ReadonlyMap<string, SessionSummary>,
+  sessionsByFile: ReadonlyMap<string, StreamedSession>,
 ): RepoLayout | undefined {
   return (
     (agent.sessionFile ? sessionsByFile.get(agent.sessionFile)?.layout : undefined) ?? agent.layout
@@ -67,25 +86,36 @@ export function groupPath(group: ListingGroup<unknown>): string {
 }
 
 /**
- * Groups ordered by their most recent item, items by activity. Top-level labels are the folder
- * basename, with the parent's basename prepended when another top-level group shares it.
+ * Items ordered by `compareRecency`, groups by their first item, so groups with a prompt come
+ * before those without. `repos` adds a repo group, after the others, for each container path
+ * that has no items. Top-level labels are the folder basename, with the parent's basename
+ * prepended when another top-level group shares it.
  */
-export function groupListing<T>(items: readonly T[], keys: ListingKeys<T>): ListingGroup<T>[] {
+export function groupListing<T>(
+  items: readonly T[],
+  keys: ListingKeys<T>,
+  { repos: emptyRepos = [] }: { repos?: readonly string[] } = {},
+): ListingGroup<T>[] {
   const groups = new Map<string, ListingGroup<T>>();
   const repos = new Map<
     string,
-    { group: Extract<ListingGroup<T>, { kind: "repo" }>; checkouts: Map<string, WorktreeGroup<T>> }
+    { group: RepoGroup<T>; checkouts: Map<string, WorktreeGroup<T>> }
   >();
-  const sorted = [...items].sort((a, b) => keys.activity(b) - keys.activity(a));
-  // Map insertion order follows the items' order: groups and checkouts come most recent first.
+  const sorted = [...items].sort((a, b) => compareRecency(keys.recency(a), keys.recency(b)));
+  // Map insertion order follows the items' order: groups and checkouts come in item order.
   for (const item of sorted) {
     const cwd = keys.cwd(item);
     const layout = keys.layout(item);
     if (layout === undefined) {
       const key = `folder:${cwd}`;
+      const missing = keys.missing?.(item) === true;
       const group = groups.get(key);
-      if (group) group.items.push(item);
-      else groups.set(key, { kind: "folder", cwd, label: "", items: [item] });
+      if (group?.kind === "folder") {
+        group.items.push(item);
+        if (missing) group.missing = true;
+      } else {
+        groups.set(key, { kind: "folder", cwd, label: "", missing, items: [item] });
+      }
       continue;
     }
     let repo = repos.get(layout.repo);
@@ -114,6 +144,12 @@ export function groupListing<T>(items: readonly T[], keys: ListingKeys<T>): List
         items: [item],
       });
     }
+  }
+  for (const repo of emptyRepos) {
+    if (repos.has(repo)) continue;
+    const group: RepoGroup<T> = { kind: "repo", repo, label: "", items: [], worktrees: [] };
+    repos.set(repo, { group, checkouts: new Map() });
+    groups.set(`repo:${repo}`, group);
   }
   for (const { group, checkouts } of repos.values()) {
     // Stable sort: the main checkout moves first, the rest keep their recency order.

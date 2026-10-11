@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,67 +13,65 @@ import type { StreamFrame } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/agent-manager.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
+import { SidebarStateStore } from "../store/sidebar-state.ts";
 import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import { StreamHub } from "./stream-hub.ts";
 
 const TEST_DATA = fileURLToPath(new URL("../../test-data", import.meta.url));
 const proj = (name: string) => join(TEST_DATA, "sessions", "--home-user-proj--", name);
 
-function hubAt(now: string): StreamHub {
-  vi.setSystemTime(now);
-  const manager = new AgentManager({
-    home: TEST_DATA,
-    command: () => ({ bin: "/nonexistent", args: [] }),
-  });
-  // Every session is owned, so `ownedBy` would show up if it weren't stripped.
-  const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: () => "agent-1" });
-  return new StreamHub({ manager, catalog });
+let dataRoot: string;
+
+/** A sidebar state store in the test's data dir. */
+function sidebarStore(): SidebarStateStore {
+  return new SidebarStateStore(join(dataRoot, "data"));
 }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
+  dataRoot = mkdtempSync(join(tmpdir(), "pi-code-hub-data-"));
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  rmSync(dataRoot, { recursive: true, force: true });
 });
 
 describe("StreamHub baseline", () => {
-  it("holds the sessions updated within 7 days, most recent first, without ownedBy", async () => {
-    // v3-full was last updated 2026-01-01T10:30:00.000Z: exactly 7 days before.
-    const hub = hubAt("2026-01-08T10:30:00.000Z");
-    await hub.ready;
-    expect(hub.baseline()).toEqual({
-      type: "baseline",
-      agents: [],
-      sessions: [
-        {
-          file: proj("2026-01-02T09-00-00-000Z_forked.jsonl"),
-          id: "forked",
-          cwd: "/home/user/proj",
-          firstMessage: "Only a question, never answered",
-          createdAt: "2026-01-02T09:00:00.000Z",
-          updatedAt: "2026-01-02T09:00:01.000Z",
-          parentSession: "/sessions/--home-user-proj--/2026-01-01T10-00-00-000Z_v3-full.jsonl",
-        },
-        {
-          file: proj("2026-01-01T10-00-00-000Z_v3-full.jsonl"),
-          id: "v3-full",
-          cwd: "/home/user/proj",
-          name: "Renamed session",
-          firstMessage: "Fix the failing test please",
-          createdAt: "2026-01-01T10:00:00.000Z",
-          updatedAt: "2026-01-01T10:30:00.000Z",
-        },
-      ],
-      branches: {},
+  it("holds every session, most recently prompted first, without ownedBy or updatedAt", async () => {
+    const manager = new AgentManager({
+      home: TEST_DATA,
+      command: () => ({ bin: "/nonexistent", args: [] }),
     });
-  });
-
-  it("drops sessions older than 7 days", async () => {
-    const hub = hubAt("2026-01-08T10:30:00.001Z");
+    // Every session is owned, so `ownedBy` would show up if it weren't stripped.
+    const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: () => "agent-1" });
+    const hub = new StreamHub({ manager, catalog, sidebar: sidebarStore() });
     await hub.ready;
-    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["forked"]);
+    const baseline = hub.baseline();
+    expect(baseline.sessions.map((s) => s.id)).toEqual([
+      "forked",
+      "v3-full",
+      "v2-hook",
+      "v1-legacy",
+      "header-only",
+    ]);
+    expect(baseline.sessions[0]).toEqual({
+      file: proj("2026-01-02T09-00-00-000Z_forked.jsonl"),
+      id: "forked",
+      cwd: "/home/user/proj",
+      firstMessage: "Only a question, never answered",
+      createdAt: "2026-01-02T09:00:00.000Z",
+      lastPromptAt: "2026-01-02T09:00:01.000Z",
+      parentSession: "/sessions/--home-user-proj--/2026-01-01T10-00-00-000Z_v3-full.jsonl",
+      missing: true,
+    });
+    expect(baseline.sessions.some((s) => "ownedBy" in s || "updatedAt" in s)).toBe(false);
+    expect(baseline).toMatchObject({
+      agents: [],
+      branches: {},
+      sidebar: { pinned: [], collapsed: [] },
+    });
+    hub.close();
   });
 });
 
@@ -80,22 +85,36 @@ describe("StreamHub catalog refresh", () => {
     rmSync(agentDir, { recursive: true, force: true });
   });
 
-  function writeSession(id: string, updatedAt: string, cwd = "/p"): void {
-    const header = { type: "session", version: 3, id, timestamp: updatedAt, cwd };
+  function writeSession(id: string, createdAt: string, cwd = "/p"): void {
+    const header = { type: "session", version: 3, id, timestamp: createdAt, cwd };
     writeFileSync(
       join(agentDir, "sessions", "--p--", `${id}.jsonl`),
       `${JSON.stringify(header)}\n`,
     );
   }
 
-  it("broadcasts catalog only when the window changes", async () => {
+  function append(id: string, at: string, role: "user" | "assistant"): void {
+    const entry = { type: "message", timestamp: at, message: { role, content: "go" } };
+    appendFileSync(
+      join(agentDir, "sessions", "--p--", `${id}.jsonl`),
+      `${JSON.stringify(entry)}\n`,
+    );
+  }
+
+  const prompt = (id: string, at: string) => append(id, at, "user");
+
+  it("broadcasts catalog only when the list changes, old sessions included", async () => {
     vi.setSystemTime("2026-01-10T00:00:00.000Z");
     writeSession("a", "2026-01-09T00:00:00.000Z");
     const manager = new AgentManager({
       home: agentDir,
       command: () => ({ bin: "/nonexistent", args: [] }),
     });
-    const hub = new StreamHub({ manager, catalog: new SessionCatalog({ agentDir }) });
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir }),
+      sidebar: sidebarStore(),
+    });
     await hub.ready;
     const frames: StreamFrame[] = [];
     hub.subscribe((f) => frames.push(f));
@@ -105,20 +124,50 @@ describe("StreamHub catalog refresh", () => {
     expect(frames).toEqual([]);
 
     writeSession("b", "2026-01-09T12:00:00.000Z");
+    writeSession("old", "2025-01-01T00:00:00.000Z");
     await hub.refreshCatalog();
     expect(frames.map((f) => f.type === "catalog" && f.sessions.map((s) => s.id))).toEqual([
-      ["b", "a"],
+      ["b", "a", "old"],
     ]);
-    // Outside the window: no change.
-    writeSession("old", "2025-12-01T00:00:00.000Z");
-    await hub.refreshCatalog();
-    expect(frames).toHaveLength(1);
 
-    // Time alone moves a session out of the window.
-    vi.setSystemTime("2026-01-16T06:00:00.000Z");
+    // A prompt moves the oldest session to the top.
+    prompt("old", "2026-01-09T20:00:00.000Z");
     await hub.refreshCatalog();
-    expect(frames.at(-1)).toEqual({ type: "catalog", sessions: [hub.baseline().sessions[0]] });
-    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["b"]);
+    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["old", "b", "a"]);
+    expect(frames).toHaveLength(2);
+    hub.close();
+  });
+
+  it("broadcasts no catalog for agent output, only for a new prompt", async () => {
+    vi.setSystemTime("2026-01-10T00:00:00.000Z");
+    writeSession("a", "2026-01-09T00:00:00.000Z");
+    prompt("a", "2026-01-09T00:00:01.000Z");
+    const manager = new AgentManager({
+      home: agentDir,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir }),
+      sidebar: sidebarStore(),
+    });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+
+    // Moves the session's last entry time, nothing else.
+    append("a", "2026-01-09T00:00:05.000Z", "assistant");
+    await hub.refreshCatalog();
+    expect(frames).toEqual([]);
+
+    prompt("a", "2026-01-09T00:00:09.000Z");
+    await hub.refreshCatalog();
+    expect(frames).toEqual([
+      {
+        type: "catalog",
+        sessions: [expect.objectContaining({ id: "a", lastPromptAt: "2026-01-09T00:00:09.000Z" })],
+      },
+    ]);
     hub.close();
   });
 
@@ -133,7 +182,11 @@ describe("StreamHub catalog refresh", () => {
       home: root,
       command: () => ({ bin: "/nonexistent", args: [] }),
     });
-    const hub = new StreamHub({ manager, catalog: new SessionCatalog({ agentDir }) });
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir }),
+      sidebar: sidebarStore(),
+    });
     await hub.ready;
     const frames: StreamFrame[] = [];
     hub.subscribe((f) => frames.push(f));
@@ -149,6 +202,45 @@ describe("StreamHub catalog refresh", () => {
         ],
       },
     ]);
+    hub.close();
+  });
+});
+
+describe("StreamHub sidebar state", () => {
+  let root: string;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "pi-code-hub-sidebar-")));
+    mkdirSync(join(root, "agent", "sessions"), { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("puts the state in the baseline, broadcasts changes and prunes on catalog refresh", async () => {
+    const folder = join(root, "folder");
+    mkdirSync(folder);
+    const manager = new AgentManager({
+      home: root,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const sidebar = new SidebarStateStore(join(root, "data"));
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
+      sidebar,
+    });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+
+    await sidebar.update({ collapsed: { [folder]: true } });
+    expect(hub.baseline().sidebar).toEqual({ pinned: [], collapsed: [folder] });
+    expect(frames).toEqual([{ type: "sidebar", sidebar: { pinned: [], collapsed: [folder] } }]);
+
+    rmSync(folder, { recursive: true });
+    await hub.refreshCatalog();
+    await sidebar.update({}); // queued after the refresh's prune
+    expect(frames.at(-1)).toEqual({ type: "sidebar", sidebar: { pinned: [], collapsed: [] } });
     hub.close();
   });
 });

@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/agent-status";
 import { Button } from "@/components/ui/button";
 import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { GroupedListing } from "@/features/catalog/grouped-listing";
-import { agentLayout, epochMs, groupListing } from "@/features/catalog/listing-groups";
+import { agentLayout, agentRecency, groupListing } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { GroupedSessionList } from "@/features/catalog/session-list";
 import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
@@ -71,7 +71,8 @@ function OpenConversations({ agents }: { agents: AgentInfo[] }) {
     return groupListing(agents, {
       cwd: (agent) => agent.cwd,
       layout: (agent) => agentLayout(agent, byFile),
-      activity: (agent) => epochMs(agent.startedAt),
+      recency: (agent) =>
+        agentRecency(agent, agent.sessionFile ? byFile.get(agent.sessionFile) : undefined),
     });
   }, [agents, sessions]);
   return (

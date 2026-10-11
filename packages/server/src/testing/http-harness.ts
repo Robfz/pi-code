@@ -32,6 +32,7 @@ import { StreamHub } from "../live/stream-hub.ts";
 import { type PushSendOptions, PushService } from "../push/push-service.ts";
 import { SubscriptionStore } from "../push/subscriptions.ts";
 import { loadVapidDetails } from "../push/vapid.ts";
+import { SidebarStateStore } from "../store/sidebar-state.ts";
 import { fakePiCommand } from "./stub-process.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
@@ -300,6 +301,7 @@ export class Harness {
   readonly manager: AgentManager;
   readonly catalog: SessionCatalog;
   readonly hub: StreamHub;
+  readonly sidebar: SidebarStateStore;
   /** pi-code's data dir (VAPID keys, push subscriptions). */
   readonly dataDir: string;
   push: PushService | undefined;
@@ -349,7 +351,12 @@ export class Harness {
       agentDir: this.agentDir,
       ownerOf: (file) => this.manager.ownerOf(file),
     });
-    this.hub = new StreamHub({ manager: this.manager, catalog: this.catalog });
+    this.sidebar = new SidebarStateStore(this.dataDir);
+    this.hub = new StreamHub({
+      manager: this.manager,
+      catalog: this.catalog,
+      sidebar: this.sidebar,
+    });
     this.sessionsWatcher = opts.watchSessions
       ? watchSessions(join(this.agentDir, "sessions"), () => void this.hub.refreshCatalog())
       : undefined;
@@ -393,6 +400,7 @@ export class Harness {
       manager: this.manager,
       catalog: this.catalog,
       hub: this.hub,
+      sidebar: this.sidebar,
       piVersion: async () => "test",
       ...(this.push !== undefined ? { push: this.push } : {}),
       ...(opts.sse !== undefined ? { sse: opts.sse } : {}),

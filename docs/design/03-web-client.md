@@ -44,10 +44,11 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 The tree screen (on both) and the phone review page keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
-- **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), in listing groups (below); groups and rows most recent first. Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
-- **Row:** a `StatusMark` (the status vocabulary, [`09-ui-overhaul.md`](09-ui-overhaul.md), "Status vocabulary"): a neutral spinner for Working, a dot coloured for Needs input, Failed, Finished or Idle, nothing for Closed (exited agents, session rows); title; relative activity time, refreshed every 60 s. The route's agent is highlighted.
-- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on every row (the `×` rule below). A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
-- **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once. A themed × button clears the field.
+- **Rows:** every agent in `live.agents`, exited included, plus every session no agent holds (matched by `sessionFile`), in listing groups (below); pinned repos first, by label, then groups and rows by their last prompt ([`05-desktop.md`](05-desktop.md), "Ordering"). Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
+- **Row:** a `StatusMark` (the status vocabulary, [`09-ui-overhaul.md`](09-ui-overhaul.md), "Status vocabulary"): a neutral spinner for Working, a dot coloured for Needs input, Failed, Finished or Idle, nothing for Closed (exited agents, session rows); title; the relative time of the last prompt (else of the creation), refreshed every 60 s. The route's agent is highlighted.
+- **Collapse and pins:** clicking a group header's title (not its buttons) collapses or expands it, except the main checkout's, on Radix Collapsible with the app's 150 ms height animation; a collapsed header shows its hidden rows' `StatusMark`s: Working while one works, then the most urgent of Needs input, Failed and Finished. Repo headers have a pin toggle. Both are server state, shared by every client ([`05-desktop.md`](05-desktop.md), "Sidebar").
+- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "Pin" and "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on every row (the `×` rule below). A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
+- **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the session rows, and agent rows are filtered client-side on their title and cwd; collapsed groups show their rows while the field has text. The previous results stay while the next query loads; clearing the field shows every session at once. A themed × button clears the field.
 
 ### Listing groups and worktrees
 
@@ -73,8 +74,9 @@ Stop is `DELETE /api/agents/:id`; Delete is `deleteSession(file)` (`DELETE /api/
 interface LiveOverview {                     // Zustand; read by the sidebar, Home, badge and share
   loaded: boolean;                           // false until the first baseline
   agents: Record<AgentId, AgentInfo>;        // every agent the server holds, exited included
-  sessions: SessionSummary[];                // the 7-day window
+  sessions: SessionSummary[];                // every session, most recently prompted first
   branches: Record<string, string>;          // cwd → branch
+  sidebar: SidebarState;                     // pins and collapsed groups
   connection: "connecting" | "live" | "reconnecting" | "offline";
 }
 
@@ -85,12 +87,14 @@ class LiveRegistry {
   open(agentId: AgentId): ConversationStore; // idempotent: created and loaded on first call
   show(agentId: AgentId): () => void;        // marks the conversation on screen and acks it
   drop(agentId: AgentId): void;              // forgets the store and marks it closed
+  setSidebar(patch: SidebarPatch): Promise<void>; // applied at once, then PATCH /api/sidebar
+  expand(paths: string[]): void;             // uncollapses those of `paths` that are collapsed
 }
 ```
 
-- **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming until dropped or the tab reloads, so switching back costs nothing.
+- **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount, and `expand` with the agent's cwd and layout repo once the agent is known. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming until dropped or the tab reloads, so switching back costs nothing.
 - **Refetch.** A `resync` frame, and an `agent_status` event turning the agent `ready`, refetch that store the same way. While its snapshot is in flight it ignores its frames and is left out of reconnect URLs.
-- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. A `catalog` frame invalidates the `sessions` and `projects` queries only when the listing changes (a session added or removed, or any field other than `updatedAt` changed).
+- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` / `sidebar` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. Every `catalog` frame invalidates the `sessions` and `projects` queries; the server sends one only when the streamed list changes (`05-desktop.md`, "Session watcher").
 - **Attention.** Snapshots don't clear attention. The registry acks (`POST /ack`) only the conversation on screen: on `show`, on `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its attention while the page is visible and focused. The ack leaves `input` while a dialog or the trust prompt is pending, so the badge stays until it is answered.
 - **Liveness.** EventSource reconnects by itself with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no message, no `ping`) for 35 s is reopened. `offline` marks the connection offline.
 

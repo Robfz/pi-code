@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DirsResponse, ProjectsResponse, SessionsResponse } from "@pi-code/protocol";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentManager } from "../agents/agent-manager.ts";
 import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { StreamHub } from "../live/stream-hub.ts";
+import { SidebarStateStore } from "../store/sidebar-state.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const TEST_DATA = fileURLToPath(new URL("../../test-data", import.meta.url));
@@ -21,13 +22,15 @@ beforeAll(() => {
   mkdirSync(join(home, "Dev", "proj"), { recursive: true });
   const manager = new AgentManager({ home, command: () => ({ bin: "/nonexistent", args: [] }) });
   const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: (f) => manager.ownerOf(f) });
+  const sidebar = new SidebarStateStore(join(home, "data"));
   app = createApp({
     hostname: HOSTNAME,
     port: 4180,
     staticDir: home,
     manager,
     catalog,
-    hub: new StreamHub({ manager, catalog }),
+    hub: new StreamHub({ manager, catalog, sidebar }),
+    sidebar,
     piVersion: async () => "test",
   });
 });
@@ -57,28 +60,21 @@ describe("catalog routes", () => {
     const other = await get<SessionsResponse>(
       `/api/sessions?cwd=${encodeURIComponent("/home/user/other")}`,
     );
-    expect(other.body.sessions.map((s) => s.id)).toEqual(["header-only", "v2-hook"]);
+    expect(other.body.sessions.map((s) => s.id)).toEqual(["v2-hook", "header-only"]);
   });
 
-  it("GET /api/sessions?q= matches cwd and name at any age, combinable with cwd", async () => {
-    // Every fixture session is older than the 7-day window.
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime("2026-06-01T00:00:00.000Z");
-    try {
-      const ids = async (query: string) =>
-        (await get<SessionsResponse>(`/api/sessions?${query}`)).body.sessions.map((s) => s.id);
-      expect(await ids("q=Other")).toEqual(["header-only", "v2-hook"]);
-      expect(await ids("q=renamed")).toEqual(["v3-full"]);
-      expect(await ids("q=nowhere")).toEqual([]);
-      expect(await ids(`q=user&cwd=${encodeURIComponent("/home/user/proj")}`)).toEqual([
-        "forked",
-        "v3-full",
-        "v1-legacy",
-      ]);
-      expect(await ids("q=")).toHaveLength(5);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("GET /api/sessions?q= matches cwd and name, combinable with cwd", async () => {
+    const ids = async (query: string) =>
+      (await get<SessionsResponse>(`/api/sessions?${query}`)).body.sessions.map((s) => s.id);
+    expect(await ids("q=Other")).toEqual(["v2-hook", "header-only"]);
+    expect(await ids("q=renamed")).toEqual(["v3-full"]);
+    expect(await ids("q=nowhere")).toEqual([]);
+    expect(await ids(`q=user&cwd=${encodeURIComponent("/home/user/proj")}`)).toEqual([
+      "forked",
+      "v3-full",
+      "v1-legacy",
+    ]);
+    expect(await ids("q=")).toHaveLength(5);
   });
 
   it("GET /api/fs/dirs", async () => {

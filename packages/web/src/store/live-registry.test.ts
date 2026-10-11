@@ -3,8 +3,10 @@ import type {
   AgentInfo,
   CursorList,
   ServerEvent,
-  SessionSummary,
+  SidebarPatch,
+  SidebarState,
   Snapshot,
+  StreamedSession,
   StreamFrame,
 } from "@pi-code/protocol";
 import { QueryClient } from "@tanstack/react-query";
@@ -14,6 +16,8 @@ import { FakeEventSource } from "@/test/fake-event-source";
 import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtures";
 import type { ConversationStore } from "./conversation-store";
 import { LiveRegistry, type RegistryDeps, STALE_AFTER_MS } from "./live-registry";
+
+const noSidebar: SidebarState = { pinned: [], collapsed: [] };
 
 function parseCursors(list: CursorList): Map<AgentId, number> {
   const cursors = new Map<AgentId, number>();
@@ -69,7 +73,7 @@ class FakeServer {
       return { id, seq: replayable ? seq : undefined };
     });
     const agents = [...this.logs.keys()].map((id) => makeAgent({ id }));
-    this.send({ type: "baseline", agents, sessions: [], branches: {} });
+    this.send({ type: "baseline", agents, sessions: [], branches: {}, sidebar: noSidebar });
     for (const { id, seq } of starts) {
       if (seq === undefined) {
         this.connection.cursors.set(id, this.seq(id));
@@ -173,12 +177,11 @@ function gaps(log: readonly string[]): string[] {
   return found;
 }
 
-const session = (id: string): SessionSummary => ({
+const session = (id: string): StreamedSession => ({
   file: `/s/${id}.jsonl`,
   id,
   cwd: "/home/me/project",
   createdAt: "2026-01-01T00:00:00.000Z",
-  updatedAt: "2026-01-02T00:00:00.000Z",
 });
 
 const agentFrame = (patch: Partial<AgentInfo>): StreamFrame => ({
@@ -193,6 +196,7 @@ let queryClient: QueryClient;
 let deps: Partial<RegistryDeps> & {
   fetchSnapshot: ReturnType<typeof vi.fn<(id: AgentId) => Promise<Snapshot>>>;
   ack: ReturnType<typeof vi.fn>;
+  patchSidebar: ReturnType<typeof vi.fn<(patch: SidebarPatch) => Promise<SidebarState>>>;
 };
 let registry: LiveRegistry;
 
@@ -232,6 +236,7 @@ beforeEach(() => {
   deps = {
     fetchSnapshot: vi.fn(async (id: AgentId) => server.snapshot(id)),
     ack: vi.fn(async () => {}),
+    patchSidebar: vi.fn(async () => noSidebar),
     document: fakeDocument as unknown as RegistryDeps["document"],
     window: fakeWindow as unknown as RegistryDeps["window"],
   };
@@ -256,12 +261,14 @@ describe("LiveRegistry", () => {
       agents: [makeAgent({ id: "a1" })],
       sessions: [session("s1")],
       branches: { "/home/me/project": "main" },
+      sidebar: { pinned: ["/home/me/repo"], collapsed: [] },
     });
     expect(registry.live.getState()).toMatchObject({
       loaded: true,
       agents: { a1: { id: "a1" } },
       sessions: [{ id: "s1" }],
       branches: { "/home/me/project": "main" },
+      sidebar: { pinned: ["/home/me/repo"], collapsed: [] },
       connection: "live",
     });
 
@@ -273,48 +280,81 @@ describe("LiveRegistry", () => {
     expect(registry.live.getState().branches).toEqual({ "/home/me/other": "feat" });
   });
 
-  it("invalidates the session and project lists only when what they show or their order changes", () => {
+  it("refetches the session and project lists on every catalog frame", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const invalidated = () => invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey);
     start();
     latest().open();
-    latest().send({ type: "baseline", agents: [], sessions: [session("s1")], branches: {} });
-
-    // A session write only moves updatedAt: nothing to refetch.
-    const touched = { ...session("s1"), updatedAt: "2026-01-03T00:00:00.000Z" };
-    latest().send({ type: "catalog", sessions: [touched] });
-    expect(registry.live.getState().sessions).toEqual([touched]);
-    expect(invalidateQueries).not.toHaveBeenCalled();
-
-    // A new session in a known folder.
-    latest().send({ type: "catalog", sessions: [session("s2"), touched] });
-    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
-
-    // A rename.
-    invalidateQueries.mockClear();
-    latest().send({ type: "catalog", sessions: [{ ...session("s2"), name: "Named" }, touched] });
-    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
-
-    // A write to the second session moves it to the top.
-    invalidateQueries.mockClear();
-    const top = { ...touched, updatedAt: "2026-01-04T00:00:00.000Z" };
-    latest().send({ type: "catalog", sessions: [top, { ...session("s2"), name: "Named" }] });
-    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
-
-    // Another write to it keeps the order.
-    invalidateQueries.mockClear();
-    const retouched = { ...touched, updatedAt: "2026-01-05T00:00:00.000Z" };
-    latest().send({ type: "catalog", sessions: [retouched, { ...session("s2"), name: "Named" }] });
-    expect(invalidateQueries).not.toHaveBeenCalled();
-
-    // A new folder.
-    invalidateQueries.mockClear();
-    const elsewhere = { ...session("s3"), cwd: "/home/me/other" };
     latest().send({
-      type: "catalog",
-      sessions: [elsewhere, retouched, { ...session("s2"), name: "Named" }],
+      type: "baseline",
+      agents: [],
+      sessions: [session("s1")],
+      branches: {},
+      sidebar: noSidebar,
     });
-    expect(invalidated()).toEqual([["sessions"], ["projects"]]);
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    const prompted = { ...session("s1"), lastPromptAt: "2026-01-03T00:00:00.000Z" };
+    latest().send({ type: "catalog", sessions: [prompted] });
+    expect(registry.live.getState().sessions).toEqual([prompted]);
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ["sessions"],
+      ["projects"],
+    ]);
+  });
+
+  it("follows sidebar frames and applies its own changes at once", async () => {
+    start();
+    latest().open();
+    latest().send({
+      type: "baseline",
+      agents: [],
+      sessions: [],
+      branches: {},
+      sidebar: { pinned: [], collapsed: ["/a"] },
+    });
+    latest().send({ type: "sidebar", sidebar: { pinned: ["/r"], collapsed: ["/a", "/b"] } });
+    expect(registry.live.getState().sidebar).toEqual({ pinned: ["/r"], collapsed: ["/a", "/b"] });
+
+    // Shown before the server answers; then what it answers for those paths.
+    let answer: (state: SidebarState) => void = () => {};
+    deps.patchSidebar.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const done = registry.setSidebar({ pinned: { "/r": false }, collapsed: { "/c": true } });
+    expect(registry.live.getState().sidebar).toEqual({
+      pinned: [],
+      collapsed: ["/a", "/b", "/c"],
+    });
+    // The server skipped "/c" (its folder is gone).
+    answer({ pinned: [], collapsed: ["/a", "/b"] });
+    await done;
+    expect(registry.live.getState().sidebar).toEqual({ pinned: [], collapsed: ["/a", "/b"] });
+
+    // A refusal puts the flags back.
+    deps.patchSidebar.mockRejectedValueOnce(new Error("nope"));
+    const error = await registry.setSidebar({ collapsed: { "/a": false } }).catch((e) => e);
+    expect(error).toEqual(new Error("nope"));
+    expect(registry.live.getState().sidebar.collapsed).toEqual(["/b", "/a"]);
+  });
+
+  it("expands only collapsed groups, and asks the server only then", () => {
+    start();
+    latest().open();
+    latest().send({
+      type: "baseline",
+      agents: [],
+      sessions: [],
+      branches: {},
+      sidebar: { pinned: [], collapsed: ["/repo", "/other"] },
+    });
+    registry.expand(["/repo/wt", "/elsewhere"]);
+    expect(deps.patchSidebar).not.toHaveBeenCalled();
+    registry.expand(["/repo/wt", "/repo"]);
+    expect(deps.patchSidebar.mock.calls).toEqual([[{ collapsed: { "/repo": false } }]]);
+    expect(registry.live.getState().sidebar.collapsed).toEqual(["/other"]);
   });
 
   it("reconnects on each hydrate with every hydrated store at its seq", async () => {
@@ -513,6 +553,7 @@ describe("LiveRegistry", () => {
       agents: [makeAgent({ id: "a2" })],
       sessions: [],
       branches: {},
+      sidebar: noSidebar,
     });
     expect(a1.getState().closed).toBe(true);
     expect(a2.getState().closed).toBe(false);
