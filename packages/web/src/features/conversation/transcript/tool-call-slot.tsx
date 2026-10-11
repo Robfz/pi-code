@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useConversation } from "@/store/context";
-import { selectIsRunning, selectToolResults } from "@/store/selectors";
+import type { ConversationState } from "@/store/conversation-store";
+import { selectToolResults } from "@/store/selectors";
 import type { ToolResultPayload, ToolStatus } from "@/tools/registry";
 import { ToolCallView } from "@/tools/tool-call-view";
 
@@ -8,6 +9,23 @@ function asPayload(result: unknown): ToolResultPayload | undefined {
   if (typeof result !== "object" || result === null) return undefined;
   const { content, details } = result as { content?: unknown; details?: unknown };
   return { content: Array.isArray(content) ? content : [], details };
+}
+
+/**
+ * A call's status: its committed result's, else its live run's; a call with neither runs while
+ * the run is active.
+ */
+export function toolStatus(
+  s: ConversationState,
+  toolCallId: string,
+  streaming = false,
+): ToolStatus {
+  const committed = selectToolResults(s).get(toolCallId);
+  if (committed) return committed.isError ? "error" : "done";
+  const live = s.live.tools[toolCallId];
+  if (live) return live.status;
+  if (streaming) return "streaming";
+  return s.live.run.active ? "running" : "done";
 }
 
 /**
@@ -34,28 +52,12 @@ export function ToolCallSlot({
   const committed = useConversation((s) => selectToolResults(s).get(toolCallId));
   const live = useConversation((s) => s.live.tools[toolCallId]);
   const curatorUrl = useConversation((s) => s.live.curator[toolCallId]);
-  // Only a call with neither result nor live run needs the run state (running vs. done).
-  const orphan = committed === undefined && live === undefined && !streaming;
-  const running = useConversation((s) => orphan && selectIsRunning(s));
+  const status = useConversation((s) => toolStatus(s, toolCallId, streaming));
   const liveResult = live?.result;
   const result = useMemo<ToolResultPayload | undefined>(() => {
     if (committed) return { content: committed.content, details: committed.details };
     return asPayload(liveResult);
   }, [committed, liveResult]);
-
-  let status: ToolStatus;
-  let isError = false;
-  if (committed) {
-    isError = committed.isError;
-    status = isError ? "error" : "done";
-  } else if (live) {
-    status = live.status;
-    isError = live.status === "error";
-  } else if (streaming) {
-    status = "streaming";
-  } else {
-    status = running ? "running" : "done";
-  }
 
   return (
     <ToolCallView
@@ -66,7 +68,7 @@ export function ToolCallSlot({
       status={status}
       partialResult={committed ? undefined : live?.partialResult}
       result={result}
-      isError={isError}
+      isError={status === "error"}
       curatorUrl={curatorUrl}
       durationMs={committed ? committed.durationMs : live?.durationMs}
       startedAt={committed ? undefined : live?.startedAt}

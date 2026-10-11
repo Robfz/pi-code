@@ -1,10 +1,15 @@
-import { TagIcon } from "lucide-react";
-import { Fragment, memo, useMemo } from "react";
+import { ListChecksIcon, TagIcon } from "lucide-react";
+import { createContext, memo, type ReactNode, useContext, useMemo } from "react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { Badge } from "@/components/ui/badge";
+import { formatSeconds } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { Step, Turn } from "@/store/turns";
+import { type Step, type Turn, turnStats } from "@/store/turns";
+import { useRowOpen, useUiPrefs } from "@/store/ui-prefs";
 import { AssistantText, StopReasonNotice } from "./assistant-message";
 import { renderEntry } from "./entry";
+import { ExplorationGroupRow } from "./exploration-group";
+import { failedToolCalls, foldSteps, groupSteps, type Item } from "./grouping";
 import { useLiveSteps } from "./live-section";
 import { Thinking } from "./thinking";
 import { ToolCallSlot } from "./tool-call-slot";
@@ -62,6 +67,93 @@ function EntryLabel({ entryId, label }: { entryId: string; label: string }) {
   );
 }
 
+/** Labels by the key of the first step of each labelled entry. */
+const StepLabels = createContext<ReadonlyMap<string, string>>(new Map());
+
+function StepItem({ step }: { step: Step }) {
+  const label = useContext(StepLabels).get(step.key);
+  return (
+    <>
+      {label !== undefined && step.entryId !== undefined && (
+        <EntryLabel entryId={step.entryId} label={label} />
+      )}
+      <StepView step={step} />
+    </>
+  );
+}
+
+function Items({ items }: { items: readonly Item[] }) {
+  return items.map((item) =>
+    item.kind === "group" ? (
+      <ExplorationGroupRow key={item.key} group={item}>
+        {item.steps.map((step) => (
+          <StepItem key={step.key} step={step} />
+        ))}
+      </ExplorationGroupRow>
+    ) : (
+      <StepItem key={item.key} step={item} />
+    ),
+  );
+}
+
+/** Compact's fold of a finished turn's work: "Worked for 2m 14s", the steps grouped in its body. */
+function WorkedRow({ turn, children }: { turn: Turn; children: ReactNode }) {
+  const [open, setOpen] = useRowOpen(() => false);
+  const durationMs = useMemo(() => turnStats(turn).durationMs, [turn]);
+  return (
+    <CollapsibleRow
+      data-testid="worked"
+      open={open}
+      onOpenChange={setOpen}
+      icon={<ListChecksIcon />}
+      label={
+        <span data-slot="row-verb" className="font-[450] text-muted-foreground">
+          {durationMs === undefined ? "Worked" : `Worked for ${formatSeconds(durationMs)}`}
+        </span>
+      }
+    >
+      <div className="pb-1">{children}</div>
+    </CollapsibleRow>
+  );
+}
+
+/**
+ * What a turn shows of its steps for the density: every step (Detailed), exploration grouped
+ * (Balanced), or, in Compact, the work folded into a "Worked" row (finished) or the latest text
+ * alone (live).
+ */
+function TurnBody({
+  turn,
+  steps,
+  live,
+  failed,
+}: {
+  turn: Turn;
+  steps: Step[];
+  live: boolean;
+  failed: ReadonlySet<string>;
+}) {
+  const density = useUiPrefs((s) => s.density);
+  const view = useMemo(() => {
+    if (density === "detailed") return { items: steps };
+    if (density === "balanced") return { items: groupSteps(steps, failed) };
+    if (live) return { items: steps.filter((step) => step.kind === "text").slice(-1) };
+    const { folded, rest } = foldSteps(steps);
+    return { worked: folded.length > 0 ? groupSteps(folded, failed) : undefined, items: rest };
+  }, [density, steps, live, failed]);
+
+  return (
+    <>
+      {view.worked && (
+        <WorkedRow turn={turn}>
+          <Items items={view.worked} />
+        </WorkedRow>
+      )}
+      <Items items={view.items} />
+    </>
+  );
+}
+
 /**
  * One turn: its user message, then its steps. The last turn also shows what's in flight
  * (`useLiveSteps`); the others render from committed entries only.
@@ -86,9 +178,25 @@ export const TurnView = memo(function TurnView({
     const committed = new Set(turn.steps.map((step) => step.key));
     return [...turn.steps, ...live.steps.filter((step) => !committed.has(step.key))];
   }, [turn.steps, live.steps]);
+  const committedFailures = useMemo(() => failedToolCalls(turn.entries), [turn.entries]);
+  const failed = useMemo(
+    () =>
+      live.failed.size === 0 ? committedFailures : new Set([...committedFailures, ...live.failed]),
+    [committedFailures, live.failed],
+  );
+  const stepLabels = useMemo(() => {
+    const byStep = new Map<string, string>();
+    const seen = new Set<string>();
+    for (const step of steps) {
+      if (step.entryId === undefined || seen.has(step.entryId)) continue;
+      seen.add(step.entryId);
+      const label = labels.get(step.entryId);
+      if (label !== undefined) byStep.set(step.key, label);
+    }
+    return byStep;
+  }, [steps, labels]);
 
   if (!turn.user && steps.length === 0) return null;
-  const labelled = new Set<string>();
   const userLabel = turn.user && !pending ? labels.get(turn.id) : undefined;
 
   return (
@@ -106,21 +214,9 @@ export const TurnView = memo(function TurnView({
           <UserMessageView message={turn.user} pending={pending} />
         </div>
       )}
-      {steps.map((step) => {
-        let label: string | undefined;
-        if (step.entryId !== undefined && !labelled.has(step.entryId)) {
-          labelled.add(step.entryId);
-          label = labels.get(step.entryId);
-        }
-        return (
-          <Fragment key={step.key}>
-            {label !== undefined && step.entryId !== undefined && (
-              <EntryLabel entryId={step.entryId} label={label} />
-            )}
-            <StepView step={step} />
-          </Fragment>
-        );
-      })}
+      <StepLabels.Provider value={stepLabels}>
+        <TurnBody turn={turn} steps={steps} live={live.active} failed={failed} />
+      </StepLabels.Provider>
     </section>
   );
 });

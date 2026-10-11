@@ -13,7 +13,7 @@ import { ToolCallView, type ToolCallViewProps } from "./tool-call-view";
 
 beforeAll(stubCanvas);
 afterEach(() => {
-  useUiPrefs.setState({ toolsExpanded: false });
+  useUiPrefs.setState({ density: "balanced" });
   vi.unstubAllGlobals();
 });
 
@@ -451,8 +451,8 @@ describe("grep / find / ls", () => {
     });
   });
 
-  it("honours the global expand toggle", () => {
-    useUiPrefs.setState({ toolsExpanded: true });
+  it("is expanded in Detailed density", () => {
+    useUiPrefs.setState({ density: "detailed" });
     view({
       toolCallId: "l2",
       toolName: "ls",

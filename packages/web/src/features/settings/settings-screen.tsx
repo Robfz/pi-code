@@ -15,7 +15,7 @@ import {
 } from "@/lib/push";
 import { queryKeys } from "@/lib/query-client";
 import { PlaceholderScreen } from "@/routes/placeholder";
-import { useUiPrefs } from "@/store/ui-prefs";
+import { DENSITIES, DENSITY_LABEL, useUiPrefs } from "@/store/ui-prefs";
 
 const PUSH_KEY = ["push-status"] as const;
 
@@ -128,29 +128,24 @@ function NotificationsSection() {
   );
 }
 
-function ToolsSection() {
-  const expanded = useUiPrefs((s) => s.toolsExpanded);
-  const setExpanded = useUiPrefs((s) => s.setToolsExpanded);
+function DensitySection() {
+  const density = useUiPrefs((s) => s.density);
+  const setDensity = useUiPrefs((s) => s.setDensity);
   return (
-    <Section title="Tool calls">
-      <p>How tool calls appear in conversations (the header toggle changes it too).</p>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant={expanded ? "outline" : "default"}
-          aria-pressed={!expanded}
-          onClick={() => setExpanded(false)}
-        >
-          Collapsed
-        </Button>
-        <Button
-          size="sm"
-          variant={expanded ? "default" : "outline"}
-          aria-pressed={expanded}
-          onClick={() => setExpanded(true)}
-        >
-          Expanded
-        </Button>
+    <Section title="Transcript density">
+      <p>How much of each turn conversations show (the header menu changes it too).</p>
+      <div className="flex flex-wrap gap-2">
+        {DENSITIES.map((level) => (
+          <Button
+            key={level}
+            size="sm"
+            variant={density === level ? "default" : "outline"}
+            aria-pressed={density === level}
+            onClick={() => setDensity(level)}
+          >
+            {DENSITY_LABEL[level].name}
+          </Button>
+        ))}
       </div>
     </Section>
   );
@@ -200,7 +195,7 @@ export function SettingsScreen() {
     <PlaceholderScreen title="Settings">
       <div className="flex flex-col gap-6 pb-8">
         <NotificationsSection />
-        <ToolsSection />
+        <DensitySection />
         <ThemeSection />
         <AboutSection />
       </div>

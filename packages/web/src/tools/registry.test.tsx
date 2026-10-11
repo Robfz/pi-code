@@ -15,7 +15,7 @@ const base: Omit<ToolRendererProps, "expanded" | "status" | "isError"> = {
 };
 
 afterEach(() => {
-  useUiPrefs.setState({ toolsExpanded: false });
+  useUiPrefs.setState({ density: "balanced" });
 });
 
 describe("tool renderers", () => {
@@ -91,8 +91,8 @@ describe("tool renderers", () => {
     expect(within(rowBody(row)).getByText("Command aborted")).toHaveClass("text-destructive");
   });
 
-  it("the global toggle expands every tool", () => {
-    useUiPrefs.setState({ toolsExpanded: true });
+  it("Detailed density expands every tool", () => {
+    useUiPrefs.setState({ density: "detailed" });
     render(
       <ToolCallView
         {...base}

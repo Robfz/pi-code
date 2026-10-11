@@ -23,7 +23,7 @@ vi.mock("sonner", async (importOriginal) => {
 
 beforeAll(stubCanvas);
 afterEach(() => {
-  useUiPrefs.setState({ toolsExpanded: false });
+  useUiPrefs.setState({ density: "balanced" });
   vi.unstubAllGlobals();
   vi.mocked(toast.error).mockClear();
   delete (Element.prototype as Partial<Element>).scrollIntoView;
@@ -106,7 +106,7 @@ describe("SelectableDiff on desktop", () => {
   it("inserts a clicked line of a tool diff and focuses the composer", async () => {
     desktop();
     stubFetch();
-    useUiPrefs.setState({ toolsExpanded: true });
+    useUiPrefs.setState({ density: "detailed" });
     await renderWithStore(
       <>
         <Composer />
@@ -133,7 +133,7 @@ describe("SelectableDiff on desktop", () => {
 
   it("inserts an absolute tool path inside the cwd relative to it", async () => {
     desktop();
-    useUiPrefs.setState({ toolsExpanded: true });
+    useUiPrefs.setState({ density: "detailed" });
     renderDiff(<ToolCallView {...editCall("/home/me/project/src/notes.txt")} />);
     await tap("new", 1);
     expect(draftText()).toBe("@src/notes.txt:1 ");

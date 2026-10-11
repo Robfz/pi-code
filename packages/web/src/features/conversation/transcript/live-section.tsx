@@ -62,14 +62,19 @@ function streamingSteps(streaming: StreamingMessage | undefined): Step[] {
 const NO_TOOLS: Record<string, ToolRun> = {};
 const NO_IDS = new Set<string>();
 const NO_STEPS: Step[] = [];
+const NO_FAILURES: ReadonlySet<string> = new Set();
 
 /**
  * What the live turn adds to its committed steps: the streaming message's blocks, then tools
- * running with no call in the transcript or the streaming message (e.g. after a reload).
- * `enabled` only for the transcript's last turn; the others subscribe to constants, so token
- * deltas re-render that turn alone.
+ * running with no call in the transcript or the streaming message (e.g. after a reload), and the
+ * live runs that failed. `enabled` only for the transcript's last turn; the others subscribe to
+ * constants, so token deltas re-render that turn alone.
  */
-export function useLiveSteps(enabled: boolean): { active: boolean; steps: Step[] } {
+export function useLiveSteps(enabled: boolean): {
+  active: boolean;
+  steps: Step[];
+  failed: ReadonlySet<string>;
+} {
   const active = useConversation(
     (s) =>
       enabled &&
@@ -97,7 +102,11 @@ export function useLiveSteps(enabled: boolean): { active: boolean; steps: Step[]
     const all = [...fromStreaming, ...orphans];
     return all.length > 0 ? all : NO_STEPS;
   }, [streaming, tools, committedIds]);
-  return { active, steps };
+  const failed = useMemo(() => {
+    const ids = Object.keys(tools).filter((id) => tools[id]?.status === "error");
+    return ids.length > 0 ? new Set(ids) : NO_FAILURES;
+  }, [tools]);
+  return { active, steps, failed };
 }
 
 /** `!` / `!!` commands in flight (committed as `bashExecution` entries when done). */

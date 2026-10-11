@@ -1,7 +1,8 @@
 import { activeBranch, initialLiveState, type SessionEntry } from "@pi-code/protocol";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useUiPrefs } from "@/store/ui-prefs";
 import { fixtureNames, fixtureTranscript, makeAgent } from "@/test/fixtures";
 import { hydratedStore, renderWithStore } from "@/test/render";
 import { Transcript } from "./transcript";
@@ -20,7 +21,16 @@ async function renderTranscript(name: string) {
   return { transcript, branch: activeBranch(transcript) };
 }
 
+beforeEach(() => {
+  useUiPrefs.setState({ density: "balanced" });
+});
+
 describe.each(fixtureNames())("transcript of fixture %s", (name) => {
+  // Detailed: no exploration group hides a call in its collapsed body.
+  beforeEach(() => {
+    useUiPrefs.setState({ density: "detailed" });
+  });
+
   it("renders every visible entry of the active branch", async () => {
     const { branch } = await renderTranscript(name);
     const root = await screen.findByTestId("transcript");

@@ -2,6 +2,7 @@ import { BrainIcon } from "lucide-react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { formatSeconds } from "@/lib/time";
 import { useConversation } from "@/store/context";
+import { useRowOpen } from "@/store/ui-prefs";
 
 function lastLine(text: string): string {
   const lines = text.split("\n").filter((line) => line.trim() !== "");
@@ -11,7 +12,7 @@ function lastLine(text: string): string {
 /**
  * A thinking block's row: "Thinking" with its latest line while it streams, then "Thought for
  * 12s" (from the streaming block's `startedAt` / `endedAt`, else the live state's `thinkingMs`
- * under `durationKey`), or "Thought" when the duration is unknown.
+ * under `durationKey`), or "Thought" when the duration is unknown. Open by default in Detailed.
  */
 export function Thinking({
   text,
@@ -32,6 +33,7 @@ export function Thinking({
   const recorded = useConversation((s) =>
     durationKey === undefined ? undefined : s.live.thinkingMs[durationKey],
   );
+  const [open, setOpen] = useRowOpen((density) => density === "detailed");
   const durationMs =
     startedAt !== undefined && endedAt !== undefined ? endedAt - startedAt : recorded;
 
@@ -50,6 +52,8 @@ export function Thinking({
   return (
     <CollapsibleRow
       data-testid="thinking"
+      open={open}
+      onOpenChange={setOpen}
       icon={<BrainIcon />}
       label={
         live ? (
