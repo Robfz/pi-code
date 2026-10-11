@@ -24,7 +24,7 @@ src/
 | `PI_CODE_HOSTNAME` | required | Tailnet hostname, e.g. `mac.tail1234.ts.net`; used for the Host allowlist and origin checks |
 | `PI_CODE_PI_BIN` | `pi` on `PATH` | pi executable |
 | `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys, push subscriptions |
-| `PI_AGENT_DIR` | `~/.pi/agent` | Sessions, trust.json; read-only except worktree removal, which deletes the worktree's session files |
+| `PI_AGENT_DIR` | `~/.pi/agent` | Sessions, trust.json; read-only except session deletion and worktree removal, which delete session files |
 
 Tailscale setup (documented in the README, not automated):
 
@@ -60,7 +60,7 @@ The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi 
 - `agents: Map<agentId, Agent>` and `owners: Map<sessionFile, agentId>`.
 - `open({ cwd })` → new agent, new session.
 - `open({ sessionFile })` → if already owned, return the existing agent; else spawn with `--session` and `cwd` read from the session header.
-- `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id`, the idle sweep and worktree removal).
+- `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id`, the idle sweep, session deletion and worktree removal).
 - Each agent's cwd is classified once at creation (`layoutOf`); `AgentInfo.layout` carries it.
 - Emits `agent` on every `AgentInfo` change and `closed` when an agent is removed; the StreamHub turns them into frames.
 - After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
@@ -121,7 +121,7 @@ Dialog answers go through `POST /api/agents/:id/ui-responses`, written to pi as 
 
 ## Catalog
 
-Read-only over `~/.pi/agent/sessions`, parsing the documented session format; worktree removal is the one write (see Worktrees).
+Read-only over `~/.pi/agent/sessions`, parsing the documented session format; session deletion and worktree removal are the only writes (see Session deletion and Worktrees).
 
 - **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached by `(path, mtime, size)`.
 - **Search** — `GET /api/sessions?q=`: case-insensitive substring match on the session's `cwd` path and name, over all sessions whatever their age.
@@ -147,7 +147,11 @@ Read-only over `~/.pi/agent/sessions`, parsing the documented session format; wo
 `POST` / `DELETE /api/worktrees` (`http/worktrees-routes.ts`, `git/worktrees.ts`; design in [`06-worktrees.md`](06-worktrees.md)) work only in `<repo>/main` layout repos, with paths canonicalized inside `$HOME` (`canonicalPath`, `paths.ts`).
 
 - **Create**: validate name, branch and base, refuse an existing folder or branch, `git fetch origin` (non-interactive ssh), `git worktree add -b <branch> <repo>/<name> <base>` (default `origin/main`, else `origin/master`), then `manager.open({ cwd })`. `fetch` and `worktree add` time out after 60 s.
-- **Remove**: without `force`, refuse uncommitted changes, untracked files or submodules (`worktree_dirty`); close the agents inside the worktree; `git worktree remove [--force]` from the main checkout (10 min timeout; a missing folder's record is pruned); delete the sessions whose header `cwd` is inside it (`trash`, else `unlink`; `catalog/session-files.ts`), the only write to pi's agent dir; refresh the catalog.
+- **Remove**: without `force`, refuse uncommitted changes, untracked files or submodules (`worktree_dirty`); close the agents inside the worktree; `git worktree remove [--force]` from the main checkout (10 min timeout; a missing folder's record is pruned); delete the sessions whose header `cwd` is inside it (`trash`, else `unlink`; `catalog/session-files.ts`); refresh the catalog.
+
+## Session deletion
+
+`DELETE /api/sessions { file }` (`http/sessions-routes.ts`; design in [`08-delete-sessions.md`](08-delete-sessions.md)) closes every agent, exited ones included, whose `sessionFile` is the file's realpath, then deletes the file through `deleteSessionFiles` only if `SessionCatalog.sessions()` lists it (`trash`, else `unlink`). An existing unlisted file is kept (`400 session_not_listed`); a missing one answers `204`. The catalog is refreshed, failures included. With worktree removal, it is one of pi-code's two writes to pi's agent dir.
 
 ## Push
 

@@ -6,6 +6,7 @@ export const API_ERROR_STATUS = {
   streaming_behavior_required: 400,
   not_in_layout: 400,
   not_a_worktree: 400,
+  session_not_listed: 400,
   forbidden_origin: 403,
   forbidden_host: 403,
   agent_not_found: 404,

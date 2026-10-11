@@ -11,6 +11,7 @@ import type {
   AllowedRpcCommandType,
   CreateWorktreeBody,
   CursorList,
+  DeleteSessionBody,
   DirSuggestion,
   DirsResponse,
   FileContentResponse,
@@ -211,6 +212,12 @@ export async function listSessions(cwd?: string): Promise<SessionSummary[]> {
 export async function searchSessions(q: string): Promise<SessionSummary[]> {
   return (await request<SessionsResponse>("GET", `/api/sessions?q=${encodeURIComponent(q)}`))
     .sessions;
+}
+
+/** Deletes a listed session file, stopping the agents that hold it first. */
+export function deleteSession(file: string): Promise<void> {
+  const body: DeleteSessionBody = { file };
+  return request<void>("DELETE", "/api/sessions", body);
 }
 
 /** Directory autocomplete under `$HOME` (`prefix` may start with `~`). */

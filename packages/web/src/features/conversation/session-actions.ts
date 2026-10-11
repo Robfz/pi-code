@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { closeAgent, errorMessage, isApiRequestError, rpc } from "@/lib/api";
+import { errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useConversation } from "@/store/context";
 import { useDrafts } from "@/store/drafts";
@@ -125,17 +125,6 @@ export function useSessionActions() {
           return true;
         });
         return ok === true;
-      },
-
-      async close(): Promise<boolean> {
-        const ok = await attempt(async () => {
-          await closeAgent(agentId);
-          return true;
-        });
-        if (!ok) return false;
-        invalidateCatalog();
-        void navigate({ to: "/" });
-        return true;
       },
     };
   }, [agentId, navigate, queryClient]);

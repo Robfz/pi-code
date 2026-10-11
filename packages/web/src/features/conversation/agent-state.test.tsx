@@ -51,7 +51,7 @@ describe("agent lifecycle states", () => {
     expect(screen.getByTestId("agent-starting")).toHaveTextContent("Starting pi…");
   });
 
-  it("exited: shows the stderr tail, restarts and closes", async () => {
+  it("exited: shows the stderr tail, restarts and stops", async () => {
     const { calls } = stubFetch((call) =>
       call.url === "/api/agents/a1/restart"
         ? [200, { agent: makeAgent({ status: "starting" }) }]
@@ -61,6 +61,7 @@ describe("agent lifecycle states", () => {
       agent: makeAgent({ status: "exited", exitCode: 1, stderrTail: ["boom", "stack line"] }),
     });
     const { router } = await renderWithStore(<AgentStatePanel />, store);
+    await router.navigate({ to: "/agents/$agentId", params: { agentId: "a1" } });
     const panel = screen.getByTestId("agent-exited");
     expect(panel).toHaveTextContent("pi exited with code 1");
     expect(panel).toHaveTextContent("boom");
@@ -76,7 +77,7 @@ describe("agent lifecycle states", () => {
     );
     expect(store.getState().agent.status).toBe("exited");
 
-    await user.click(await screen.findByRole("button", { name: /Close/ }));
+    await user.click(await screen.findByRole("button", { name: /Stop/ }));
     await waitFor(() =>
       expect(calls.map((c) => [c.method, c.url])).toContainEqual(["DELETE", "/api/agents/a1"]),
     );

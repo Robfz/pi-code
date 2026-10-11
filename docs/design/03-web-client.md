@@ -1,6 +1,6 @@
 # Web client design
 
-React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md), and the review panel, draft store and line references in [`07-code-review.md`](07-code-review.md); this document summarizes them.
+React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md), the review panel, draft store and line references in [`07-code-review.md`](07-code-review.md), and Stop and Delete in [`08-delete-sessions.md`](08-delete-sessions.md); this document summarizes them.
 
 | Concern | Choice |
 |---|---|
@@ -31,7 +31,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 ## Shell and sidebar
 
-`AppShell` wraps every route (offline banner, badge sync, service-worker messages, `WorktreeActionsProvider`) and switches on `(min-width: 1024px)` (`useIsDesktop`):
+`AppShell` wraps every route (offline banner, badge sync, service-worker messages, `WorktreeActionsProvider`, `StopOrDeleteProvider`) and switches on `(min-width: 1024px)` (`useIsDesktop`):
 
 | | Desktop (≥1024px) | Phone (<1024px) |
 |---|---|---|
@@ -46,7 +46,7 @@ The tree screen (on both) and the phone review page keep their "Back to conversa
 
 - **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), in listing groups (below); groups and rows most recent first. Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
 - **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; a compact attention icon (Home keeps text badges); relative activity time, refreshed every 60 s. The route's agent is highlighted.
-- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on live rows (labelled "Close {title} ({folder})") → `DELETE /api/agents/:id` then `drop`, after a confirmation when the agent is streaming or awaiting input, disabled while the request is in flight. A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
+- **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on every row (the `×` rule below). A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
 - **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once. A themed × button clears the field.
 
 ### Listing groups and worktrees
@@ -54,6 +54,16 @@ The tree screen (on both) and the phone review page keep their "Back to conversa
 Every listing (sidebar, Home, `/sessions`, the picker's recent projects) goes through `groupListing` (`features/catalog/listing-groups.ts`): items without `layout` form folder groups by cwd; items of a `<repo>/main` layout repo form one repo group, with the container's own items under its header and one sub-group per checkout, `main` first. In a missing worktree, exited agents and the sessions no live agent holds are disabled.
 
 `WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`); header buttons reach it through `useWorktreeActions`.
+
+### Stop and Delete
+
+`StopOrDeleteProvider` (`features/sessions/stop-or-delete.tsx`) owns the Stop-or-Delete dialog; the sidebar, Home ("Open conversations", "Recent sessions"), `/sessions` and the conversation header reach it through `useStopOrDelete`. The `×` rule, on every row of those lists (not the share screen):
+
+- Live agent → dialog "Stop or delete {title}?" with Cancel, Stop and Delete; labelled "Stop or delete {title} ({folder})".
+- Exited agent, or session no agent holds → deletes at once; labelled "Delete {title} ({folder})". It works in a missing worktree too, where the row is disabled for opening.
+- Home or `/sessions` session held by an agent (in `live.agents`, by `sessionFile`) → that agent's rule.
+
+Stop is `DELETE /api/agents/:id`; Delete is `deleteSession(file)` (`DELETE /api/sessions`), with the agent's `sessionFile` for an agent row (only Stop when it has none yet). Both `drop` the agent; a delete invalidates the `sessions` and `projects` queries. Stopping or deleting the conversation on screen navigates to `/`. A row's `×` is disabled while its own request runs; failures show a toast; success shows nothing.
 
 ## Live registry
 
@@ -119,13 +129,13 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 ## Conversation screen
 
 ```
-┌ header: session name · project · changes (desktop) · ⋮ (tree, diff on phone, fork…) ┐
-│ transcript (active branch, committed)                                               │
-│ live: pending user message, streaming assistant message, running tools, bash output │
-│ widgets (aboveEditor)                                                               │
-│ composer                                                                            │
-│ widgets (belowEditor)                                                               │
-└ status bar ─────────────────────────────────────────────────────────────────────────┘
+┌ header: session name · project · changes (desktop) · ⋮ (tree, diff on phone, fork…, stop, delete) ┐
+│ transcript (active branch, committed)                                                              │
+│ live: pending user message, streaming assistant message, running tools, bash output                │
+│ widgets (aboveEditor)                                                                              │
+│ composer                                                                                           │
+│ widgets (belowEditor)                                                                              │
+└ status bar ────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop, the header's "Show changes" button (`aria-pressed`) and `/diff` toggle the review pane, which takes the right half of the content area ([`07-code-review.md`](07-code-review.md), "Desktop pane"); the header menu's Diff item exists only on phone.

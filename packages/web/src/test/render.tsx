@@ -10,9 +10,11 @@ import {
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
+import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { createQueryClient } from "@/lib/query-client";
-import { ConversationStoreProvider } from "@/store/context";
+import { ConversationStoreProvider, LiveRegistryProvider } from "@/store/context";
 import { type ConversationStore, createConversationStore } from "@/store/conversation-store";
+import { LiveRegistry } from "@/store/live-registry";
 import { makeSnapshot } from "./fixtures";
 
 /** A hydrated store (no connection). */
@@ -24,16 +26,30 @@ export function hydratedStore(patch: Partial<Snapshot> = {}): ConversationStore 
   return store;
 }
 
-/** Render inside a store provider and a minimal router (for `Link` / `useNavigate`). */
+/**
+ * Render inside a store provider, a live registry (never started), the Stop-or-Delete provider
+ * and a minimal router (for `Link` / `useNavigate`).
+ */
 export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
   const queryClient = createQueryClient();
   queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
+  const registry = new LiveRegistry(queryClient);
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>
-        <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>
+        <LiveRegistryProvider registry={registry}>
+          <StopOrDeleteProvider>
+            <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>
+          </StopOrDeleteProvider>
+        </LiveRegistryProvider>
       </QueryClientProvider>
     ),
+  });
+  // Its `agentId` param marks the conversation on screen, as in the app.
+  const agent = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "agents/$agentId/$",
+    component: () => null,
   });
   const catchAll = createRoute({
     getParentRoute: () => rootRoute,
@@ -41,12 +57,12 @@ export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
     component: () => null,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([catchAll]),
+    routeTree: rootRoute.addChildren([agent, catchAll]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
   const result = render(<RouterProvider router={router as never} />);
-  return { ...result, router, queryClient };
+  return { ...result, router, queryClient, registry };
 }
 
 export interface FetchCall {

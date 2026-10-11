@@ -12,6 +12,7 @@ import { agentLayout, epochMs, groupListing } from "@/features/catalog/listing-g
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { GroupedSessionList } from "@/features/catalog/session-list";
 import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
+import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
@@ -31,18 +32,28 @@ function statusLabel(agent: AgentInfo): string | null {
   }
 }
 
-const agentRowClass = "flex min-w-0 items-center gap-3 rounded-xl border bg-card/40 px-3 py-2.5";
+const agentRowClass = "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5";
 
-/** `disabled`: an exited agent in a missing worktree, which can't be restarted. */
-function AgentRow({ agent, disabled }: { agent: AgentInfo; disabled: boolean }) {
+/**
+ * `disabled`: an exited agent in a missing worktree, which can't be restarted (its `×` works);
+ * `folder` names the row's folder in the `×`'s label.
+ */
+function AgentRow({
+  agent,
+  disabled,
+  folder,
+}: {
+  agent: AgentInfo;
+  disabled: boolean;
+  folder: string;
+}) {
   const status = statusLabel(agent);
+  const title = agent.sessionName ?? baseName(agent.cwd);
   const content = (
     <>
       <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">
-          {agent.sessionName ?? baseName(agent.cwd)}
-        </span>
+        <span className="truncate text-sm font-medium">{title}</span>
         <span className="truncate text-xs text-muted-foreground">{agent.cwd}</span>
       </div>
       <AttentionBadge attention={agent.attention} />
@@ -55,18 +66,20 @@ function AgentRow({ agent, disabled }: { agent: AgentInfo; disabled: boolean }) 
     </>
   );
   return (
-    <li>
+    <li
+      className={cn(
+        "flex min-w-0 items-center rounded-xl border bg-card/40",
+        !disabled && "hover:bg-muted/50",
+      )}
+    >
       {disabled ? (
         <div className={cn(agentRowClass, "opacity-70")}>{content}</div>
       ) : (
-        <Link
-          to="/agents/$agentId"
-          params={{ agentId: agent.id }}
-          className={cn(agentRowClass, "hover:bg-muted/50")}
-        >
+        <Link to="/agents/$agentId" params={{ agentId: agent.id }} className={agentRowClass}>
           {content}
         </Link>
       )}
+      <StopOrDeleteButton title={title} folder={folder} agent={agent} className="mr-2" />
     </li>
   );
 }
@@ -85,13 +98,14 @@ function OpenConversations({ agents }: { agents: AgentInfo[] }) {
     <GroupedListing
       label="Open conversations"
       groups={groups}
-      renderItems={(items, missing) => (
+      renderItems={(items, missing, folder) => (
         <ul className="flex flex-col gap-2">
           {items.map((agent) => (
             <AgentRow
               key={agent.id}
               agent={agent}
               disabled={missing && agent.status === "exited"}
+              folder={folder}
             />
           ))}
         </ul>

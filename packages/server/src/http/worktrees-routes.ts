@@ -66,21 +66,6 @@ async function openIn(manager: AgentManager, path: string): Promise<Agent> {
   }
 }
 
-/** Closes every agent, exited ones included, whose cwd is inside `path`. */
-async function closeAgentsIn(manager: AgentManager, path: string): Promise<void> {
-  const ids = manager
-    .list()
-    .filter((a) => isInside(path, a.cwd))
-    .map((a) => a.id);
-  await Promise.all(
-    ids.map((id) =>
-      manager.close(id).catch((e: unknown) => {
-        if (!isApiError(e, "agent_not_found")) throw e; // closed meanwhile
-      }),
-    ),
-  );
-}
-
 /** Deletes the sessions whose header cwd is inside `path`; `internal` naming any survivors. */
 async function deleteSessionsIn(
   catalog: SessionCatalog,
@@ -124,7 +109,7 @@ export function worktreesRoutes({ manager, catalog, hub, trashCommand }: Worktre
         // Checked before closing anything, so conversations keep running if the user cancels.
         if (!force) await assertClean(path);
         // A running pi would recreate its session file after the deletion below.
-        await closeAgentsIn(manager, path);
+        await manager.closeWhere((a) => isInside(path, a.cwd));
         await removeWorktree(main, path, force);
         try {
           await deleteSessionsIn(catalog, path, trashCommand);

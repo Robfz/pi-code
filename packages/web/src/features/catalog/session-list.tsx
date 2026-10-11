@@ -2,6 +2,7 @@ import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
 import { CircleDotIcon, LoaderIcon, MessageSquareIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
+import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
 import { baseName } from "@/lib/content";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -14,18 +15,22 @@ type OpenAgent = ReturnType<typeof useOpenAgent>;
 /**
  * Sessions as tappable rows: name (or first message), first message, project, last update,
  * "Open" when an agent already has it. Tapping resumes it through `open`; a session whose folder
- * is missing can't be resumed unless an agent still has it.
+ * is missing can't be resumed unless an agent still has it. With `folder`, each row gets a `×`
+ * (`StopOrDeleteButton`, following the holding agent's rule when one has it).
  */
 function SessionRows({
   sessions,
   open,
   showProject,
   label,
+  folder,
 }: {
   sessions: SessionSummary[];
   open: OpenAgent;
   showProject: boolean;
   label?: string;
+  /** The folder's label, for the `×`'s accessible name. */
+  folder?: string;
 }) {
   const pendingFile = open.isPending ? (open.variables as { sessionFile?: string }) : undefined;
   return (
@@ -34,7 +39,10 @@ function SessionRows({
         const title = session.name ?? session.firstMessage ?? "Empty session";
         const pending = pendingFile?.sessionFile === session.file;
         return (
-          <li key={session.file}>
+          <li
+            key={session.file}
+            className="flex min-w-0 items-start rounded-xl border bg-card/40 hover:bg-muted/50"
+          >
             <button
               type="button"
               data-testid="session-row"
@@ -42,7 +50,7 @@ function SessionRows({
                 (session.layout?.missing === true && session.ownedBy === undefined) || pending
               }
               onClick={() => open.mutate({ sessionFile: session.file })}
-              className="flex w-full min-w-0 items-start gap-3 rounded-xl border bg-card/40 px-3 py-2.5 text-left hover:bg-muted/50 disabled:opacity-70"
+              className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-2.5 text-left disabled:opacity-70"
             >
               {pending ? (
                 <LoaderIcon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
@@ -85,6 +93,14 @@ function SessionRows({
                 </Badge>
               )}
             </button>
+            {folder !== undefined && (
+              <StopOrDeleteButton
+                title={title}
+                folder={folder}
+                file={session.file}
+                className="mt-2 mr-2"
+              />
+            )}
           </li>
         );
       })}
@@ -129,7 +145,9 @@ export function GroupedSessionList({
     <GroupedListing
       label={label}
       groups={groups}
-      renderItems={(items) => <SessionRows sessions={items} open={open} showProject={false} />}
+      renderItems={(items, _missing, folder) => (
+        <SessionRows sessions={items} open={open} showProject={false} folder={folder} />
+      )}
     />
   );
 }

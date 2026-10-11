@@ -61,8 +61,11 @@ export function GroupedListing<T>({
 }: {
   label: string;
   groups: ListingGroup<T>[];
-  /** One folder's items; in a `missing` one, only live agents stay usable. */
-  renderItems(items: T[], missing: boolean): ReactNode;
+  /**
+   * One folder's items; in a `missing` one, only live agents open. `folder` is its label
+   * (`repo/worktree` for a checkout), to tell apart same-titled rows.
+   */
+  renderItems(items: T[], missing: boolean, folder: string): ReactNode;
 }) {
   return (
     <ul aria-label={label} className="flex flex-col gap-4">
@@ -70,7 +73,7 @@ export function GroupedListing<T>({
         <li key={`${group.kind}:${groupPath(group)}`}>
           {group.kind === "folder" ? (
             <Section label={group.label} path={group.cwd} icon={<ListingGroupIcon kind="folder" />}>
-              {renderItems(group.items, false)}
+              {renderItems(group.items, false, group.label)}
             </Section>
           ) : (
             <Section
@@ -79,7 +82,7 @@ export function GroupedListing<T>({
               icon={<ListingGroupIcon kind="repo" />}
               actions={<NewWorktreeButton repo={{ path: group.repo, label: group.label }} />}
             >
-              {group.items.length > 0 && renderItems(group.items, false)}
+              {group.items.length > 0 && renderItems(group.items, false, group.label)}
               {group.worktrees.length > 0 && (
                 <div className={cn(worktreeSubgroupGuideClass, "gap-2")}>
                   {group.worktrees.map((worktree) => (
@@ -99,7 +102,11 @@ export function GroupedListing<T>({
                         )
                       }
                     >
-                      {renderItems(worktree.items, worktree.missing)}
+                      {renderItems(
+                        worktree.items,
+                        worktree.missing,
+                        `${group.label}/${worktree.label}`,
+                      )}
                     </Section>
                   ))}
                 </div>

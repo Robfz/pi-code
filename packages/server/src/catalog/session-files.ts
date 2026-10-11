@@ -1,6 +1,7 @@
 /**
- * Deleting session files, pi-code's only write to pi's agent dir (design/06-worktrees.md,
- * "`DELETE /api/worktrees`").
+ * Deleting session files, pi-code's only write to pi's agent dir: `DELETE /api/sessions`
+ * (design/08-delete-sessions.md) and `DELETE /api/worktrees` (design/06-worktrees.md). Callers
+ * pass only files the catalog lists.
  */
 import { spawn } from "node:child_process";
 import { unlink } from "node:fs/promises";
