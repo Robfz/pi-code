@@ -36,8 +36,8 @@ function Counts({ additions, deletions }: { additions: number; deletions: number
   return (
     <span className="font-sans tabular-nums">
       {" "}
-      <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>{" "}
-      <span className="text-red-600 dark:text-red-400">−{deletions}</span>
+      <span className="text-diff-add">+{additions}</span>{" "}
+      <span className="text-diff-del">−{deletions}</span>
     </span>
   );
 }

@@ -10,7 +10,19 @@ import { CODE_REF_COLOR, splitCodeRefs } from "./code-refs";
 
 const SKIPPED = new Set(["pre", "a"]);
 
-export const CODE_REF_CLASS = ["cursor-pointer", "hover:underline", ...CODE_REF_COLOR.split(" ")];
+/** A mono chip, as in assistant text (`index.css` drops the chip inside inline code). */
+export const CODE_REF_CLASS = [
+  "cursor-pointer",
+  "hover:underline",
+  CODE_REF_COLOR,
+  "bg-link/12",
+  "rounded-[5px]",
+  "px-[0.38em]",
+  "py-[0.12em]",
+  "font-mono",
+  "text-[0.875em]",
+  "tracking-[-0.01em]",
+];
 
 /** `node` split into text and reference spans, or `null` without references. */
 function split(node: Text): ElementContent[] | null {

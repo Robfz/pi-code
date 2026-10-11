@@ -99,7 +99,7 @@ describe("references in messages", () => {
     const user = await screen.findByTestId("user-message");
     const buttons = within(user).getAllByRole("button");
     expect(buttons.map((button) => button.textContent)).toEqual(["@src/a.ts:3-4", "@b.ts:2"]);
-    for (const button of buttons) expect(button).toHaveClass("text-blue-600");
+    for (const button of buttons) expect(button).toHaveClass("text-link");
   });
 
   it("colors references in assistant text, not bare paths or code blocks", async () => {
@@ -114,7 +114,7 @@ describe("references in messages", () => {
     const [plain, inCode] = references(assistant);
     expect(plain).toHaveAttribute("role", "button");
     expect(plain).toHaveAttribute("tabindex", "0");
-    expect(plain).toHaveClass("text-blue-600");
+    expect(plain).toHaveClass("text-link");
     expect(inCode?.parentElement?.tagName).toBe("CODE");
     expect(assistant).toHaveTextContent("and src/a.ts:3.");
   });

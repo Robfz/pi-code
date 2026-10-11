@@ -117,9 +117,7 @@ function StatusIcon({ status }: { status: AgentStatus }) {
   }
   if (status === "failed")
     return <XIcon aria-label="Failed" className="size-3.5 text-destructive" />;
-  return (
-    <CheckIcon aria-label="Done" className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-  );
+  return <CheckIcon aria-label="Done" className="size-3.5 text-status-done" />;
 }
 
 function AgentCard({
@@ -193,7 +191,7 @@ function AgentCard({
         status === "running" && tools.length === 0 && <Notice>Running…</Notice>
       )}
       {(usage || result.model) && (
-        <p className="text-[11px] text-muted-foreground tabular-nums">
+        <p className="text-xs text-muted-foreground tabular-nums">
           {[usage, result.model].filter(Boolean).join(" · ")}
         </p>
       )}
@@ -321,7 +319,7 @@ function SubagentBody(props: ToolRendererProps) {
         />
       ))}
       {details.mode !== "single" && usage && !active && (
-        <p className="text-[11px] text-muted-foreground tabular-nums">Total: {usage}</p>
+        <p className="text-xs text-muted-foreground tabular-nums">Total: {usage}</p>
       )}
       {props.isError && props.result !== undefined && text && (
         <p className="whitespace-pre-wrap text-xs text-destructive">{text}</p>

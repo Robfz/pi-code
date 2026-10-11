@@ -46,8 +46,8 @@ function PlainPatch({ patch }: { patch: string }) {
           key={i}
           className={cn(
             "block",
-            line.startsWith("+") && "bg-emerald-500/15",
-            line.startsWith("-") && "bg-red-500/15",
+            line.startsWith("+") && "bg-diff-add/10",
+            line.startsWith("-") && "bg-diff-del/10",
           )}
         >
           {line || " "}

@@ -1,4 +1,4 @@
-import { GitBranchIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
+import { GitBranchIcon, LoaderIcon } from "lucide-react";
 import { baseName } from "@/lib/content";
 import { formatCost } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -20,9 +20,9 @@ function ContextBar({ percent }: { percent: number | null | undefined }) {
   const known = percent !== null && percent !== undefined;
   const tone =
     known && percent >= 80
-      ? "bg-destructive"
+      ? "bg-status-error"
       : known && percent >= 60
-        ? "bg-amber-500"
+        ? "bg-status-input"
         : "bg-foreground/70";
   return (
     <span
@@ -44,37 +44,22 @@ function ContextBar({ percent }: { percent: number | null | undefined }) {
   );
 }
 
-/** Leading run indicator: running / compacting / retrying n/m. */
+/** "Working" while the run is active, compacting or retrying. */
 export function RunIndicator() {
-  const run = useConversation((s) => s.live.run);
-  const compacting = useConversation((s) => s.state?.isCompacting === true);
-  const streaming = useConversation((s) => s.state?.isStreaming === true);
-  if (run.retry) {
-    return (
-      <span
-        data-testid="run-indicator"
-        className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
-      >
-        <RefreshCwIcon className="size-3 animate-spin" />
-        retrying {run.retry.attempt}/{run.retry.maxAttempts}
-      </span>
-    );
-  }
-  if (run.compaction || compacting) {
-    return (
-      <span data-testid="run-indicator" className="flex items-center gap-1 text-foreground">
-        <LoaderIcon className="size-3 animate-spin" /> compacting
-      </span>
-    );
-  }
-  if (run.active || streaming) {
-    return (
-      <span data-testid="run-indicator" className="flex items-center gap-1 text-foreground">
-        <LoaderIcon className="size-3 animate-spin" /> running
-      </span>
-    );
-  }
-  return null;
+  const working = useConversation(
+    (s) =>
+      s.live.run.active ||
+      s.live.run.retry !== undefined ||
+      s.live.run.compaction !== undefined ||
+      s.state?.isCompacting === true ||
+      s.state?.isStreaming === true,
+  );
+  if (!working) return null;
+  return (
+    <span data-testid="run-indicator" className="flex items-center gap-1 text-muted-foreground">
+      <LoaderIcon aria-hidden className="size-3 animate-spin" /> Working
+    </span>
+  );
 }
 
 const itemButton =
@@ -121,7 +106,7 @@ export function StatusBar() {
                 data-testid="status-dirty"
                 role="img"
                 aria-label="uncommitted changes"
-                className="size-1.5 rounded-full bg-amber-500"
+                className="size-1.5 rounded-full bg-status-input"
               />
             )}
           </span>

@@ -212,7 +212,7 @@ export function ComposerInput({
         }}
         className={cn(
           SHARED,
-          "relative block w-full resize-none bg-transparent text-transparent caret-foreground outline-none selection:bg-blue-500/25 selection:text-transparent",
+          "relative block w-full resize-none bg-transparent text-transparent caret-foreground outline-none selection:bg-link/25 selection:text-transparent",
           className,
         )}
       />

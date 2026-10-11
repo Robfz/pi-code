@@ -191,7 +191,7 @@ function Row({
           <Icon
             className={cn(
               "mt-0.5 size-3.5 shrink-0",
-              item.kind === "user" ? "text-sky-500" : "text-muted-foreground",
+              item.kind === "user" ? "text-foreground" : "text-muted-foreground",
             )}
           />
           <span

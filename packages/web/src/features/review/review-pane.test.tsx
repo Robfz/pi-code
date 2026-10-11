@@ -87,12 +87,12 @@ async function tap(root: HTMLElement, line: number) {
 }
 
 describe("review pane on desktop", () => {
-  it("the header button toggles the pane and narrows the conversation's padding", async () => {
+  it("the header button toggles the pane beside the capped conversation column", async () => {
     await renderApp("/agents/a1", { desktop: true });
     await waitFor(() => expect(box()).toBeEnabled());
     const user = userEvent.setup();
     expect(pane()).toBeNull();
-    expect(screen.getByTestId("transcript-column")).toHaveClass("lg:px-32");
+    expect(screen.getByTestId("transcript-column")).toHaveClass("max-w-[46rem]");
 
     await user.click(screen.getByRole("button", { name: "Show changes" }));
     const shown = await screen.findByRole("complementary", { name: "Review" });
@@ -106,10 +106,8 @@ describe("review pane on desktop", () => {
       "true",
     );
     for (const column of ["transcript-column", "composer-column"]) {
-      expect(screen.getByTestId(column)).toHaveClass("lg:px-6");
-      expect(screen.getByTestId(column)).not.toHaveClass("lg:px-32");
+      expect(screen.getByTestId(column)).toHaveClass("max-w-[46rem]", "lg:px-6");
     }
-    expect(document.querySelector("header")).toHaveClass("lg:px-6");
 
     await user.click(screen.getByRole("button", { name: "Hide changes" }));
     expect(pane()).toBeNull();

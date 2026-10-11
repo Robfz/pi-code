@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { imagePolicy, Markdown } from "./markdown";
@@ -82,6 +82,13 @@ describe("Markdown codeRefs", () => {
     expect(container).toHaveTextContent("@e.ts:8");
   });
 
+  it("shows references as text-link chips", () => {
+    const { container } = render(<Markdown text={TEXT} codeRefs />);
+    const plain = container.querySelector("[data-code-ref]");
+    expect(plain).toHaveTextContent("@src/a.ts:3");
+    expect(plain).toHaveClass("text-link", "bg-link/12", "font-mono", "rounded-[5px]");
+  });
+
   it("marks nothing without the prop", () => {
     const { container } = render(<Markdown text={TEXT} />);
     expect(refs(container)).toEqual([]);
@@ -97,6 +104,36 @@ describe("imagePolicy", () => {
     expect(imagePolicy("data:text/html,<b>x</b>").kind).toBe("blocked");
     expect(imagePolicy("relative/a.png").kind).toBe("blocked");
     expect(imagePolicy(undefined).kind).toBe("blocked");
+  });
+});
+
+describe("Markdown styles", () => {
+  it("renders prose at text-prose, replaced by a caller's size", () => {
+    const { container, rerender } = render(<Markdown text="hello" />);
+    expect(container.querySelector(".markdown")).toHaveClass("text-prose");
+    rerender(<Markdown text="hello" className="text-xs" />);
+    expect(container.querySelector(".markdown")).toHaveClass("text-xs");
+    expect(container.querySelector(".markdown")).not.toHaveClass("text-prose");
+  });
+
+  it("gives links text-link", () => {
+    render(<Markdown text="See [the docs](https://x.example/docs)." />);
+    const link = screen.getByText("the docs");
+    expect(link).toHaveAttribute("data-streamdown", "link");
+    expect(link).toHaveClass("text-link", "hover:underline", "no-underline");
+    expect(link).not.toHaveClass("text-primary");
+  });
+
+  it("heads code blocks with their language and a copy button, no download", () => {
+    const { container } = render(<Markdown text={"```ts\nconst a = 1;\n```"} />);
+    const block = container.querySelector('[data-streamdown="code-block"]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(
+      within(block).getByText("ts", { selector: '[data-streamdown="code-block-header"] *' }),
+    ).toBeInTheDocument();
+    expect(within(block).getByRole("button", { name: "Copy Code" })).toBeInTheDocument();
+    expect(within(block).queryByRole("button", { name: /download/i })).toBeNull();
+    expect(within(block).getAllByRole("button")).toHaveLength(1);
   });
 });
 

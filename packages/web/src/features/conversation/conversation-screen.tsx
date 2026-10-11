@@ -34,14 +34,14 @@ export function ConversationScreen() {
   // What such a sheet's overlay covers is inert while it's open: focus skips to the sidebar.
   const { covered, cover } = useScopedCover();
   const inert = covered || undefined;
-  // Full content width on desktop; capped below.
-  const column = cn("flex w-full flex-col", !desktop && "mx-auto max-w-3xl");
-  const padding = pane ? "lg:px-6" : "lg:px-32";
+  // One centred column for the transcript and the composer area; beside the review pane it
+  // narrows to the space left.
+  const column = "mx-auto flex w-full max-w-[46rem] flex-col px-4 lg:px-6";
 
   return (
     <div className="flex h-dvh">
       <div ref={setRoot} className="relative flex h-dvh min-w-0 flex-1 flex-col">
-        <ConversationHeader inert={inert} paneOpen={pane} className={padding} />
+        <ConversationHeader inert={inert} paneOpen={pane} />
         <div
           ref={scrollRef}
           inert={inert}
@@ -50,7 +50,7 @@ export function ConversationScreen() {
           <div
             ref={contentRef}
             data-testid="transcript-column"
-            className={cn(column, "gap-4 px-3 py-4 lg:py-8", padding)}
+            className={cn(column, "gap-4 py-4 lg:py-8")}
           >
             <Transcript />
             <LiveSection />
@@ -60,11 +60,7 @@ export function ConversationScreen() {
         <div
           data-testid="composer-column"
           inert={inert}
-          className={cn(
-            column,
-            "gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]",
-            padding,
-          )}
+          className={cn(column, "gap-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]")}
         >
           <QueueDisplay />
           <Widgets placement="aboveEditor" />

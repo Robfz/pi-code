@@ -144,11 +144,12 @@ describe("Sidebar", () => {
     expect(within(row("Desktop design doc")).getByText("1m ago")).toBeInTheDocument();
   });
 
-  it("marks rows per status and shows attention", async () => {
+  it("marks rows per status", async () => {
     await renderSidebar("/agents/ready");
     baseline(
       [
         makeAgent({ id: "ready", sessionName: "Ready one", attention: "finished" }),
+        makeAgent({ id: "idle", sessionName: "Idle one" }),
         makeAgent({ id: "trust", sessionName: "Trust one", status: "awaiting_trust" }),
         makeAgent({
           id: "streaming",
@@ -164,6 +165,7 @@ describe("Sidebar", () => {
           sessionFile: "fx",
           attention: "failed",
         }),
+        makeAgent({ id: "closed", sessionName: "Closed one", status: "exited", sessionFile: "fc" }),
       ],
       [session({ file: "free", name: "Disk one" })],
     );
@@ -172,18 +174,29 @@ describe("Sidebar", () => {
       within(row(name))
         .queryAllByRole("img")
         .map((img) => img.getAttribute("aria-label"));
-    // The status mark, then the attention icon.
-    expect(mark("Ready one")).toEqual(["Live", "Finished"]);
-    expect(mark("Trust one")).toEqual(["Live"]);
-    expect(mark("Streaming one")).toEqual(["Working", "Needs input"]);
+    // One mark per row: the status.
+    expect(mark("Ready one")).toEqual(["Finished"]);
+    expect(mark("Idle one")).toEqual(["Idle"]);
+    expect(mark("Trust one")).toEqual(["Needs input"]);
+    expect(mark("Streaming one")).toEqual(["Needs input"]);
     expect(mark("Starting one")).toEqual(["Working"]);
     expect(mark("Exited one")).toEqual(["Failed"]);
+    expect(mark("Closed one")).toEqual([]);
     expect(mark("Disk one")).toEqual([]);
-    expect(within(row("Ready one")).getByRole("img", { name: "Finished" })).toHaveAttribute(
-      "title",
-      "Finished",
-    );
-    expect(within(row("Ready one")).queryByText("Finished")).toBeNull();
+    const working = within(row("Starting one")).getByRole("img", { name: "Working" });
+    expect(working.querySelector("svg")).toHaveClass("animate-spin");
+    const dots: Array<[string, string, string]> = [
+      ["Ready one", "Finished", "bg-status-done"],
+      ["Idle one", "Idle", "bg-status-idle"],
+      ["Trust one", "Needs input", "bg-status-input"],
+      ["Exited one", "Failed", "bg-status-error"],
+    ];
+    for (const [name, label, color] of dots) {
+      const dot = within(row(name)).getByRole("img", { name: label });
+      expect(dot).toHaveAttribute("title", label);
+      expect(dot).toHaveClass("rounded-full", color);
+      expect(within(row(name)).queryByText(label)).toBeNull();
+    }
     // × on every row: live ones ask Stop or Delete, the others delete.
     expect(
       within(row("Ready one")).getByRole("button", { name: "Stop or delete Ready one (project)" }),

@@ -166,24 +166,24 @@ describe("StatusBar", () => {
   });
 
   it.each([
-    [{ run: { active: true } }, "running"],
-    [{ run: { active: true, compaction: { reason: "manual" as const } } }, "compacting"],
+    ["running", { run: { active: true } }],
+    ["compacting", { run: { active: true, compaction: { reason: "manual" as const } } }],
     [
+      "retrying",
       {
         run: {
           active: true,
           retry: { attempt: 2, maxAttempts: 3, delayMs: 1000, errorMessage: "529", startedAt: 0 },
         },
       },
-      "retrying 2/3",
     ],
-  ])("run state indicator %#", async (patch, text) => {
+  ])("reads Working while %s", async (_, patch) => {
     stubFetch();
     await renderWithStore(
       <StatusBar />,
       hydratedStore({ state: state(), live: { ...initialLiveState(), ...patch } }),
     );
-    expect(screen.getByTestId("run-indicator")).toHaveTextContent(text);
+    expect(screen.getByTestId("run-indicator")).toHaveTextContent(/^Working$/);
   });
 
   it("model picker groups get_available_models by provider and calls set_model", async () => {

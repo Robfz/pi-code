@@ -155,18 +155,30 @@ describe("ConversationScreen live rendering", () => {
 describe("ConversationScreen width", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("caps the transcript and composer at max-w-3xl below 1024px", async () => {
+  const CAP = ["mx-auto", "w-full", "max-w-[46rem]", "px-4", "lg:px-6"];
+  const expectCapped = () => {
+    for (const id of ["transcript-column", "composer-column"]) {
+      expect(screen.getByTestId(id)).toHaveClass(...CAP);
+      expect(screen.getByTestId(id).className).not.toMatch(/lg:px-32/);
+    }
+  };
+
+  it("caps the transcript and composer columns on phone", async () => {
     stubMatchMedia(() => false);
     await renderWithStore(<ConversationScreen />, hydratedStore());
-    expect(screen.getByTestId("transcript-column")).toHaveClass("max-w-3xl");
-    expect(screen.getByTestId("composer-column")).toHaveClass("max-w-3xl");
+    expectCapped();
   });
 
-  it("uses the full content width from 1024px", async () => {
+  it("caps them on desktop with the review pane closed and open", async () => {
     stubMatchMedia((query) => query === DESKTOP_QUERY);
+    stubFetch((call) =>
+      call.url === "/api/agents/a1/git/diff" ? [200, { oldRev: "abc1234", files: [] }] : undefined,
+    );
     await renderWithStore(<ConversationScreen />, hydratedStore());
-    expect(screen.getByTestId("transcript-column")).not.toHaveClass("max-w-3xl");
-    expect(screen.getByTestId("composer-column")).not.toHaveClass("max-w-3xl");
+    expectCapped();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show changes" }));
+    expect(await screen.findByRole("complementary", { name: "Review" })).toBeInTheDocument();
+    expectCapped();
   });
 });
 

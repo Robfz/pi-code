@@ -6,7 +6,7 @@ import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 /** Dark theme background (`--background` in `src/index.css`). */
-const THEME_COLOR = "#0a0a0a";
+const THEME_COLOR = "#0d0d0d";
 
 /** Lazy Shiki chunks (grammars, themes, engine) go to their own folder, outside the precache. */
 const SHIKI_DIR = "shiki";

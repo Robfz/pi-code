@@ -167,7 +167,7 @@ export function ExternalLink({ href, children }: { href: string; children: React
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="break-all text-primary underline-offset-2 hover:underline"
+      className="break-all text-link underline-offset-2 hover:underline"
     >
       {children}
     </a>

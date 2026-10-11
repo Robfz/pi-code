@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@git-diff-view/react": "^0.1.7",
     "@pi-code/protocol": "workspace:*",
     "@streamdown/code": "^1.1.1",
