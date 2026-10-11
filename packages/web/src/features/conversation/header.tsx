@@ -1,12 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import {
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
+  ChevronDownIcon,
   CopyPlusIcon,
   EllipsisVerticalIcon,
   FileDiffIcon,
   GitBranchIcon,
   GitForkIcon,
+  ListCollapseIcon,
   PencilIcon,
   PowerIcon,
   ShrinkIcon,
@@ -19,6 +19,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -30,14 +33,58 @@ import { useIsDesktop } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { useConversation, useLive } from "@/store/context";
 import { selectSessionName } from "@/store/selectors";
-import { useUiPrefs } from "@/store/ui-prefs";
+import { DENSITIES, DENSITY_LABEL, type Density, useUiPrefs } from "@/store/ui-prefs";
 import { useOpenSheet } from "./action-sheets";
 import { ConnectionIndicator } from "./connection-indicator";
 import { useSessionActions } from "./session-actions";
 
+/** The transcript density: its icon and, from 1024px, the current level's name. */
+function DensityMenu() {
+  const density = useUiPrefs((s) => s.density);
+  const setDensity = useUiPrefs((s) => s.setDensity);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          aria-label="Transcript density"
+          title="Transcript density"
+          className="h-7 gap-1.5 rounded-[7px] px-[9px] font-normal text-muted-foreground hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground [&_svg:not([class*='size-'])]:size-3.5"
+        >
+          <ListCollapseIcon />
+          <span className="hidden lg:inline">{DENSITY_LABEL[density].name}</span>
+          <ChevronDownIcon className="-ml-0.5 size-3 text-faint-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-70 rounded-xl p-[5px]">
+        <DropdownMenuLabel className="px-2 pt-1.5 pb-1 font-normal text-faint-foreground">
+          Transcript density
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={density}
+          onValueChange={(value) => setDensity(value as Density)}
+        >
+          {DENSITIES.map((level) => (
+            <DropdownMenuRadioItem
+              key={level}
+              value={level}
+              className="flex-col items-start gap-0.5 rounded-[7px] py-[7px] pl-2"
+            >
+              <span className="font-medium">{DENSITY_LABEL[level].name}</span>
+              <span className="text-xs text-muted-foreground">
+                {DENSITY_LABEL[level].description}
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /**
  * Back to Home and the conversations sheet (below the desktop breakpoint only) · session name ·
- * project · connection · review pane toggle (desktop) · tool expansion toggle · menu (tree, diff
+ * project · connection · review pane toggle (desktop) · density · menu (tree, diff
  * below the desktop breakpoint, fork, clone, compact, rename, new session, stop, delete). Session
  * commands need a ready agent. `inert` while a scoped sheet covers it.
  */
@@ -55,8 +102,6 @@ export function ConversationHeader({
   const cwd = useConversation((s) => s.agent.cwd);
   const name = useConversation(selectSessionName);
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
-  const toolsExpanded = useUiPrefs((s) => s.toolsExpanded);
-  const setToolsExpanded = useUiPrefs((s) => s.setToolsExpanded);
   const actions = useSessionActions();
   // The overview tracks the agent's current session file; the store's copy is its snapshot's.
   const storeAgent = useConversation((s) => s.agent);
@@ -96,15 +141,7 @@ export function ConversationHeader({
             <FileDiffIcon />
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={toolsExpanded ? "Collapse tools" : "Expand tools"}
-          aria-pressed={toolsExpanded}
-          onClick={() => setToolsExpanded(!toolsExpanded)}
-        >
-          {toolsExpanded ? <ChevronsDownUpIcon /> : <ChevronsUpDownIcon />}
-        </Button>
+        <DensityMenu />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="More">

@@ -5,7 +5,7 @@ import { GitBranchIcon, LoaderIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } 
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
-import { AttentionIcon } from "@/components/attention-badge";
+import { StatusMark } from "@/components/agent-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
@@ -19,6 +19,7 @@ import {
   RemoveWorktreeButton,
   worktreeSubgroupGuideClass,
 } from "@/features/worktrees/worktree-actions";
+import { agentStatus } from "@/lib/agent-status";
 import { isLive } from "@/lib/agents";
 import { errorMessage, restartAgent, searchSessions } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
@@ -42,21 +43,6 @@ function useNow(intervalMs: number): number {
     return () => clearInterval(timer);
   }, [intervalMs]);
   return now;
-}
-
-function RowMark({ row, pending }: { row: SidebarRow; pending: boolean }) {
-  const agent = row.agent;
-  let mark: ReactNode = null;
-  if (pending || (agent && (agent.isStreaming || agent.status === "starting"))) {
-    mark = (
-      <span role="img" aria-label="Working">
-        <LoaderIcon aria-hidden className="size-3.5 animate-spin text-muted-foreground" />
-      </span>
-    );
-  } else if (agent && isLive(agent)) {
-    mark = <span role="img" aria-label="Live" className="size-2 rounded-full bg-emerald-500" />;
-  }
-  return <span className="flex size-4 shrink-0 items-center justify-center">{mark}</span>;
 }
 
 const rowClass =
@@ -88,11 +74,12 @@ function Row({
   const agent = row.agent;
   const content = (
     <>
-      <RowMark row={row} pending={pending} />
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <StatusMark status={agentStatus(agent, pending)} />
+      </span>
       <span data-testid="sidebar-row-title" className="min-w-0 flex-1 truncate">
         {row.title}
       </span>
-      {agent && <AttentionIcon attention={agent.attention} />}
       <time
         dateTime={new Date(row.activity).toISOString()}
         className="shrink-0 text-xs text-muted-foreground"
@@ -107,8 +94,8 @@ function Row({
     <li
       data-testid="sidebar-row"
       className={cn(
-        "flex min-w-0 items-center rounded-md hover:bg-muted/60",
-        current && "bg-muted font-medium",
+        "flex min-w-0 items-center rounded-md text-subtle-foreground hover:bg-accent hover:text-foreground",
+        current && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
       )}
     >
       {live ? (
@@ -179,13 +166,13 @@ function Group({
           nested ? "pt-1.5" : "pt-3",
         )}
       >
-        {/* The label keeps its width (truncating only past the whole line); the branch gets the rest. */}
+        {/* The branch gives way first; the label truncates only once the branch is gone. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <ListingGroupIcon kind={kind} />
           <Heading
             id={headingId}
             className={cn(
-              "max-w-full shrink-0 truncate text-foreground/80",
+              "min-w-0 truncate text-foreground/80",
               nested ? "font-normal" : "font-medium",
             )}
             title={path}
@@ -193,7 +180,10 @@ function Group({
             {label}
           </Heading>
           {branch !== undefined && (
-            <span className="flex min-w-0 items-center gap-0.5 overflow-hidden" title="Branch">
+            <span
+              className="flex min-w-0 shrink-1000 items-center gap-0.5 overflow-hidden"
+              title="Branch"
+            >
               <GitBranchIcon aria-hidden className="size-3 shrink-0" />
               <span className="truncate font-mono">{branch}</span>
             </span>

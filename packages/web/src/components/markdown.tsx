@@ -1,7 +1,9 @@
+import type { Element, Root } from "hast";
 import { ImageIcon, ImageOffIcon } from "lucide-react";
 import { type ComponentProps, memo, useState } from "react";
 import {
   type Components,
+  type ControlsConfig,
   defaultRehypePlugins,
   Streamdown,
   type StreamdownProps,
@@ -106,15 +108,40 @@ function rehypePlugins(): RehypePlugins {
   return [raw, [plugin, strict], harden] as RehypePlugins;
 }
 
-const REHYPE_PLUGINS = rehypePlugins();
+/** Streamdown merges an element's classes into its own, so links take these over its defaults. */
+const LINK_CLASS = [
+  "font-normal",
+  "text-link",
+  "no-underline",
+  "underline-offset-3",
+  "hover:underline",
+];
+
+function addLinkClass(node: Root | Element) {
+  for (const child of node.children) {
+    if (child.type !== "element") continue;
+    if (child.tagName === "a") child.properties.className = LINK_CLASS;
+    addLinkClass(child);
+  }
+}
+
+function rehypeLinks() {
+  return (tree: Root) => addLinkClass(tree);
+}
+
+const REHYPE_PLUGINS: RehypePlugins = [...rehypePlugins(), rehypeLinks];
 const REHYPE_PLUGINS_WITH_CODE_REFS: RehypePlugins = [...REHYPE_PLUGINS, rehypeCodeRefs];
 
 const PLUGINS = { code: lazyCodePlugin };
 
+/** Code blocks show their language and a copy button, not Streamdown's download button. */
+const CONTROLS: ControlsConfig = { code: { copy: true, download: false } };
+
 /**
  * Markdown via Streamdown; `streaming` enables incomplete-markdown handling for live text.
  * Single newlines inside a paragraph render as line breaks (`pre-line`), like pi's TUI.
- * Code blocks are highlighted by `@streamdown/code` (Shiki, languages loaded on demand).
+ * Code blocks are highlighted by `@streamdown/code` (Shiki, languages loaded on demand); their
+ * chrome and the prose styles live in `index.css` (`.markdown`).
  * `codeRefs` marks line references as `span[data-code-ref]` (`rehypeCodeRefs`); the caller
  * handles their clicks.
  */
@@ -132,7 +159,7 @@ export const Markdown = memo(function Markdown({
   return (
     <Streamdown
       className={cn(
-        "markdown min-w-0 break-words text-sm leading-relaxed [&_p]:whitespace-pre-line",
+        "markdown min-w-0 space-y-[0.8em] break-words text-prose [&_p]:whitespace-pre-line",
         className,
       )}
       mode={streaming ? "streaming" : "static"}
@@ -141,6 +168,8 @@ export const Markdown = memo(function Markdown({
       components={COMPONENTS}
       rehypePlugins={codeRefs ? REHYPE_PLUGINS_WITH_CODE_REFS : REHYPE_PLUGINS}
       plugins={PLUGINS}
+      controls={CONTROLS}
+      lineNumbers={false}
     >
       {text}
     </Streamdown>

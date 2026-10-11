@@ -4,6 +4,7 @@
  * curator** (the proxied URL from the `curator` event, opened in a new tab).
  */
 
+import { GlobeIcon, LinkIcon } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 import { toolResultText } from "@/lib/content";
 import {
@@ -16,12 +17,20 @@ import {
   Muted,
   Notice,
   num,
+  plural,
   resultImages,
+  statusVerb,
   str,
   strList,
   truncate,
 } from "./common";
-import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
+import { BodySection } from "./generic";
+import {
+  registerToolRenderer,
+  type ToolLabel,
+  type ToolRenderer,
+  type ToolRendererProps,
+} from "./registry";
 
 export interface SourceLink {
   title: string;
@@ -93,19 +102,21 @@ function Progress({ props }: { props: ToolRendererProps }) {
 // ---------------------------------------------------------------------------
 // web_search
 
-function WebSearchSummary(props: ToolRendererProps) {
+function webSearchLabel(props: ToolRendererProps): ToolLabel {
   const queries = queriesOf(props.args);
-  const d = details(props);
-  const total = props.result && !props.isError ? num(d, "totalResults") : undefined;
-  return (
-    <span className="text-muted-foreground">
-      {queries.length === 1 && (
-        <span className="text-foreground">"{truncate(queries[0] ?? "", 80)}"</span>
-      )}
-      {queries.length > 1 && <span className="text-foreground">{queries.length} queries</span>}
-      {total !== undefined && ` · ${total} ${total === 1 ? "source" : "sources"}`}
-    </span>
-  );
+  const total = props.result && !props.isError ? num(details(props), "totalResults") : undefined;
+  return {
+    icon: GlobeIcon,
+    verb: statusVerb(props.status, "Searching web", "Searched web", "Web search failed"),
+    target: queryTarget(queries),
+    meta: total !== undefined ? `· ${plural(total, "source", "sources")}` : undefined,
+  };
+}
+
+function queryTarget(queries: string[]): ToolLabel["target"] {
+  if (queries.length === 1) return { kind: "text", text: `"${truncate(queries[0] ?? "", 120)}"` };
+  if (queries.length > 1) return { kind: "text", text: `${queries.length} queries` };
+  return undefined;
 }
 
 interface CuratedQuery {
@@ -184,14 +195,11 @@ function WebSearchBody(props: ToolRendererProps) {
         <>
           <SourceList sources={sources} />
           {!summary && (
-            <details>
-              <summary className="cursor-pointer text-xs text-muted-foreground select-none">
-                Full results
-              </summary>
+            <BodySection title="Full results">
               <div className="max-h-96 overflow-auto">
                 <Markdown text={text} className="text-xs" />
               </div>
-            </details>
+            </BodySection>
           )}
         </>
       )}
@@ -210,24 +218,20 @@ function QueryList({ queries }: { queries: string[] }) {
   );
 }
 
-export const webSearchRenderer: ToolRenderer = {
-  Summary: WebSearchSummary,
-  Body: WebSearchBody,
-  expandWhileRunning: true,
-};
+export const webSearchRenderer: ToolRenderer = { label: webSearchLabel, Body: WebSearchBody };
 
 // ---------------------------------------------------------------------------
 // source_check
 
-function SourceCheckSummary(props: ToolRendererProps) {
+function sourceCheckLabel(props: ToolRendererProps): ToolLabel {
   const claim = str(props.args, "claim");
   const count = props.result && !props.isError ? num(details(props), "sourceCount") : undefined;
-  return (
-    <span className="text-muted-foreground">
-      {claim && <span className="text-foreground">{truncate(claim, 80)}</span>}
-      {count !== undefined && ` · ${count} ${count === 1 ? "source" : "sources"}`}
-    </span>
-  );
+  return {
+    icon: GlobeIcon,
+    verb: statusVerb(props.status, "Checking", "Checked", "Check failed"),
+    target: claim ? { kind: "text", text: truncate(claim, 120) } : undefined,
+    meta: count !== undefined ? `· ${plural(count, "source", "sources")}` : undefined,
+  };
 }
 
 function SourceCheckBody(props: ToolRendererProps) {
@@ -261,22 +265,18 @@ function SourceCheckBody(props: ToolRendererProps) {
           {passages} {passages === 1 ? "passage" : "passages"} extracted
         </Notice>
       )}
-      <details>
-        <summary className="cursor-pointer text-xs text-muted-foreground select-none">
-          Full artifact
-        </summary>
+      <BodySection title="Full artifact">
         <div className="max-h-96 overflow-auto">
           <Markdown text={text} className="text-xs" />
         </div>
-      </details>
+      </BodySection>
     </div>
   );
 }
 
 export const sourceCheckRenderer: ToolRenderer = {
-  Summary: SourceCheckSummary,
+  label: sourceCheckLabel,
   Body: SourceCheckBody,
-  expandWhileRunning: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -289,22 +289,24 @@ function urlsOf(args: unknown): string[] {
   return url ? [url] : [];
 }
 
-function FetchSummary(props: ToolRendererProps) {
+function fetchLabel(props: ToolRendererProps): ToolLabel {
   const urls = urlsOf(props.args);
   const title = props.result && !props.isError ? str(details(props), "title") : undefined;
-  return (
-    <span className="text-muted-foreground">
-      {urls.length === 1 && <span className="text-foreground">{truncate(urls[0] ?? "", 80)}</span>}
-      {urls.length > 1 && <span className="text-foreground">{urls.length} URLs</span>}
-      {title && ` · ${truncate(title, 60)}`}
-    </span>
-  );
+  let text: string | undefined;
+  if (urls.length > 1) text = `${urls.length} URLs`;
+  else text = title ?? urls[0];
+  return {
+    icon: LinkIcon,
+    verb: statusVerb(props.status, "Fetching", "Fetched", "Fetch failed"),
+    target: text ? { kind: "text", text: truncate(text, 120) } : undefined,
+  };
 }
 
 function ContentBody({ props, urls }: { props: ToolRendererProps; urls: string[] }) {
   const d = details(props);
   const links = urls.length > 1 || props.result === undefined ? urls : [];
   if (props.result === undefined) {
+    if (links.length === 0 && !isActive(props.status)) return null;
     return (
       <div className="flex flex-col gap-2">
         <UrlList urls={links} />
@@ -353,7 +355,7 @@ function FetchBody(props: ToolRendererProps) {
 }
 
 export const fetchContentRenderer: ToolRenderer = {
-  Summary: FetchSummary,
+  label: fetchLabel,
   Body: FetchBody,
 };
 
@@ -369,16 +371,14 @@ function selector(args: unknown): string | undefined {
   return undefined;
 }
 
-function GetContentSummary(props: ToolRendererProps) {
+function getContentLabel(props: ToolRendererProps): ToolLabel {
   const d = props.result && !props.isError ? details(props) : undefined;
   const what = str(d, "title") ?? str(d, "url") ?? selector(props.args);
-  const id = str(props.args, "responseId");
-  return (
-    <span className="text-muted-foreground">
-      {what && <span className="text-foreground">{truncate(what, 80)}</span>}
-      {id && ` · ${id}`}
-    </span>
-  );
+  return {
+    icon: GlobeIcon,
+    verb: statusVerb(props.status, "Getting content", "Got content", "Get content failed"),
+    target: what ? { kind: "text", text: truncate(what, 120) } : undefined,
+  };
 }
 
 function GetContentBody(props: ToolRendererProps) {
@@ -388,7 +388,7 @@ function GetContentBody(props: ToolRendererProps) {
 }
 
 export const getSearchContentRenderer: ToolRenderer = {
-  Summary: GetContentSummary,
+  label: getContentLabel,
   Body: GetContentBody,
 };
 

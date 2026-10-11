@@ -18,7 +18,7 @@ import { deflateSync } from "node:zlib";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 
-const BG = [0x18, 0x18, 0x1b]; // zinc-900, reads as "dark" next to the #0a0a0a theme
+const BG = [0x18, 0x18, 0x1b]; // zinc-900, reads as "dark" next to the #0d0d0d theme
 const FG = [0xfa, 0xfa, 0xfa];
 const ACCENT = [0x34, 0xd3, 0x99]; // emerald-400
 

@@ -468,7 +468,7 @@ describe("bash prefixes", () => {
     const run = within(screen.getByTestId("live")).getByTestId("bash-execution");
     expect(run).toHaveAttribute("data-excluded", "true");
     expect(run).toHaveTextContent("!! git status");
-    expect(run).toHaveTextContent("exit 0");
+    expect(run).not.toHaveTextContent("exit 0");
   });
 
   it("works while a run is active", async () => {

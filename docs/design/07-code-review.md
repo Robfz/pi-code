@@ -1,6 +1,6 @@
 # Code review and line references
 
-Review the project's git changes and files next to a conversation, and send line references from them into the composer. References are inline `@path:N` text that pi passes to the model verbatim; pi-code colors them blue and makes them clickable wherever they appear. Decisions and rationale: [`../../maps/2026-10-09-code-review.md`](../../maps/2026-10-09-code-review.md). Where this document overlaps `01`–`06`, it takes precedence.
+Review the project's git changes and files next to a conversation, and send line references from them into the composer. References are inline `@path:N` text that pi passes to the model verbatim; pi-code colours them in the `link` colour and makes them clickable wherever they appear. Decisions and rationale: [`../../maps/2026-10-09-code-review.md`](../../maps/2026-10-09-code-review.md). Where this document overlaps `01`–`06`, it takes precedence.
 
 Terms:
 
@@ -180,7 +180,7 @@ interface Drafts {
 
 `ComposerInput` (`features/conversation/composer-input.tsx`) is the native `<textarea>` over an `aria-hidden` mirror `div` (F7, F8):
 
-- Both have the same font and size (`text-base md:text-sm`), padding, line height, `whitespace-pre-wrap break-words` wrapping and width. Both have `scrollbar-gutter: stable`, so the textarea's scrollbar past `max-h-48` doesn't narrow its text against the mirror's. The mirror renders the text with every `findCodeRefs` match in a blue span (`text-blue-600 dark:text-blue-400`), plus a trailing zero-width space so a final empty line keeps its height.
+- Both have the same font and size (`text-prose`), padding, line height, `whitespace-pre-wrap break-words` wrapping and width. Both have `scrollbar-gutter: stable`, so the textarea's scrollbar past `max-h-[220px]` doesn't narrow its text against the mirror's. The mirror renders the text with every `findCodeRefs` match in a `text-link` span (`CODE_REF_COLOR`), plus a trailing zero-width space so a final empty line keeps its height.
 - The textarea has `text-transparent`, a visible caret and a translucent selection color. The mirror sits behind it, `pointer-events-none`, and copies its `scrollTop` on `scroll`. Autosizing (`field-sizing-content`, or the existing fallback) stays on the textarea; the mirror fills the same box.
 - IME, autocorrect and the caret stay native. Typing inside a reference edits it as plain text, so a broken reference turns back to normal color.
 
@@ -284,7 +284,7 @@ At ≥1024px (`useIsDesktop`), the conversation route renders the review panel a
 └─────────┴────────────────────────────────┴───────────────────────────────────┘
 ```
 
-- `ConversationScreen` becomes a row: the conversation column and `ReviewPane` (`features/review/review-pane.tsx`) split the content width in halves, each `h-dvh` with its own scroll. The pane can't be resized. While the pane is open the conversation drops its `lg:px-32` padding to `lg:px-6` (header, transcript and composer columns). Scoped dialog sheets stay in the conversation column.
+- `ConversationScreen` becomes a row: the conversation column and `ReviewPane` (`features/review/review-pane.tsx`) split the content width in halves, each `h-dvh` with its own scroll. The pane can't be resized. The transcript and composer column keeps its `max-w-[46rem]` cap and padding and fits the half left to it ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Layout"). Scoped dialog sheets stay in the conversation column.
 - The pane header holds the tabs, Refresh and a Close (×) button.
 - Opening and closing: a header button (`FileDiffIcon`, "Show changes" / "Hide changes", `aria-pressed`) and `/diff` toggle `paneOpen`, opening on the stored tab. On desktop the header menu has no Diff item.
 - `paneOpen` is per conversation and survives a reload (review state). The tree route shows no pane.
@@ -299,8 +299,8 @@ At ≥1024px (`useIsDesktop`), the conversation route renders the review panel a
 
 ### Rendering
 
-- **User messages** (`transcript/user-message.tsx`, committed and pending): the body after `<file>` blocks renders through `CodeRefText` (`features/review/code-ref-text.tsx`). It splits plain text by `findCodeRefs` and renders each match as a blue `button` showing the original text.
-- **Assistant text blocks** (`assistant-message.tsx`): `Markdown` gains `codeRefs?: boolean`. When set, the rehype plugin `rehypeCodeRefs` (`lib/code-refs-rehype.ts`), appended after `harden`, splits text nodes, those inside inline `code` included, into `span[data-code-ref]` elements, blue and `role="button"` with `tabIndex=0`. Text inside `pre` and `a` is left alone, and so is every other Markdown surface (thinking, tool output, custom messages). Each text node is scanned on its own, so a node start counts as a reference start (inline code, emphasis). A click or Enter on `[data-code-ref]` is handled by delegation on the message wrapper, which parses the element's text again with `findCodeRefs`.
+- **User messages** (`transcript/user-message.tsx`, committed and pending): the body after `<file>` blocks renders through `CodeRefText` (`features/review/code-ref-text.tsx`). It splits plain text by `findCodeRefs` and renders each match as a `text-link` `button` showing the original text.
+- **Assistant text blocks** (`assistant-message.tsx`): `Markdown` gains `codeRefs?: boolean`. When set, the rehype plugin `rehypeCodeRefs` (`lib/code-refs-rehype.ts`), appended after `harden`, splits text nodes, those inside inline `code` included, into `span[data-code-ref]` elements, mono `text-link` chips on `bg-link/12`, with `role="button"` and `tabIndex=0`. Text inside `pre` and `a` is left alone, and so is every other Markdown surface (thinking, tool output, custom messages). Each text node is scanned on its own, so a node start counts as a reference start (inline code, emphasis). A click or Enter on `[data-code-ref]` is handled by delegation on the text block's wrapper, which parses the element's text again with `findCodeRefs`.
 
 ### Opening
 

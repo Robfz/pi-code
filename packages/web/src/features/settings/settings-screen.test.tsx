@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { urlBase64ToUint8Array } from "@/lib/push";
 import { createQueryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/router";
+import { useUiPrefs } from "@/store/ui-prefs";
 import { installPushEnv, uninstallPushEnv } from "@/test/push-env";
 import { stubFetch } from "@/test/render";
 
@@ -173,5 +174,25 @@ describe("Settings · theme", () => {
         "true",
       ),
     );
+  });
+});
+
+describe("Settings · transcript density", () => {
+  it("offers the three densities, the current one pressed", async () => {
+    stubPushApi();
+    useUiPrefs.setState({ density: "balanced" });
+    renderSettings();
+    const user = userEvent.setup();
+    expect(await screen.findByRole("heading", { name: "Transcript density" })).toBeInTheDocument();
+    const pressed = () =>
+      ["Compact", "Balanced", "Detailed"].map((name) =>
+        screen.getByRole("button", { name }).getAttribute("aria-pressed"),
+      );
+    expect(pressed()).toEqual(["false", "true", "false"]);
+    await user.click(screen.getByRole("button", { name: "Compact" }));
+    expect(useUiPrefs.getState().density).toBe("compact");
+    expect(pressed()).toEqual(["true", "false", "false"]);
+    await user.click(screen.getByRole("button", { name: "Detailed" }));
+    expect(pressed()).toEqual(["false", "false", "true"]);
   });
 });

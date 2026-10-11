@@ -379,8 +379,10 @@ interface LiveState {
     compaction?: { reason: "manual" | "threshold" | "overflow" };
     retry?: { attempt: number; maxAttempts: number; delayMs: number; errorMessage: string; startedAt: number };
     lastError?: string;
+    startedAt?: number;                            // receivedAt of agent_start
   };
   streaming?: {                                    // assistant message in flight
+    timestamp?: number;                            // the message's timestamp from message_start; keys thinkingMs
     blocks: Record<number, StreamingBlock>;        // keyed by contentIndex
   };
   pendingUser?: UserMessage;                       // message_start(user) not yet committed
@@ -394,9 +396,10 @@ interface LiveState {
   editorText?: { text: string; nonce: number };    // set_editor_text
   notices: { id: string; message: string; kind: "info" | "warning" | "error"; at: number }[]; // last 20 notify
   bash: Record<string, { command: string; output: string; done?: BashResult; excludeFromContext?: boolean }>;
+  thinkingMs: Record<string, number>;              // thinking durations by `${message timestamp}:${contentIndex}`; outlives runs
 }
 
-type StreamingBlock =
+type StreamingBlock =                              // every variant also has startedAt?, endedAt?
   | { type: "text"; text: string; done: boolean }
   | { type: "thinking"; text: string; done: boolean }
   | { type: "toolCall"; id: string; name: string; argsText: string; call?: ToolCall };
@@ -407,6 +410,8 @@ interface ToolRun {
   status: "running" | "done" | "error";
   partialResult?: unknown;
   result?: unknown;                                // content + details
+  startedAt?: number;                              // receivedAt of tool_execution_start
+  durationMs?: number;                             // tool_execution_end's durationMs, else its receivedAt − startedAt
 }
 
 interface PendingDialog {
@@ -421,6 +426,7 @@ Semantics (pi's streaming rules from pi's `docs/json.md`):
 - `entries_appended` clears `pendingUser` and removes tools whose results are now committed.
 - `transcript_reset` clears `streaming`, `pendingUser` and finished tools.
 - `agent_settled` (and `agent_status` exited) sets `run.active = false`, clears `streaming`, `retry` and `compaction`.
-- `live_reset` does the same and also clears `pendingUser`, `tools`, `curator`, `queue`, `dialogs` and `bash`; extension UI (`statuses`, `widgets`, `title`, `editorText`, `notices`) and `run.lastError` stay.
+- `live_reset` does the same and also clears `pendingUser`, `tools`, `curator`, `queue`, `dialogs` and `bash`; extension UI (`statuses`, `widgets`, `title`, `editorText`, `notices`), `run.lastError` and `thinkingMs` stay.
 - `ui_request` with a fire-and-forget method updates `statuses` / `widgets` / `title` / `editorText` / `notices`; dialog methods append to `dialogs`; `ui_resolved` removes one (the server publishes it on answer and on timeout).
+- **Timing** comes from each event's `receivedAt` (the server's clock), so snapshots carry it and a reload mid-run keeps it; without `receivedAt` the fields stay absent. A block gets `startedAt` when it is created (its `*_start`, or the delta that creates it) and `endedAt` at its `*_end`; a tool run gets `startedAt` at `tool_execution_start` and `durationMs` at `tool_execution_end`; `run.startedAt` is set at `agent_start` and dropped on settling. At `thinking_end`, `endedAt − startedAt` goes into `thinkingMs` under the streaming message's `timestamp` and the block's `contentIndex`, so a committed thinking block finds its duration by its message's `timestamp` and its index in `content`. Settling, `live_reset` and `transcript_reset` keep `thinkingMs`, which lives as long as the agent's live state on the server. Details in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Protocol: timing in `reduceLive`".
 - The reducer is pure and deterministic; server and client run the same code.

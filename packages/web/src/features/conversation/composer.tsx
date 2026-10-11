@@ -1,15 +1,6 @@
 import { formatFileBlock, type ImageContent } from "@pi-code/protocol";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowUpIcon,
-  FileTextIcon,
-  ListPlusIcon,
-  NavigationIcon,
-  PaperclipIcon,
-  SquareIcon,
-  UndoIcon,
-  XIcon,
-} from "lucide-react";
+import { ArrowUpIcon, FileTextIcon, PlusIcon, XIcon } from "lucide-react";
 import {
   type KeyboardEvent,
   type SyntheticEvent,
@@ -29,9 +20,10 @@ import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
 import { caretAt, type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
-import { selectEditorText, selectIsRunning, selectQueue } from "@/store/selectors";
+import { selectEditorText, selectIsRunning } from "@/store/selectors";
 import { type Attachment, prepareAttachment } from "./attachments";
 import { ComposerInput, selectionOf } from "./composer-input";
+import { ModelPicker } from "./model-picker";
 import {
   BUILTIN_COMMANDS,
   commandItems,
@@ -50,9 +42,9 @@ function isCoarsePointer(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
 }
 
-function joinTexts(texts: readonly string[]): string {
-  return texts.filter((t) => t.trim() !== "").join("\n\n");
-}
+/** Send and Steer: round, solid foreground; on the chip surface with a faint icon while disabled. */
+const roundSolid =
+  "size-[30px] rounded-full disabled:bg-chip disabled:text-faint-foreground disabled:opacity-100";
 
 /** Last `set_editor_text` nonce applied per conversation store (outlives remounts). */
 const seenEditorNonce = new WeakMap<ConversationStore, number>();
@@ -124,11 +116,14 @@ function SlashMenu({
 }
 
 /**
- * Prompt composer (`docs/design/03-web-client.md`, "Composer").
+ * Prompt composer (`docs/design/09-ui-overhaul.md`, "Composer").
  *
+ * - Footer: attach, then the model picker and Send (idle) or Queue, Stop and Steer (running;
+ *   Queue and Steer only while the draft has text or attachments). Stop & edit sits in
+ *   `QueueDisplay`.
  * - Idle: Send → `prompt`.
  * - Running: Steer → `prompt { streamingBehavior: "steer" }`, Queue → `"followUp"`,
- *   Stop → `abort`, Stop & edit → `clear_queue` then `abort`, restoring the queued texts.
+ *   Stop → `abort`.
  * - Desktop keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter newline.
  * - `/` autocompletes built-in and pi commands; built-ins run in the client.
  * - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
@@ -147,7 +142,6 @@ export function Composer() {
   const hydrated = useConversation((s) => s.hydrated);
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
   const running = useConversation(selectIsRunning);
-  const queue = useConversation(selectQueue);
   const editorText = useConversation(selectEditorText);
   const supportsImages = useConversation((s) => s.state?.model?.input.includes("image") === true);
   const draft = useDrafts((s) => s.drafts[agentId] ?? EMPTY_DRAFT);
@@ -253,8 +247,8 @@ export function Composer() {
     if (slashQuery(value) === null) setMenuDismissed(false);
   }
 
-  const hasQueue = queue.steering.length + queue.followUp.length > 0;
-  const canSend = ready && (text.trim() !== "" || attachments.length > 0);
+  const hasDraft = text.trim() !== "" || attachments.length > 0;
+  const canSend = ready && hasDraft;
 
   async function runBash(message: string, command: string, excludeFromContext: boolean) {
     useDrafts.getState().clear(agentId);
@@ -334,21 +328,6 @@ export function Composer() {
     }
   }
 
-  async function stopAndEdit() {
-    setStopping(true);
-    try {
-      const queued = await rpc(agentId, { type: "clear_queue" });
-      const restored = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])];
-      const current = useDrafts.getState().drafts[agentId]?.text ?? "";
-      useDrafts.getState().replace(agentId, joinTexts([...restored, current]));
-      await rpc(agentId, { type: "abort" });
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setStopping(false);
-    }
-  }
-
   async function addFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     const results = await Promise.allSettled(
@@ -402,7 +381,7 @@ export function Composer() {
           onHover={setMenuIndex}
         />
       )}
-      <div className="rounded-2xl border bg-card/60 focus-within:border-ring">
+      <div className="rounded-2xl border border-input bg-card shadow-[0_8px_24px_-16px_oklch(0_0_0/0.5)] transition-[border-color,box-shadow] focus-within:border-ring/50 focus-within:ring-3 focus-within:ring-ring/15">
         {attachments.length > 0 && (
           <ul aria-label="Attachments" className="flex gap-2 overflow-x-auto px-3 pt-3">
             {attachments.map((attachment, index) => (
@@ -455,9 +434,9 @@ export function Composer() {
             onEdit(event);
             setMenuDismissed(false);
           }}
-          className="field-sizing-content max-h-48 min-h-11 placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className="field-sizing-content max-h-[220px] min-h-9 placeholder:text-faint-foreground disabled:cursor-not-allowed"
         />
-        <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
+        <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-2">
           <input
             ref={fileRef}
             type="file"
@@ -474,63 +453,65 @@ export function Composer() {
             variant="ghost"
             size="icon"
             aria-label="Attach file"
-            className="mr-auto"
+            title="Attach file"
+            className="mr-auto size-[30px] rounded-full text-muted-foreground hover:bg-accent dark:hover:bg-accent"
             disabled={!ready}
             onClick={() => fileRef.current?.click()}
           >
-            <PaperclipIcon />
+            <PlusIcon className="size-[17px]" />
           </Button>
+          <ModelPicker />
           {running ? (
             <>
-              {hasQueue && (
+              {hasDraft && (
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  disabled={stopping}
-                  onClick={() => void stopAndEdit()}
+                  title="Queue after this run"
+                  className="h-7 rounded-lg border-input px-2.5 font-normal text-muted-foreground hover:bg-accent dark:hover:bg-accent"
+                  disabled={!canSend}
+                  onClick={() => void send("followUp")}
                 >
-                  <UndoIcon /> Stop &amp; edit
+                  Queue
                 </Button>
               )}
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canSend}
-                onClick={() => void send("followUp")}
-              >
-                <ListPlusIcon /> Queue
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!canSend}
-                onClick={() => void send("steer")}
-              >
-                <NavigationIcon /> Steer
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
+                variant="secondary"
                 size="icon"
                 aria-label="Stop"
+                title="Stop"
+                className="size-[30px] rounded-full text-foreground shadow-[inset_0_0_0_1px_var(--input)]"
                 disabled={stopping}
                 onClick={() => void stop()}
               >
-                <SquareIcon className="fill-current" />
+                <span aria-hidden className="size-2.5 rounded-[2.5px] bg-current" />
               </Button>
+              {hasDraft && (
+                <Button
+                  type="button"
+                  size="icon"
+                  aria-label="Steer"
+                  title="Steer — send now"
+                  className={roundSolid}
+                  disabled={!canSend}
+                  onClick={() => void send("steer")}
+                >
+                  <ArrowUpIcon className="size-4" strokeWidth={2.25} />
+                </Button>
+              )}
             </>
           ) : (
             <Button
               type="button"
               size="icon"
               aria-label="Send"
-              className="rounded-full"
+              title="Send"
+              className={roundSolid}
               disabled={!canSend}
               onClick={() => void send()}
             >
-              <ArrowUpIcon />
+              <ArrowUpIcon className="size-4" strokeWidth={2.25} />
             </Button>
           )}
         </div>

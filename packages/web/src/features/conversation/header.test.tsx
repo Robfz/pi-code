@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useUiPrefs } from "@/store/ui-prefs";
 import { makeAgent } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
@@ -237,5 +238,36 @@ describe("ConversationHeader menu", () => {
     );
     expect(screen.getByRole("menuitem", { name: /Stop/ })).not.toHaveAttribute("aria-disabled");
     expect(screen.getByRole("menuitem", { name: /Delete/ })).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("ConversationHeader density", () => {
+  it("lists the three levels, checks the current one and switches on choice", async () => {
+    stubFetch();
+    useUiPrefs.setState({ density: "balanced" });
+    const { user } = await renderHeader();
+    const button = screen.getByRole("button", { name: "Transcript density" });
+    expect(button).toHaveTextContent("Balanced");
+    await user.click(button);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Transcript density")).toBeInTheDocument();
+    const items = within(menu).getAllByRole("menuitemradio");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "CompactFinished turns fold into ‘Worked for …’",
+      "BalancedEvery step, exploration grouped",
+      "DetailedNo grouping, everything expanded",
+    ]);
+    expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "true",
+      "false",
+    ]);
+    expect(items[1]?.querySelector("svg.lucide-check")).not.toBeNull();
+    expect(items[0]?.querySelector("svg.lucide-check")).toBeNull();
+
+    await user.click(items[2] as HTMLElement);
+    expect(useUiPrefs.getState().density).toBe("detailed");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(button).toHaveTextContent("Detailed");
   });
 });

@@ -4,8 +4,15 @@
  */
 
 import type { BashToolDetails } from "@pi-code/protocol";
-import { Badge } from "@/components/ui/badge";
+import {
+  FileSearchIcon,
+  FileTextIcon,
+  FolderOpenIcon,
+  SquareTerminalIcon,
+  TextSearchIcon,
+} from "lucide-react";
 import { toolResultText } from "@/lib/content";
+import { cn } from "@/lib/utils";
 import {
   argPath,
   CodeBlock,
@@ -17,13 +24,20 @@ import {
   Notice,
   num,
   Pending,
+  plural,
   resultImages,
   splitNotice,
+  statusVerb,
   str,
   truncate,
 } from "./common";
 import { OutputBlock } from "./generic";
-import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
+import {
+  registerToolRenderer,
+  type ToolLabel,
+  type ToolRenderer,
+  type ToolRendererProps,
+} from "./registry";
 
 // ---------------------------------------------------------------------------
 // read
@@ -37,16 +51,14 @@ export function readRange(args: unknown): string | undefined {
   return limit !== undefined ? `:${start}-${start + limit - 1}` : `:${start}-`;
 }
 
-function ReadSummary({ args }: ToolRendererProps) {
+function readLabel({ args, status }: ToolRendererProps): ToolLabel {
   const path = argPath(args);
-  if (!path) return null;
-  const range = readRange(args);
-  return (
-    <span className="font-mono">
-      {path}
-      {range && <Muted>{range}</Muted>}
-    </span>
-  );
+  return {
+    icon: FileTextIcon,
+    verb: statusVerb(status, "Reading", "Read", "Read failed"),
+    target: path ? { kind: "path", text: path } : undefined,
+    meta: readRange(args),
+  };
 }
 
 function ReadBody({ args, status, result, isError }: ToolRendererProps) {
@@ -54,19 +66,35 @@ function ReadBody({ args, status, result, isError }: ToolRendererProps) {
   if (isError) return <ErrorOutput result={result} />;
   const images = resultImages(result);
   const { body, notice } = splitNotice(toolResultText(result));
+  const code = body !== "" && (images.length === 0 || body.trim() !== "");
+  if (!code) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Images images={images} />
+        {body === "" && images.length === 0 && <Notice>Empty file</Notice>}
+        {notice && <Notice>{notice}</Notice>}
+      </div>
+    );
+  }
+  // The code fills the body edge to edge; images and the notice keep the body's padding.
   return (
-    <div className="flex flex-col gap-2">
-      <Images images={images} />
-      {body !== "" && (images.length === 0 || body.trim() !== "") && (
-        <CodeBlock code={body} lang={langFromPath(argPath(args))} />
+    <div data-flush className="flex flex-col">
+      {images.length > 0 && (
+        <div className="border-b px-3 py-2.5">
+          <Images images={images} />
+        </div>
       )}
-      {body === "" && images.length === 0 && <Notice>Empty file</Notice>}
-      {notice && <Notice>{notice}</Notice>}
+      <CodeBlock code={body} lang={langFromPath(argPath(args))} />
+      {notice && (
+        <div className="border-t px-3 py-1.5">
+          <Notice>{notice}</Notice>
+        </div>
+      )}
     </div>
   );
 }
 
-export const readRenderer: ToolRenderer = { Summary: ReadSummary, Body: ReadBody };
+export const readRenderer: ToolRenderer = { label: readLabel, Body: ReadBody };
 
 // ---------------------------------------------------------------------------
 // bash
@@ -101,25 +129,23 @@ export function bashOutcome(
   return { output: text };
 }
 
-function OutcomeBadge({ outcome }: { outcome: BashOutcome }) {
-  if (outcome.kind === "aborted") return <Badge variant="outline">aborted</Badge>;
-  if (outcome.kind === "timeout") return <Badge variant="destructive">timed out</Badge>;
-  return (
-    <Badge variant={outcome.code === 0 ? "secondary" : "destructive"}>exit {outcome.code}</Badge>
-  );
+function outcomeText(outcome: BashOutcome): string {
+  if (outcome.kind === "aborted") return "aborted";
+  if (outcome.kind === "timeout") {
+    return outcome.seconds !== undefined ? `timed out after ${outcome.seconds}s` : "timed out";
+  }
+  return `exit ${outcome.code}`;
 }
 
-function BashSummary({ args, result, isError }: ToolRendererProps) {
+function bashLabel({ args, status, result, isError }: ToolRendererProps): ToolLabel {
   const command = str(args, "command");
   const outcome = result ? bashOutcome(toolResultText(result), isError).outcome : undefined;
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {command !== undefined && (
-        <code className="min-w-0 truncate font-mono">$ {truncate(command, 120)}</code>
-      )}
-      {outcome && <OutcomeBadge outcome={outcome} />}
-    </span>
-  );
+  return {
+    icon: SquareTerminalIcon,
+    verb: statusVerb(status, "Running", "Ran", "Command failed"),
+    target: command !== undefined ? { kind: "code", text: truncate(command, 200) } : undefined,
+    meta: outcome?.kind === "exit" && outcome.code !== 0 ? `exit ${outcome.code}` : undefined,
+  };
 }
 
 function BashBody({ args, status, partialResult, result, isError }: ToolRendererProps) {
@@ -131,11 +157,13 @@ function BashBody({ args, status, partialResult, result, isError }: ToolRenderer
     ? { outcome: undefined, output: text }
     : bashOutcome(text, isError);
   const details = (live ? undefined : result?.details) as BashToolDetails | undefined;
-  const shown = output.replace(/\n$/, "");
+  const shown = output.replace(/\n+$/, "");
+  const failed = outcome !== undefined && !(outcome.kind === "exit" && outcome.code === 0);
+  // One terminal surface: the command, its output and the outcome, without nested boxes.
   return (
-    <div className="flex flex-col gap-2">
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs">
-        <Muted>$ </Muted>
+    <div className="flex flex-col gap-1.5 font-mono text-[12.5px] leading-[1.6] tracking-[-0.01em]">
+      <pre className="whitespace-pre-wrap break-words text-foreground">
+        <span className="text-faint-foreground">$ </span>
         {command}
         {timeout !== undefined && <Muted> (timeout {timeout}s)</Muted>}
       </pre>
@@ -143,14 +171,14 @@ function BashBody({ args, status, partialResult, result, isError }: ToolRenderer
         <OutputBlock text={shown} error={!live && isError && outcome === undefined} />
       )}
       {shown === "" && live && isActive(status) && <Pending label="Waiting for output…" />}
-      {shown === "" && !live && <Notice>No output</Notice>}
+      {shown === "" && !live && <p className="text-faint-foreground">No output</p>}
       {outcome && (
-        <div className="flex items-center gap-2">
-          <OutcomeBadge outcome={outcome} />
-          {outcome.kind === "timeout" && outcome.seconds !== undefined && (
-            <Notice>after {outcome.seconds}s</Notice>
-          )}
-        </div>
+        <p
+          data-testid="bash-outcome"
+          className={cn(failed ? "text-status-error" : "text-faint-foreground")}
+        >
+          {outcomeText(outcome)}
+        </p>
       )}
       {details?.truncation?.truncated && (
         <Notice>
@@ -163,7 +191,7 @@ function BashBody({ args, status, partialResult, result, isError }: ToolRenderer
 }
 
 export const bashRenderer: ToolRenderer = {
-  Summary: BashSummary,
+  label: bashLabel,
   Body: BashBody,
   expandWhileRunning: true,
 };
@@ -190,25 +218,34 @@ const GREP_MATCH = /^.+?:\d+: /;
 function listCount(toolName: string, items: string[]): string {
   if (toolName === "grep") {
     const matches = items.filter((line) => GREP_MATCH.test(line)).length || items.length;
-    return `${matches} ${matches === 1 ? "match" : "matches"}`;
+    return plural(matches, "match", "matches");
   }
-  if (toolName === "ls") return `${items.length} ${items.length === 1 ? "entry" : "entries"}`;
-  return `${items.length} ${items.length === 1 ? "file" : "files"}`;
+  if (toolName === "ls") return plural(items.length, "entry", "entries");
+  return plural(items.length, "file", "files");
 }
 
-function SearchSummary({ toolName, args, result, isError }: ToolRendererProps) {
+function searchLabel({ toolName, args, status, result, isError }: ToolRendererProps): ToolLabel {
   const pattern = str(args, "pattern");
-  const path = argPath(args);
   const count = result && !isError ? listCount(toolName, listResult(result).items) : undefined;
-  return (
-    <span className="font-mono">
-      {toolName === "grep" && pattern !== undefined && `/${truncate(pattern, 60)}/`}
-      {toolName === "find" && pattern !== undefined && truncate(pattern, 60)}
-      {toolName === "ls" && (path ?? ".")}
-      {toolName !== "ls" && path && <Muted> in {path}</Muted>}
-      {count && <Muted className="font-sans"> · {count}</Muted>}
-    </span>
-  );
+  const meta = count && `· ${count}`;
+  if (toolName === "ls") {
+    return {
+      icon: FolderOpenIcon,
+      verb: statusVerb(status, "Listing", "Listed", "List failed"),
+      target: { kind: "path", text: argPath(args) ?? "." },
+      meta,
+    };
+  }
+  const grep = toolName === "grep";
+  return {
+    icon: grep ? TextSearchIcon : FileSearchIcon,
+    verb: grep
+      ? statusVerb(status, "Searching", "Searched", "Search failed")
+      : statusVerb(status, "Finding", "Found", "Find failed"),
+    target:
+      pattern !== undefined ? { kind: "code", text: grep ? `/${pattern}/` : pattern } : undefined,
+    meta,
+  };
 }
 
 function SearchBody({ status, result, isError }: ToolRendererProps) {
@@ -222,7 +259,7 @@ function SearchBody({ status, result, isError }: ToolRendererProps) {
       ) : (
         <ul
           data-testid="result-list"
-          className="max-h-80 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs"
+          className="max-h-80 overflow-auto font-mono text-xs leading-[1.6] text-subtle-foreground"
         >
           {items.map((item, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: result lines may repeat
@@ -237,7 +274,7 @@ function SearchBody({ status, result, isError }: ToolRendererProps) {
   );
 }
 
-export const searchRenderer: ToolRenderer = { Summary: SearchSummary, Body: SearchBody };
+export const searchRenderer: ToolRenderer = { label: searchLabel, Body: SearchBody };
 
 registerToolRenderer("read", readRenderer);
 registerToolRenderer("bash", bashRenderer);

@@ -4,10 +4,16 @@
  * result content. Calls whose shape isn't recognised render with the generic renderer.
  */
 
+import { PlugIcon } from "lucide-react";
 import { prettyJson, toolResultText } from "@/lib/content";
-import { asRecord, Images, isActive, Muted, Pending, resultImages, str } from "./common";
-import { genericToolRenderer, OutputBlock } from "./generic";
-import { registerToolRenderer, type ToolRenderer, type ToolRendererProps } from "./registry";
+import { asRecord, Images, isActive, Pending, resultImages, statusVerb, str } from "./common";
+import { BodySection, genericToolRenderer, OutputBlock } from "./generic";
+import {
+  registerToolRenderer,
+  type ToolLabel,
+  type ToolRenderer,
+  type ToolRendererProps,
+} from "./registry";
 
 export const MCP_NAMESPACE_PREFIX = "mcp__";
 
@@ -70,20 +76,14 @@ export function describeMcpCall(
   return { label: "status", isCall: false };
 }
 
-function McpSummary(props: ToolRendererProps) {
+function mcpLabel(props: ToolRendererProps): ToolLabel {
   const call = describeMcpCall(props);
-  if (!call) return genericToolRenderer.Summary ? <genericToolRenderer.Summary {...props} /> : null;
-  return (
-    <span className="font-mono">
-      {call.server && (
-        <>
-          {call.server}
-          <Muted> · </Muted>
-        </>
-      )}
-      {call.label}
-    </span>
-  );
+  if (!call) return genericToolRenderer.label(props);
+  return {
+    icon: PlugIcon,
+    verb: statusVerb(props.status, "Calling", "Called", "Call failed"),
+    target: { kind: "code", text: call.server ? `${call.server} · ${call.label}` : call.label },
+  };
 }
 
 function hasContent(value: unknown): boolean {
@@ -112,12 +112,13 @@ function McpBody(props: ToolRendererProps) {
   return (
     <div className="flex flex-col gap-2">
       {showArgs && (
-        <details open={props.result === undefined}>
-          <summary className="cursor-pointer text-xs text-muted-foreground select-none">
-            Arguments
-          </summary>
+        <BodySection
+          key={String(props.result === undefined)}
+          title="Arguments"
+          defaultOpen={props.result === undefined}
+        >
           <OutputBlock text={prettyJson(call.toolArgs)} />
-        </details>
+        </BodySection>
       )}
       {props.result === undefined ? (
         partial !== "" ? (
@@ -143,7 +144,7 @@ function McpBody(props: ToolRendererProps) {
   );
 }
 
-export const mcpRenderer: ToolRenderer = { Summary: McpSummary, Body: McpBody };
+export const mcpRenderer: ToolRenderer = { label: mcpLabel, Body: McpBody };
 
 registerToolRenderer("mcp", mcpRenderer);
 registerToolRenderer(isMcpNamespaceTool, mcpRenderer);

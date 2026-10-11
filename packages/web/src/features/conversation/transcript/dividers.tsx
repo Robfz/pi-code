@@ -1,4 +1,5 @@
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { Markdown } from "@/components/markdown";
 
 /**
@@ -14,24 +15,22 @@ export function SummaryDivider({
   summary: string;
   testId: string;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <details
+    <CollapsibleRow
       data-testid={testId}
-      className="group/divider"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      labelClassName="items-center gap-3"
+      label={
+        <>
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className="h-px flex-1 bg-border" />
+        </>
+      }
     >
-      <summary className="flex cursor-pointer list-none items-center gap-3 text-xs text-muted-foreground select-none">
-        <span className="h-px flex-1 bg-border" />
-        <span>{label}</span>
-        <span className="h-px flex-1 bg-border" />
-      </summary>
-      {open && (
-        <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2">
-          <Markdown text={summary} />
-        </div>
-      )}
-    </details>
+      <div className="mt-1 mb-2 rounded-lg bg-muted/40 px-3 py-2">
+        <Markdown text={summary} />
+      </div>
+    </CollapsibleRow>
   );
 }
 

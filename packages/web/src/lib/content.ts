@@ -52,3 +52,9 @@ export function truncate(text: string, max = 80): string {
   const line = text.split("\n")[0] ?? "";
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
+
+/** Lines of a text, a trailing newline not counting as one more ("" has none). */
+export function lineCount(text: string): number {
+  if (text === "") return 0;
+  return text.replace(/\n$/, "").split("\n").length;
+}

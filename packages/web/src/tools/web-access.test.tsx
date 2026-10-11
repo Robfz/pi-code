@@ -1,19 +1,29 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { fixtureToolCall, propsAt } from "./testing";
+import { fixtureToolCall, propsAt, rowBody, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
-import { sourcesFromText } from "./web-access";
+import { fetchContentRenderer, getSearchContentRenderer, sourcesFromText } from "./web-access";
 
-const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
+const row = () => screen.getByTestId("tool-call");
+const header = () => row().firstElementChild as HTMLElement;
 const expand = () => userEvent.setup().click(header());
+const label = () => rowParts(row());
 
 describe("web_search (web-search fixture)", () => {
   const call = fixtureToolCall("web-search", "web_search");
 
-  it("running: query and progress text, open while running", () => {
+  it("running: query, collapsed, progress text in the body", async () => {
     render(<ToolCallView {...propsAt(call, { update: 0 })} />);
-    expect(header()).toHaveTextContent('web_search"Node.js current LTS codename"');
+    expect(label()).toMatchObject({
+      icon: "globe",
+      verb: "Searching web",
+      shimmer: true,
+      target: '"Node.js current LTS codename"',
+      meta: undefined,
+    });
+    expect(header()).toHaveAttribute("aria-expanded", "false");
+    await expand();
     expect(
       screen.getByText('Searching "Node.js current LTS codename" (0/1 complete)...'),
     ).toBeInTheDocument();
@@ -40,17 +50,23 @@ describe("web_search (web-search fixture)", () => {
         curatorUrl="https://host.ts.net:8443/?session=abc"
       />,
     );
-    await expand(); // collapse the running call
     expect(header()).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("link", { name: /Review in curator/ })).toHaveAttribute(
       "href",
       "https://host.ts.net:8443/?session=abc",
     );
+    await expand(); // the body shows it instead
+    expect(screen.getAllByRole("link", { name: /Review in curator/ })).toHaveLength(1);
   });
 
   it("done: result count, then source links and full results when expanded", async () => {
     render(<ToolCallView {...propsAt(call, "end")} />);
-    expect(header()).toHaveTextContent("· 5 sources");
+    expect(label()).toMatchObject({
+      verb: "Searched web",
+      shimmer: false,
+      target: '"Node.js current LTS codename"',
+      meta: "· 5 sources",
+    });
     await expand();
     const list = screen.getByTestId("source-list");
     const links = within(list).getAllByRole("link");
@@ -93,7 +109,7 @@ describe("web_search (web-search fixture)", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("2 queries · 3 sources");
+    expect(label()).toMatchObject({ target: "2 queries", meta: "· 3 sources" });
     await expand();
     expect(screen.getByText("Summary")).toBeInTheDocument();
     expect(await screen.findByText("Active LTS")).toBeInTheDocument();
@@ -102,6 +118,25 @@ describe("web_search (web-search fixture)", () => {
       "https://d.example/x",
     );
     expect(screen.getByText("rate limited")).toBeInTheDocument();
+  });
+
+  it("failed call", () => {
+    render(
+      <ToolCallView
+        toolCallId="s3"
+        toolName="web_search"
+        args={{ query: "x" }}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "No search provider configured" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Web search failed",
+      target: '"x"',
+      meta: "No search provider configured",
+    });
   });
 
   it("error", async () => {
@@ -131,7 +166,33 @@ describe("web_search (web-search fixture)", () => {
 
 describe("source_check", () => {
   it("claim, source count, artifact sources", async () => {
-    render(
+    const { rerender } = render(
+      <ToolCallView
+        toolCallId="sc"
+        toolName="source_check"
+        args={{ claim: "Node 24 is Krypton" }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "globe",
+      verb: "Checking",
+      shimmer: true,
+      target: "Node 24 is Krypton",
+    });
+    rerender(
+      <ToolCallView
+        toolCallId="sc"
+        toolName="source_check"
+        args={{ claim: "Node 24 is Krypton" }}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "boom" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Check failed", meta: "boom" });
+    rerender(
       <ToolCallView
         toolCallId="sc"
         toolName="source_check"
@@ -160,7 +221,11 @@ describe("source_check", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("Node 24 is Krypton · 1 source");
+    expect(label()).toMatchObject({
+      verb: "Checked",
+      target: "Node 24 is Krypton",
+      meta: "· 1 source",
+    });
     await expand();
     expect(screen.getByRole("link", { name: "Node.js releases" })).toBeInTheDocument();
     expect(screen.getByText("2 passages extracted")).toBeInTheDocument();
@@ -169,7 +234,22 @@ describe("source_check", () => {
 
 describe("fetch_content / get_search_content", () => {
   it("fetch_content: URL, title and markdown content", async () => {
-    render(
+    const { rerender } = render(
+      <ToolCallView
+        toolCallId="f"
+        toolName="fetch_content"
+        args={{ url: "https://example.com/post" }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "link",
+      verb: "Fetching",
+      shimmer: true,
+      target: "https://example.com/post",
+    });
+    rerender(
       <ToolCallView
         toolCallId="f"
         toolName="fetch_content"
@@ -187,7 +267,7 @@ describe("fetch_content / get_search_content", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("https://example.com/post · Example post");
+    expect(label()).toMatchObject({ verb: "Fetched", target: "Example post", meta: undefined });
     await expand();
     expect(screen.getByRole("link", { name: "https://example.com/post" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
@@ -207,14 +287,47 @@ describe("fetch_content / get_search_content", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("2 URLs");
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Fetch failed",
+      target: "2 URLs",
+      meta: "Error: all fetches failed",
+    });
     await expand();
     expect(screen.getAllByRole("link")).toHaveLength(2);
-    expect(screen.getByText("Error: all fetches failed")).toHaveClass("text-destructive");
+    expect(within(rowBody(row())).getByText("Error: all fetches failed")).toHaveClass(
+      "text-destructive",
+    );
   });
 
   it("get_search_content: stored URL content", async () => {
-    render(
+    const { rerender } = render(
+      <ToolCallView
+        toolCallId="g"
+        toolName="get_search_content"
+        args={{ responseId: "abc123", urlIndex: 0 }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "globe",
+      verb: "Getting content",
+      shimmer: true,
+      target: "URL #0",
+    });
+    rerender(
+      <ToolCallView
+        toolCallId="g"
+        toolName="get_search_content"
+        args={{ responseId: "abc123", urlIndex: 0 }}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "Not found" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Get content failed", target: "URL #0" });
+    rerender(
       <ToolCallView
         toolCallId="g"
         toolName="get_search_content"
@@ -227,9 +340,27 @@ describe("fetch_content / get_search_content", () => {
         }}
       />,
     );
-    expect(header()).toHaveTextContent("Doc page · abc123");
+    expect(label()).toMatchObject({ verb: "Got content", target: "Doc page" });
     await expand();
     expect(screen.getByRole("link", { name: "https://example.com/doc" })).toBeInTheDocument();
     expect(await screen.findByText("Stored page body")).toBeInTheDocument();
+  });
+
+  it("renders no body without a result, URLs or progress", () => {
+    for (const { Body } of [fetchContentRenderer, getSearchContentRenderer]) {
+      const { container, unmount } = render(
+        <Body
+          toolCallId="f3"
+          toolName="fetch_content"
+          args={{}}
+          status="done"
+          isError={false}
+          partialResult={{ content: [] }}
+          expanded
+        />,
+      );
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
   });
 });

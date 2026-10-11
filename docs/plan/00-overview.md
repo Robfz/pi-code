@@ -14,6 +14,7 @@ Component plans:
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees | `T` |
 | [`07-code-review.md`](07-code-review.md) | Code review: diff modes, file search, review pane and page, line references | `C` |
 | [`08-delete-sessions.md`](08-delete-sessions.md) | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu | `X` |
+| [`09-ui-overhaul.md`](09-ui-overhaul.md) | UI overhaul (phase 1): tokens and type, status vocabulary, `reduceLive` timing, transcript turns and tool rows, density, live status, turn footer, composer picker | `U` |
 
 ## Repository setup (task R1)
 
@@ -60,6 +61,7 @@ Tooling choices made while drafting (open to veto): pnpm, Biome, Vitest, tsx, No
 | 7. Git worktrees | Repo grouping on every listing, create and remove worktrees | T1–T12 |
 | 8. Code review | Review changes and files beside the conversation, send and open line references | C1–C14 |
 | 9. Delete sessions | Delete one session at a time from every listing; Stop and Delete replace Close | X1–X7 |
+| 10. UI overhaul | Foundations, `reduceLive` timing, transcript turns, tool rows and thinking, grouping and density, live status and turn footer, composer picker | U1–U16 |
 
 Exit criterion per phase: its tasks' "done when" pass, plus the phone checklist for that phase.
 

@@ -19,15 +19,11 @@ import { SelectableDiff } from "./selectable-diff";
 
 const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; className: string }> =
   {
-    added: { letter: "A", label: "Added", className: "text-emerald-600 dark:text-emerald-400" },
-    untracked: {
-      letter: "U",
-      label: "Untracked",
-      className: "text-emerald-600 dark:text-emerald-400",
-    },
-    modified: { letter: "M", label: "Modified", className: "text-amber-600 dark:text-amber-400" },
-    deleted: { letter: "D", label: "Deleted", className: "text-red-600 dark:text-red-400" },
-    renamed: { letter: "R", label: "Renamed", className: "text-sky-600 dark:text-sky-400" },
+    added: { letter: "A", label: "Added", className: "text-diff-add" },
+    untracked: { letter: "U", label: "Untracked", className: "text-diff-add" },
+    modified: { letter: "M", label: "Modified", className: "text-status-input" },
+    deleted: { letter: "D", label: "Deleted", className: "text-diff-del" },
+    renamed: { letter: "R", label: "Renamed", className: "text-muted-foreground" },
   };
 
 /**
@@ -100,8 +96,8 @@ function FileRow({
         ) : (
           counts && (
             <span className="shrink-0 font-mono text-xs tabular-nums">
-              <span className="text-emerald-600 dark:text-emerald-400">+{counts.additions}</span>{" "}
-              <span className="text-red-600 dark:text-red-400">−{counts.deletions}</span>
+              <span className="text-diff-add">+{counts.additions}</span>{" "}
+              <span className="text-diff-del">−{counts.deletions}</span>
             </span>
           )
         )}
@@ -145,8 +141,8 @@ function Totals({ files }: { files: GitFileDiff[] }) {
   return (
     <p className="px-1 text-xs text-muted-foreground">
       {files.length} {files.length === 1 ? "file" : "files"} changed ·{" "}
-      <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>{" "}
-      <span className="text-red-600 dark:text-red-400">−{deletions}</span>
+      <span className="text-diff-add">+{additions}</span>{" "}
+      <span className="text-diff-del">−{deletions}</span>
     </p>
   );
 }

@@ -33,7 +33,7 @@ describe("App", () => {
     expect(await screen.findAllByText("alpha")).toHaveLength(2);
     expect(screen.getByText("Refactor")).toBeInTheDocument();
     expect(screen.getByText("Finished")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Working")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /alpha/ })).toHaveAttribute("href", "/agents/a1");
     expect(calls.some((c) => c.url === "/api/agents")).toBe(false);
     expect(calls.some((c) => c.url === "/api/sessions")).toBe(true);

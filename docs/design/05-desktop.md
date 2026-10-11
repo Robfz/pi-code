@@ -1,6 +1,6 @@
 # Desktop and concurrent conversations
 
-Comfortable desktop use with several conversations running at once: a sidebar of live and recent conversations, one multiplexed event stream per browser tab, and a wider layout. Decisions and rationale: [`../../maps/2026-09-30-desktop.md`](../../maps/2026-09-30-desktop.md). Where this document overlaps `01`–`03`, it takes precedence.
+Comfortable desktop use with several conversations running at once: a sidebar of live and recent conversations, one multiplexed event stream per browser tab, and a wider layout. Decisions and rationale: [`../../maps/2026-09-30-desktop.md`](../../maps/2026-09-30-desktop.md). Where this document overlaps `01`–`03`, it takes precedence; the look and feel (status vocabulary, transcript column, tokens) is specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), which takes precedence over this one.
 
 Desktop clients are the Mac and other laptops, in a browser tab over the tailnet URL (HTTP/2). One tab holds every conversation; phones use the same stream and keep their screens.
 
@@ -140,9 +140,9 @@ Tree, share, settings and `/sessions` are routes rendered in the content area on
 ```
 ┌ [+ New conversation]  [search…]   ┐
 │ pi-code   ⎇ main              [+] │  group: folder label · branch (live only) · new here
-│   ● Desktop design doc      2m [×]│  live row: mark · title · activity · stop or delete
-│   ◌ Fix flaky test          now[×]│  working: spinner replaces the mark
-│     Refactor catalog        3d [×]│  on-disk session: delete
+│   ● Desktop design doc      2m [×]│  live row: status dot · title · activity · stop or delete
+│   ◌ Fix flaky test          now[×]│  working: a neutral spinner replaces the dot
+│     Refactor catalog        3d [×]│  closed (on-disk session, exited agent): no mark · delete
 │ Kepi/phoenix                  [+] │
 │ phoenix/phoenix               [+] │
 └ ⚙                                 ┘
@@ -150,7 +150,7 @@ Tree, share, settings and `/sessions` are routes rendered in the content area on
 
 - **Rows** = every agent in `live.agents` (the registry, exited included) plus window sessions no agent holds (matched by `agent.sessionFile`). Title: agent `sessionName` / session `name`, else `firstMessage`, else "New conversation". Activity = the session's `updatedAt`; for an agent, the later of that and its `startedAt` (as in Idle sweep).
 - **Groups** by cwd, ordered by their most recent row; rows by activity. Label = folder basename, with the parent's basename prepended (`Kepi/phoenix`) when two displayed groups share a basename. The header shows `branches[cwd]` when the folder has a live row.
-- **Row marks:** green dot while the pi process runs; a spinner in its place while `isStreaming` or `starting`, or while the row's resume is in flight; exited agents show no mark. A compact attention icon follows the title: finished, failed, needs input (Home's colors; Home keeps its text badges), labelled for assistive tech and in its tooltip. Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
+- **Row marks:** one `StatusMark` before the title, from the status vocabulary ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Status vocabulary"; `agentStatus` in `lib/agent-status.ts`): a 7px dot in `status-input` for Needs input (a pending dialog or trust prompt), `status-error` for Failed, `status-done` for Finished and `status-idle` (muted) for Idle, while pi runs with nothing to report; a neutral spinner for Working (`isStreaming`, `starting`, or the row's resume or restart in flight); no mark for Closed (exited agents, session rows). The mark is labelled with the word for assistive tech and in its tooltip; it is the row's only status mark. Home shows the same states as icon-plus-word badges. Relative activity times refresh every 60 s. The row of the route's agent is highlighted.
 - **Actions:** New conversation (project picker); search; per-group `+` → `POST /api/agents { cwd }`; `×` on every row, through `useStopOrDelete` ([`08-delete-sessions.md`](08-delete-sessions.md)): on a live row (labelled "Stop or delete {title} ({folder})") it opens the "Stop or delete {title}?" dialog (Cancel, Stop → `DELETE /api/agents/:id`, Delete → `DELETE /api/sessions`); on an exited agent's or a session row (labelled "Delete {title} ({folder})") it deletes at once. A stopped or deleted agent is then `drop`ped, and the `×` is disabled while its request is in flight. Stopping or deleting the route's agent navigates to `/`. Selecting a live row navigates to it; selecting an exited agent's row restarts it (`POST /api/agents/:id/restart`) and then navigates to it; selecting a session row resumes it (`useOpenAgent`). A failed restart or resume shows a toast.
 - Home and `/sessions` rows follow the same `×` rule (a session held by an agent follows that agent's), and the conversation header's `⋮` offers Stop and Delete.
 - **Search:** non-empty text (200 ms debounce) queries `GET /api/sessions?q=` and replaces the window rows with the results; agents in `live.agents` are filtered client-side on their row title and cwd path. The previous results stay on screen while the next query loads; clearing the field shows the window at once. While the field has text, a themed × button clears it and refocuses the field (the browser's native cancel button is hidden).
@@ -158,8 +158,8 @@ Tree, share, settings and `/sessions` are routes rendered in the content area on
 
 ### Layout
 
-- **Transcript width.** At ≥1024px the conversation column (transcript and composer area) uses the full content width with the standard padding; below 1024px it is capped at `max-w-3xl`.
-- **Review pane.** At ≥1024px, with the pane open for the conversation (persisted per conversation), the conversation column and `ReviewPane` split the content width in halves, each `h-dvh` with its own scroll, and the conversation's header, transcript and composer drop from `lg:px-32` to `lg:px-6`. The header's "Show changes" / "Hide changes" button and `/diff` toggle it; the tree route shows no pane. Below 1024px the pane isn't rendered and the review panel is the `/agents/$agentId/diff` page. Details in [`07-code-review.md`](07-code-review.md).
+- **Transcript width.** The transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` (736px), with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. The header spans the full width.
+- **Review pane.** At ≥1024px, with the pane open for the conversation (persisted per conversation), the conversation and `ReviewPane` split the content width in halves, each `h-dvh` with its own scroll; the column keeps its cap and padding and fits the half left to it. The header's "Show changes" / "Hide changes" button and `/diff` toggle it; the tree route shows no pane. Below 1024px the pane isn't rendered and the review panel is the `/agents/$agentId/diff` page. Details in [`07-code-review.md`](07-code-review.md).
 - **Diff split.** `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
 - **Conversation sheets.** On desktop, extension dialogs (`DialogHost`) and the trust prompt (`TrustSheet`) are non-modal bottom sheets portalled into the conversation column (their `container` prop) with a `ScopedOverlay` dimming only that column, so the sidebar and the rest of the page stay usable. Clicks outside the sheet don't answer it, and neither does Escape pressed outside it; Tab can leave the sheet (`SheetContent loopFocus={false}`), skipping the covered column, which is `inert` while it's open. Inside a dialog, Escape, Cancel and × answer `cancelled`; the trust prompt answers only through its buttons. User-initiated action sheets (rename, model, thinking, stats) stay page-modal. On phone, dialogs and the trust prompt are modal bottom sheets, and outside taps don't cancel them.
 

@@ -99,11 +99,13 @@ The smoke script creates scratch projects under `~/tmp` and removes them, with t
 - Line references from transcript edit diffs are inserted as shown, and references in older messages aren't tied to a version: later edits can shift their lines.
 - A conversation in a subfolder of a repo reviews only that subtree's changes and files, while the header's dirty marker covers the whole repo. See [`docs/design/07-code-review.md`](docs/design/07-code-review.md) for the rest.
 - Deleting a conversation moves its session file to the server's Trash (recoverable only on that Mac, Finder → Put Back), or unlinks it for good where `trash` is missing. There is no confirmation except the Stop-or-Delete choice on live conversations. A conversation opened from a file outside pi's sessions folder is only stopped; its file is kept. See [`docs/design/08-delete-sessions.md`](docs/design/08-delete-sessions.md).
+- Thinking durations ("Thought for 12s") aren't saved in the session file (pi records none): they're kept in the agent's live state on the server, so after pi or the server restarts, and in sessions opened from history, a thinking block reads "Thought" without a duration. Messages from pi before 1.1.0 carry no durations, so their tool rows show none.
+- A turn's files chip ("4 files +120 −30") opens the review of the working tree, not a diff of that turn; only its counts are the turn's. See [`docs/design/09-ui-overhaul.md`](docs/design/09-ui-overhaul.md).
 - The status bar's subagent spend `(sa $x)` counts calls that throw (Stop/abort, server shutdown) and cursor-runner calls as $0: their spend never reaches the session file.
 
 ## Documentation
 
 - [`maps/`](maps/) — decision maps and their rationale
-- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md), [worktrees](docs/design/06-worktrees.md), [code review](docs/design/07-code-review.md), [deleting sessions](docs/design/08-delete-sessions.md)
+- [`docs/design/`](docs/design/) — system design: [overview](docs/design/00-overview.md), [server](docs/design/01-server.md), [API contract](docs/design/02-api-contract.md), [web client](docs/design/03-web-client.md), [pi extension](docs/design/04-pi-extension.md), [desktop](docs/design/05-desktop.md), [worktrees](docs/design/06-worktrees.md), [code review](docs/design/07-code-review.md), [deleting sessions](docs/design/08-delete-sessions.md), [UI overhaul](docs/design/09-ui-overhaul.md) (look and feel: tokens, transcript, density, composer; mockup in [`docs/design/mockups/`](docs/design/mockups/))
 - [`docs/plan/`](docs/plan/) — implementation plan
 - [`docs/spikes/`](docs/spikes/) — protocol spike findings

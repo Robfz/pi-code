@@ -1,77 +1,43 @@
-import { ChevronRightIcon, CircleAlertIcon, LoaderIcon, WrenchIcon } from "lucide-react";
-import { memo, useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
-import { useUiPrefs } from "@/store/ui-prefs";
-import { CuratorButton } from "./common";
+import { memo } from "react";
+import { useRowOpen } from "@/store/ui-prefs";
 import "./index";
+import { isActive } from "./common";
 import { getToolRenderer, type ToolRendererProps } from "./registry";
+import { errorLine, ToolRow } from "./tool-row";
 
 export type ToolCallViewProps = Omit<ToolRendererProps, "expanded">;
 
-/** Frame around a tool renderer: header (name, summary, status, toggle) and expandable body. */
+/**
+ * A tool call as a `ToolRow`: the renderer's label, and its body when expanded. Open by default
+ * in Detailed, and while running for renderers that `expandWhileRunning`. A finished call without
+ * a result (never executed) has no body.
+ */
 export const ToolCallView = memo(function ToolCallView(props: ToolCallViewProps) {
-  const globalExpanded = useUiPrefs((s) => s.toolsExpanded);
-  const [override, setOverride] = useState<boolean | undefined>(undefined);
-  // The global toggle wins over a per-tool choice made before it.
-  useEffect(() => {
-    void globalExpanded;
-    setOverride(undefined);
-  }, [globalExpanded]);
-
   const renderer = getToolRenderer(props.toolName);
-  const active = props.status === "running" || props.status === "streaming";
-  const expanded = override ?? (globalExpanded || (active && renderer.expandWhileRunning === true));
+  const [expanded, setExpanded] = useRowOpen(
+    (density) =>
+      density === "detailed" || (isActive(props.status) && renderer.expandWhileRunning === true),
+  );
   const rendererProps: ToolRendererProps = { ...props, expanded };
-  const { Summary, Body } = renderer;
+  const { Body } = renderer;
+  const hasBody =
+    isActive(props.status) || props.result !== undefined || props.partialResult !== undefined;
 
   return (
-    <div
+    <ToolRow
       data-testid="tool-call"
       data-tool={props.toolName}
       data-status={props.status}
-      className={cn(
-        "min-w-0 rounded-lg border bg-card/40 text-sm",
-        props.status === "error" && "border-destructive/50",
-      )}
+      label={renderer.label(rendererProps)}
+      status={props.status}
+      error={props.status === "error" ? errorLine(props.result) : undefined}
+      durationMs={props.durationMs}
+      startedAt={props.startedAt}
+      curatorUrl={props.curatorUrl}
+      open={expanded}
+      onOpenChange={setExpanded}
     >
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setOverride(!expanded)}
-        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left"
-      >
-        <ChevronRightIcon
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            expanded && "rotate-90",
-          )}
-        />
-        <WrenchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 font-mono text-xs font-medium">{props.toolName || "tool"}</span>
-        <span className="min-w-0 flex-1 truncate text-xs">
-          {Summary && <Summary {...rendererProps} />}
-        </span>
-        {active && (
-          <LoaderIcon
-            aria-label="Running"
-            className="size-3.5 shrink-0 animate-spin text-muted-foreground"
-          />
-        )}
-        {props.status === "error" && (
-          <CircleAlertIcon aria-label="Failed" className="size-3.5 shrink-0 text-destructive" />
-        )}
-      </button>
-      {expanded && (
-        <div className="border-t px-2.5 py-2">
-          <Body {...rendererProps} />
-        </div>
-      )}
-      {!expanded && props.curatorUrl && (
-        // The curator waits for a review: keep its button reachable when collapsed.
-        <div className="flex border-t px-2.5 py-2">
-          <CuratorButton url={props.curatorUrl} />
-        </div>
-      )}
-    </div>
+      {hasBody ? <Body {...rendererProps} /> : undefined}
+    </ToolRow>
   );
 });

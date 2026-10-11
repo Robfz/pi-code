@@ -1,10 +1,7 @@
 import { type AssistantMessage, effectiveStopReason, findCodeRefs } from "@pi-code/protocol";
 import { CircleAlertIcon, SquareIcon } from "lucide-react";
-import { memo } from "react";
 import { Markdown } from "@/components/markdown";
 import { useOpenReference } from "@/features/review/open-reference";
-import { Thinking } from "./thinking";
-import { ToolCallSlot } from "./tool-call-slot";
 
 /** Error / stopped / truncated footer of a finished assistant message. */
 export function StopReasonNotice({
@@ -42,14 +39,10 @@ export function StopReasonNotice({
 }
 
 /**
- * Text (Streamdown), thinking (collapsed), tool calls paired with their results. Line references
- * in text blocks are clickable (`span[data-code-ref]`, handled here by delegation).
+ * Assistant text (Streamdown). Line references in it are clickable (`span[data-code-ref]`,
+ * handled here by delegation).
  */
-export const AssistantMessageView = memo(function AssistantMessageView({
-  message,
-}: {
-  message: AssistantMessage;
-}) {
+export function AssistantText({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const openReference = useOpenReference();
   /** Opens the reference `target` is in; `false` when it isn't in one. */
   const openAt = (target: EventTarget): boolean => {
@@ -62,39 +55,14 @@ export const AssistantMessageView = memo(function AssistantMessageView({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: delegates for the role="button" references inside
     <div
-      data-testid="assistant-message"
-      className="flex min-w-0 flex-col gap-2"
+      data-testid="assistant-text"
+      className="min-w-0"
       onClick={(event) => openAt(event.target)}
       onKeyDown={(event) => {
         if (event.key === "Enter" && openAt(event.target)) event.preventDefault();
       }}
     >
-      {message.content.map((block, index) => {
-        switch (block.type) {
-          case "text":
-            return block.text.trim() === "" ? null : (
-              // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are positional
-              <Markdown key={index} text={block.text} codeRefs />
-            );
-          case "thinking":
-            return block.redacted ? null : (
-              // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are positional
-              <Thinking key={index} text={block.thinking} />
-            );
-          case "toolCall":
-            return (
-              <ToolCallSlot
-                key={block.id}
-                toolCallId={block.id}
-                toolName={block.name}
-                args={block.arguments}
-              />
-            );
-          default:
-            return null;
-        }
-      })}
-      <StopReasonNotice message={message} />
+      <Markdown text={text} streaming={streaming} codeRefs={!streaming} />
     </div>
   );
-});
+}

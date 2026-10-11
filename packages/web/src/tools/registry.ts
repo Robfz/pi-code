@@ -6,15 +6,12 @@
  * Tools without a renderer fall back to the generic one.
  */
 
-import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
+import { splitPath } from "@/lib/paths";
+import type { ActiveCall, ToolStatus } from "@/store/tool-status";
 
-export type ToolStatus =
-  /** Assistant is still streaming the call's arguments. */
-  | "streaming"
-  /** Arguments complete, waiting for / running execution. */
-  | "running"
-  | "done"
-  | "error";
+export type { ToolStatus } from "@/store/tool-status";
 
 /** `{ content, details }` of a tool result (committed `toolResult` or `tool_execution_end`). */
 export interface ToolResultPayload {
@@ -37,14 +34,26 @@ export interface ToolRendererProps {
   expanded: boolean;
   /** Proxied curator URL from a `curator` event, if any. */
   curatorUrl?: string;
+  /** Execution time: the committed result's, else the live run's. */
+  durationMs?: number;
+  /** When execution started (the live run's, server clock). */
+  startedAt?: number;
+}
+
+/** What a tool row shows (`docs/design/09-ui-overhaul.md`, "Tool rows"). */
+export interface ToolLabel {
+  icon: LucideIcon;
+  /** Present tense while running or streaming, past tense when done, "… failed" on error. */
+  verb: string;
+  target?: { kind: "path" | "code" | "text"; text: string };
+  meta?: ReactNode;
 }
 
 export interface ToolRenderer {
-  /** One-line summary next to the tool name (collapsed and expanded). */
-  Summary?: ComponentType<ToolRendererProps>;
+  label(props: ToolRendererProps): ToolLabel;
   /** Body shown when expanded. */
   Body: ComponentType<ToolRendererProps>;
-  /** Show the body while running even when collapsed (e.g. streaming output). */
+  /** Expanded while running (Balanced): `bash` and the fallback renderer only. */
   expandWhileRunning?: boolean;
 }
 
@@ -72,4 +81,19 @@ export function getToolRenderer(toolName: string): ToolRenderer {
   if (matched) return matched.renderer;
   if (!fallback) throw new Error("no fallback tool renderer registered (import @/tools)");
   return fallback;
+}
+
+/** "Reading foo.ts": a running call's verb and short target (a path's basename, else the text). */
+export function runningPhrase(call: ActiveCall): string {
+  const { verb, target } = getToolRenderer(call.toolName).label({
+    toolCallId: call.toolCallId,
+    toolName: call.toolName,
+    args: call.args,
+    argsText: call.argsText,
+    status: call.streaming ? "streaming" : "running",
+    isError: false,
+    expanded: false,
+  });
+  const short = target && (target.kind === "path" ? splitPath(target.text).base : target.text);
+  return short ? `${verb} ${short}` : verb;
 }

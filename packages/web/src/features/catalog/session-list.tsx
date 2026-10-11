@@ -1,11 +1,14 @@
 import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
-import { CircleDotIcon, LoaderIcon, MessageSquareIcon } from "lucide-react";
+import { LoaderIcon, MessageSquareIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/agent-status";
 import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
+import { agentStatus } from "@/lib/agent-status";
+import { isLive } from "@/lib/agents";
 import { baseName } from "@/lib/content";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { useLive } from "@/store/context";
 import { GroupedListing } from "./grouped-listing";
 import { epochMs, groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
@@ -13,10 +16,27 @@ import { useOpenAgent } from "./use-open-agent";
 type OpenAgent = ReturnType<typeof useOpenAgent>;
 
 /**
- * Sessions as tappable rows: name (or first message), first message, project, last update,
- * "Open" when an agent already has it. Tapping resumes it through `open`; a session whose folder
- * is missing can't be resumed unless an agent still has it. With `folder`, each row gets a `×`
- * (`StopOrDeleteButton`, following the holding agent's rule when one has it).
+ * The status of the agent holding `session` (`ownedBy`, or a live agent on its file); nothing
+ * when none does. A holder this tab doesn't know yet runs pi, so it reads Idle.
+ */
+function HolderBadge({ session }: { session: SessionSummary }) {
+  const holder = useLive((s) =>
+    session.ownedBy !== undefined && s.agents[session.ownedBy]
+      ? s.agents[session.ownedBy]
+      : Object.values(s.agents).find(
+          (agent) => isLive(agent) && agent.sessionFile === session.file,
+        ),
+  );
+  if (holder) return <StatusBadge status={agentStatus(holder)} />;
+  if (session.ownedBy !== undefined) return <StatusBadge status="idle" />;
+  return null;
+}
+
+/**
+ * Sessions as tappable rows: name (or first message), first message, project, last update, the
+ * holding agent's status when an agent already has it. Tapping resumes it through `open`; a
+ * session whose folder is missing can't be resumed unless an agent still has it. With `folder`,
+ * each row gets a `×` (`StopOrDeleteButton`, following the holding agent's rule when one has it).
  */
 function SessionRows({
   sessions,
@@ -87,11 +107,7 @@ function SessionRows({
                   </time>
                 </span>
               </span>
-              {session.ownedBy !== undefined && (
-                <Badge variant="secondary" className="gap-1">
-                  <CircleDotIcon className="text-emerald-500" /> Open
-                </Badge>
-              )}
+              <HolderBadge session={session} />
             </button>
             {folder !== undefined && (
               <StopOrDeleteButton

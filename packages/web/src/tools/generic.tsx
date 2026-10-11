@@ -1,6 +1,9 @@
+import { WrenchIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { prettyJson, toolResultText, truncate } from "@/lib/content";
 import { cn } from "@/lib/utils";
-import type { ToolRenderer, ToolRendererProps } from "./registry";
+import type { ToolLabel, ToolRenderer, ToolRendererProps } from "./registry";
 
 function hasArgs(args: unknown): boolean {
   if (args === undefined || args === null) return false;
@@ -17,17 +20,43 @@ export function argsHint(args: unknown): string | undefined {
   return undefined;
 }
 
-function GenericSummary({ args }: ToolRendererProps) {
+function genericLabel({ toolName, args, status }: ToolRendererProps): ToolLabel {
+  const name = toolName || "tool";
   const hint = argsHint(args);
-  return hint ? <span className="truncate text-muted-foreground">{hint}</span> : null;
+  return {
+    icon: WrenchIcon,
+    verb: status === "error" ? `${name} failed` : name,
+    target: hint ? { kind: "text", text: hint } : undefined,
+  };
+}
+
+/** A collapsible sub-section of a tool body ("Arguments", "Full results"). */
+export function BodySection({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <CollapsibleRow
+      label={<span className="text-xs text-muted-foreground">{title}</span>}
+      defaultOpen={defaultOpen}
+      bodyClassName="pt-1"
+    >
+      {children}
+    </CollapsibleRow>
+  );
 }
 
 export function OutputBlock({ text, error = false }: { text: string; error?: boolean }) {
   return (
     <pre
       className={cn(
-        "max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-xs",
-        error && "bg-destructive/10 text-destructive",
+        "max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.6] text-subtle-foreground",
+        error && "text-destructive",
       )}
     >
       {text}
@@ -49,12 +78,14 @@ function GenericBody({
   return (
     <div className="flex flex-col gap-2">
       {(hasArgs(args) || (argsText ?? "") !== "") && (
-        <details className="group/args" open={status === "streaming"}>
-          <summary className="cursor-pointer text-xs text-muted-foreground select-none">
-            Arguments
-          </summary>
+        // Open while the arguments stream in; collapsed again once they're complete.
+        <BodySection
+          key={String(status === "streaming")}
+          title="Arguments"
+          defaultOpen={status === "streaming"}
+        >
           <OutputBlock text={argsJson} />
-        </details>
+        </BodySection>
       )}
       {result === undefined && partial !== "" && <OutputBlock text={partial} />}
       {result !== undefined &&
@@ -71,7 +102,7 @@ function GenericBody({
 
 /** Tool name, arguments (JSON, collapsed), streaming partial text, result text, error state. */
 export const genericToolRenderer: ToolRenderer = {
-  Summary: GenericSummary,
+  label: genericLabel,
   Body: GenericBody,
   expandWhileRunning: true,
 };

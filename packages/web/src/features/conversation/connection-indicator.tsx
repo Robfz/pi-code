@@ -24,10 +24,10 @@ export function ConnectionIndicator() {
       <span
         className={cn(
           "size-2 rounded-full",
-          connection === "live" && "bg-emerald-500",
+          connection === "live" && "bg-status-idle",
           (connection === "connecting" || connection === "reconnecting") &&
-            "animate-pulse bg-amber-500",
-          connection === "offline" && "bg-destructive",
+            "animate-pulse bg-status-idle",
+          connection === "offline" && "bg-status-error",
         )}
       />
       <span className={cn(connection === "live" && "sr-only")}>{LABELS[connection]}</span>

@@ -212,6 +212,57 @@ export function groupModels(models: readonly AnyModel[]): [string, AnyModel[]][]
   return [...groups.entries()];
 }
 
+/**
+ * Thinking-level segmented control for the current model (`get_available_thinking_levels`):
+ * choosing a level sends `set_thinking_level`; the selection follows `state.thinkingLevel`.
+ */
+export function ThinkingLevelControl() {
+  const agentId = useConversation((s) => s.agentId);
+  const current = useConversation((s) => s.state?.thinkingLevel);
+  const modelKey = useConversation((s) =>
+    s.state?.model ? `${s.state.model.provider}/${s.state.model.id}` : "",
+  );
+  const actions = useSessionActions();
+  const [busy, setBusy] = useState(false);
+  const levels = useQuery({
+    queryKey: queryKeys.thinkingLevels(agentId, modelKey),
+    queryFn: () => rpc(agentId, { type: "get_available_thinking_levels" }),
+  });
+  if (levels.isError) {
+    return (
+      <p role="alert" className="text-xs text-destructive">
+        {errorMessage(levels.error)}
+      </p>
+    );
+  }
+  const list = levels.data?.levels ?? [];
+  return (
+    <fieldset
+      aria-label="Thinking level"
+      className="grid min-h-[30px] min-w-0 gap-0.5 rounded-lg bg-chip p-0.5"
+      style={{ gridTemplateColumns: `repeat(${Math.max(1, list.length)}, minmax(0, 1fr))` }}
+    >
+      {list.map((level: ThinkingLevel) => (
+        <button
+          key={level}
+          type="button"
+          aria-pressed={level === current}
+          disabled={busy}
+          onClick={async () => {
+            if (level === current) return;
+            setBusy(true);
+            await actions.setThinkingLevel(level);
+            setBusy(false);
+          }}
+          className="h-[26px] min-w-0 truncate rounded-md px-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-popover aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-[0_0_0_1px_var(--input),0_1px_2px_oklch(0_0_0/0.2)] dark:aria-pressed:bg-secondary"
+        >
+          {level}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
 function ModelSheet({ onClose }: { onClose(): void }) {
   const agentId = useConversation((s) => s.agentId);
   const current = useConversation((s) => s.state?.model);
@@ -283,6 +334,12 @@ function ModelSheet({ onClose }: { onClose(): void }) {
           </section>
         ))}
       </div>
+      {current?.reasoning && (
+        <div className="flex flex-col gap-2 border-t px-4 pt-3 pb-4">
+          <h3 className="text-xs font-medium text-muted-foreground">Thinking</h3>
+          <ThinkingLevelControl />
+        </div>
+      )}
     </BottomSheet>
   );
 }

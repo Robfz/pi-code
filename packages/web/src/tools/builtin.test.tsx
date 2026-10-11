@@ -8,17 +8,19 @@ import { stubMatchMedia } from "@/test/dom-stubs";
 import { hydratedStore } from "@/test/render";
 import { bashOutcome, listResult, readRange } from "./builtin";
 import { langFromPath, splitNotice } from "./common";
-import { fixtureToolCall, propsAt } from "./testing";
+import { fixtureToolCall, propsAt, rowBody, rowParts } from "./testing";
 import { ToolCallView, type ToolCallViewProps } from "./tool-call-view";
 
 beforeAll(stubCanvas);
 afterEach(() => {
-  useUiPrefs.setState({ toolsExpanded: false });
+  useUiPrefs.setState({ density: "balanced" });
   vi.unstubAllGlobals();
 });
 
 const expand = () => userEvent.setup().click(screen.getByRole("button", { expanded: false }));
-const header = () => screen.getByTestId("tool-call").firstElementChild as HTMLElement;
+const row = () => screen.getByTestId("tool-call");
+const label = () => rowParts(row());
+const body = () => rowBody(row());
 
 function view(props: ToolCallViewProps) {
   const store = hydratedStore();
@@ -30,10 +32,36 @@ function view(props: ToolCallViewProps) {
 }
 
 describe("read", () => {
-  it("collapsed: path; expanded: highlighted content (tool-calls fixture)", async () => {
+  it("row: running, done and failed (tool-calls fixture)", () => {
+    const call = fixtureToolCall("tool-calls", "read");
+    const { rerender } = view(propsAt(call, "start"));
+    expect(label()).toMatchObject({
+      icon: "file-text",
+      verb: "Reading",
+      shimmer: true,
+      target: "notes.txt",
+      meta: undefined,
+    });
+    rerender(<ToolCallView {...propsAt(call, "end")} />);
+    expect(label()).toMatchObject({ verb: "Read", shimmer: false, target: "notes.txt" });
+    rerender(
+      <ToolCallView
+        {...call}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "ENOENT: no such file\nmore" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Read failed",
+      meta: "ENOENT: no such file",
+    });
+  });
+
+  it("collapsed: no body; expanded: highlighted content (tool-calls fixture)", async () => {
     const call = fixtureToolCall("tool-calls", "read");
     view(propsAt(call, "end"));
-    expect(header()).toHaveTextContent("readnotes.txt");
     expect(screen.queryByTestId("code-block")).toBeNull();
     await expand();
     const block = screen.getByTestId("code-block");
@@ -57,7 +85,8 @@ describe("read", () => {
         ],
       },
     });
-    expect(header()).toHaveTextContent("src/app.ts:10-14");
+    // The directory follows the basename (hidden below 1024px).
+    expect(label()).toMatchObject({ target: "app.tssrc", meta: ":10-14" });
     await expand();
     expect(screen.getByTestId("code-block")).toHaveAttribute("data-lang", "typescript");
     expect(
@@ -75,7 +104,9 @@ describe("read", () => {
       result: { content: [{ type: "text", text: "ENOENT: no such file or directory" }] },
     });
     await expand();
-    expect(screen.getByText("ENOENT: no such file or directory")).toHaveClass("text-destructive");
+    expect(within(body()).getByText("ENOENT: no such file or directory")).toHaveClass(
+      "text-destructive",
+    );
   });
 
   it("helpers", () => {
@@ -93,18 +124,23 @@ describe("read", () => {
 });
 
 describe("bash", () => {
-  it("streams output from partialResult (steer-followup fixture)", () => {
+  it("streams output from partialResult, expanded while running (steer-followup fixture)", () => {
     const call = fixtureToolCall("steer-followup", "bash");
     // First update is `{ content: [] }`.
     const { rerender } = view(propsAt(call, { update: 0 }));
-    expect(header()).toHaveTextContent("$ sleep 2 && echo tick");
+    expect(label()).toMatchObject({
+      icon: "square-terminal",
+      verb: "Running",
+      shimmer: true,
+      target: "sleep 2 && echo tick",
+      meta: undefined,
+    });
     expect(screen.getByText("Waiting for output…")).toBeInTheDocument(); // body open while running
     rerender(<ToolCallView {...propsAt(call, { update: 1 })} />);
     expect(screen.getByText("tick")).toBeInTheDocument();
-    expect(screen.queryByText("exit 0")).toBeNull();
 
     rerender(<ToolCallView {...propsAt(call, "end")} />);
-    expect(header()).toHaveTextContent("exit 0");
+    expect(label()).toMatchObject({ verb: "Ran", shimmer: false, meta: undefined }); // exit 0
     expect(screen.queryByText("tick")).toBeNull(); // collapsed once done
   });
 
@@ -114,14 +150,18 @@ describe("bash", () => {
     await expand();
     expect(screen.getByText("tick")).toBeInTheDocument();
     expect(screen.getByText("(timeout 10s)")).toBeInTheDocument();
-    expect(screen.getAllByText("exit 0")).toHaveLength(2);
+    expect(screen.getByText("exit 0")).toHaveClass("text-faint-foreground");
   });
 
   it("aborted command (abort fixture)", async () => {
     const call = fixtureToolCall("abort", "bash");
     view(propsAt(call, "end"));
-    expect(screen.getByTestId("tool-call")).toHaveAttribute("data-status", "error");
-    expect(header()).toHaveTextContent("aborted");
+    expect(row()).toHaveAttribute("data-status", "error");
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Command failed",
+      meta: "Command aborted",
+    });
     await expand();
     expect(screen.getByText("No output")).toBeInTheDocument();
   });
@@ -130,14 +170,19 @@ describe("bash", () => {
     view({
       toolCallId: "b1",
       toolName: "bash",
-      args: { command: "false" },
+      args: { command: "false\nsecond line" },
       status: "error",
       isError: true,
       result: { content: [{ type: "text", text: "oops\n\nCommand exited with code 2" }] },
     });
-    expect(header()).toHaveTextContent("exit 2");
+    expect(label()).toMatchObject({
+      verb: "Command failed",
+      target: "false",
+      meta: "exit 2 · oops",
+    });
     await expand();
-    expect(screen.getByText("oops")).not.toHaveClass("text-destructive");
+    expect(within(body()).getByText("oops")).not.toHaveClass("text-destructive");
+    expect(within(body()).getByText("exit 2")).toHaveClass("text-status-error");
   });
 
   it("bashOutcome", () => {
@@ -151,17 +196,46 @@ describe("bash", () => {
 });
 
 describe("edit", () => {
-  it("collapsed: path and +n −m; expanded: the patch in the diff viewer (tool-calls fixture)", async () => {
+  it("row: running, done with +n −m, failed (tool-calls fixture)", () => {
+    const call = fixtureToolCall("tool-calls", "edit");
+    const { rerender } = view(propsAt(call, "start"));
+    expect(label()).toMatchObject({
+      icon: "file-pen",
+      verb: "Editing",
+      shimmer: true,
+      target: "notes.txt",
+      meta: undefined,
+    });
+    rerender(<ToolCallView {...propsAt(call, "end")} />);
+    expect(label()).toMatchObject({ verb: "Edited", meta: "+1−1" });
+    expect(within(row()).getByText("+1")).toHaveClass("text-diff-add");
+    expect(within(row()).getByText("−1")).toHaveClass("text-diff-del");
+    rerender(
+      <ToolCallView
+        {...call}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "Could not find the exact text." }] }}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Edit failed",
+      meta: "Could not find the exact text.",
+    });
+    expect(screen.getByText("Edit failed")).toHaveClass("text-status-error");
+  });
+
+  it("expanded: the patch in the diff viewer (tool-calls fixture)", async () => {
     stubMatchMedia(() => false);
     const call = fixtureToolCall("tool-calls", "edit");
     view(propsAt(call, "end"));
-    expect(header()).toHaveTextContent("notes.txt +1 −1");
     await expand();
     const diff = await loadedDiff();
     expect(diff).toHaveTextContent("I like banana bread.");
   });
 
-  it("running and error states", async () => {
+  it("running and error bodies", async () => {
     const call = fixtureToolCall("tool-calls", "edit");
     const { rerender } = view(propsAt(call, "start"));
     await expand();
@@ -176,25 +250,68 @@ describe("edit", () => {
         }}
       />,
     );
-    expect(screen.getByText("Could not find the exact text in notes.txt.")).toHaveClass(
+    expect(within(body()).getByText("Could not find the exact text in notes.txt.")).toHaveClass(
       "text-destructive",
     );
-    expect(header()).not.toHaveTextContent("+");
   });
 });
 
 describe("write", () => {
-  it("collapsed: path and line count; expanded: content as an all-added diff", async () => {
+  const args = { path: "src/hello.py", content: "print('hi')\nprint('bye')\n" };
+
+  it("row: running, done and failed", () => {
+    const { rerender } = view({
+      toolCallId: "w1",
+      toolName: "write",
+      args,
+      status: "running",
+      isError: false,
+    });
+    expect(label()).toMatchObject({
+      icon: "file-plus",
+      verb: "Writing",
+      shimmer: true,
+      target: "hello.pysrc",
+      meta: "· 2 lines",
+    });
+    rerender(
+      <ToolCallView
+        toolCallId="w1"
+        toolName="write"
+        args={args}
+        status="done"
+        isError={false}
+        result={{ content: [{ type: "text", text: "Successfully wrote to hello.py" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Wrote", meta: "· 2 lines" });
+    rerender(
+      <ToolCallView
+        toolCallId="w1"
+        toolName="write"
+        args={args}
+        status="error"
+        isError
+        result={{ content: [{ type: "text", text: "EACCES: permission denied" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({
+      icon: "circle-alert",
+      verb: "Write failed",
+      meta: "· 2 lines · EACCES: permission denied",
+    });
+  });
+
+  it("expanded: content as an all-added diff", async () => {
     stubMatchMedia(() => false);
     view({
       toolCallId: "w1",
       toolName: "write",
-      args: { path: "hello.py", content: "print('hi')\nprint('bye')\n" },
+      args,
       status: "done",
       isError: false,
       result: { content: [{ type: "text", text: "Successfully wrote to hello.py" }] },
     });
-    expect(header()).toHaveTextContent("hello.py · 2 lines");
     await expand();
     const diff = await loadedDiff();
     expect(diff).toHaveTextContent("print('bye')");
@@ -205,47 +322,115 @@ describe("write", () => {
 describe("grep / find / ls", () => {
   const grepText =
     "src/a.ts:3: const apple = 1;\nsrc/b.ts:9: apple();\n\n[100 matches limit reached. Use limit=200 for more, or refine pattern]";
+  const failed = { content: [{ type: "text", text: "Path not found: nope" }] };
 
-  it("grep: pattern, count and result list", async () => {
-    view({
+  it("grep: running, done with pattern and count, failed; result list", async () => {
+    const args = { pattern: "apple", path: "src" };
+    const { rerender } = view({
       toolCallId: "g1",
       toolName: "grep",
-      args: { pattern: "apple", path: "src" },
-      status: "done",
+      args,
+      status: "running",
       isError: false,
-      result: { content: [{ type: "text", text: grepText }], details: { matchLimitReached: 100 } },
     });
-    expect(header()).toHaveTextContent("/apple/ in src · 2 matches");
+    expect(label()).toMatchObject({
+      icon: "text-search",
+      verb: "Searching",
+      shimmer: true,
+      target: "/apple/",
+      meta: undefined,
+    });
+    rerender(
+      <ToolCallView
+        toolCallId="g1"
+        toolName="grep"
+        args={args}
+        status="error"
+        isError
+        result={failed}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Search failed", meta: "Path not found: nope" });
+    rerender(
+      <ToolCallView
+        toolCallId="g1"
+        toolName="grep"
+        args={args}
+        status="done"
+        isError={false}
+        result={{
+          content: [{ type: "text", text: grepText }],
+          details: { matchLimitReached: 100 },
+        }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Searched", target: "/apple/", meta: "· 2 matches" });
     await expand();
     const list = screen.getByTestId("result-list");
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText(/100 matches limit reached/)).toBeInTheDocument();
   });
 
-  it("find with no results", async () => {
-    view({
+  it("find: running, done with no results, failed", async () => {
+    const args = { pattern: "*.rs" };
+    const { rerender } = view({
       toolCallId: "f1",
       toolName: "find",
-      args: { pattern: "*.rs" },
-      status: "done",
+      args,
+      status: "running",
       isError: false,
-      result: { content: [{ type: "text", text: "No files found matching pattern" }] },
     });
-    expect(header()).toHaveTextContent("*.rs · 0 files");
+    expect(label()).toMatchObject({ icon: "file-search", verb: "Finding", target: "*.rs" });
+    rerender(
+      <ToolCallView
+        toolCallId="f1"
+        toolName="find"
+        args={args}
+        status="error"
+        isError
+        result={failed}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Find failed", meta: "Path not found: nope" });
+    rerender(
+      <ToolCallView
+        toolCallId="f1"
+        toolName="find"
+        args={args}
+        status="done"
+        isError={false}
+        result={{ content: [{ type: "text", text: "No files found matching pattern" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Found", target: "*.rs", meta: "· 0 files" });
     await expand();
     expect(screen.getByText("No files found matching pattern")).toBeInTheDocument();
   });
 
-  it("ls: path and entry count; error", async () => {
+  it("ls: running, done with the entry count, failed", async () => {
     const { rerender } = view({
       toolCallId: "l1",
       toolName: "ls",
-      args: { path: "src" },
-      status: "done",
+      args: { path: "packages/web/src" },
+      status: "running",
       isError: false,
-      result: { content: [{ type: "text", text: "a.ts\nb.ts\nlib/" }] },
     });
-    expect(header()).toHaveTextContent("lssrc · 3 entries");
+    expect(label()).toMatchObject({
+      icon: "folder-open",
+      verb: "Listing",
+      target: "srcpackages/web",
+    });
+    rerender(
+      <ToolCallView
+        toolCallId="l1"
+        toolName="ls"
+        args={{}}
+        status="done"
+        isError={false}
+        result={{ content: [{ type: "text", text: "a.ts\nb.ts\nlib/" }] }}
+      />,
+    );
+    expect(label()).toMatchObject({ verb: "Listed", target: ".", meta: "· 3 entries" });
     rerender(
       <ToolCallView
         toolCallId="l1"
@@ -253,11 +438,12 @@ describe("grep / find / ls", () => {
         args={{ path: "nope" }}
         status="error"
         isError
-        result={{ content: [{ type: "text", text: "Path not found: nope" }] }}
+        result={failed}
       />,
     );
+    expect(label()).toMatchObject({ verb: "List failed", target: "nope" });
     await expand();
-    expect(screen.getByText("Path not found: nope")).toHaveClass("text-destructive");
+    expect(within(body()).getByText("Path not found: nope")).toHaveClass("text-destructive");
   });
 
   it("listResult", () => {
@@ -266,8 +452,8 @@ describe("grep / find / ls", () => {
     });
   });
 
-  it("honours the global expand toggle", () => {
-    useUiPrefs.setState({ toolsExpanded: true });
+  it("is expanded in Detailed density", () => {
+    useUiPrefs.setState({ density: "detailed" });
     view({
       toolCallId: "l2",
       toolName: "ls",

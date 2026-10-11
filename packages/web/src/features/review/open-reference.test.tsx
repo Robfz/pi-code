@@ -99,12 +99,12 @@ describe("references in messages", () => {
     const user = await screen.findByTestId("user-message");
     const buttons = within(user).getAllByRole("button");
     expect(buttons.map((button) => button.textContent)).toEqual(["@src/a.ts:3-4", "@b.ts:2"]);
-    for (const button of buttons) expect(button).toHaveClass("text-blue-600");
+    for (const button of buttons) expect(button).toHaveClass("text-link");
   });
 
   it("colors references in assistant text, not bare paths or code blocks", async () => {
     await renderApp({ desktop: true });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     await waitFor(() =>
       expect(references(assistant).map((ref) => ref.textContent)).toEqual([
         "@src/a.ts:2",
@@ -114,7 +114,7 @@ describe("references in messages", () => {
     const [plain, inCode] = references(assistant);
     expect(plain).toHaveAttribute("role", "button");
     expect(plain).toHaveAttribute("tabindex", "0");
-    expect(plain).toHaveClass("text-blue-600");
+    expect(plain).toHaveClass("text-link");
     expect(inCode?.parentElement?.tagName).toBe("CODE");
     expect(assistant).toHaveTextContent("and src/a.ts:3.");
   });
@@ -131,7 +131,7 @@ describe("references in messages", () => {
 
   it("Enter on a reference in a reply opens it; a version-named one shows a toast", async () => {
     await renderApp({ desktop: true });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     const versioned = await waitFor(() => {
       const ref = references(assistant)[1];
       if (!ref) throw new Error("no reference");
@@ -149,7 +149,7 @@ describe("references in messages", () => {
 
   it("a click navigates to the review page at those lines on phones", async () => {
     const { router } = await renderApp({ desktop: false });
-    const assistant = await screen.findByTestId("assistant-message");
+    const assistant = await screen.findByTestId("assistant-text");
     const ref = await within(assistant).findByText("@src/a.ts:2");
     await userEvent.setup().click(ref);
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1/diff"));

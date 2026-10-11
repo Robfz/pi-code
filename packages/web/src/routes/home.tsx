@@ -3,8 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FolderIcon, HistoryIcon, LoaderIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { useMemo } from "react";
-import { AttentionBadge } from "@/components/attention-badge";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/agent-status";
 import { Button } from "@/components/ui/button";
 import { AgentsLoading } from "@/features/catalog/agents-loading";
 import { GroupedListing } from "@/features/catalog/grouped-listing";
@@ -13,24 +12,12 @@ import { ProjectPicker } from "@/features/catalog/project-picker";
 import { GroupedSessionList } from "@/features/catalog/session-list";
 import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
 import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
+import { agentStatus } from "@/lib/agent-status";
 import { errorMessage, listSessions } from "@/lib/api";
 import { baseName } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { useLive, useLiveAgents } from "@/store/context";
-
-function statusLabel(agent: AgentInfo): string | null {
-  switch (agent.status) {
-    case "awaiting_trust":
-      return "Trust?";
-    case "starting":
-      return "Starting";
-    case "exited":
-      return "Exited";
-    default:
-      return agent.isStreaming ? "Running" : null;
-  }
-}
 
 const agentRowClass = "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5";
 
@@ -47,7 +34,6 @@ function AgentRow({
   disabled: boolean;
   folder: string;
 }) {
-  const status = statusLabel(agent);
   const title = agent.sessionName ?? baseName(agent.cwd);
   const content = (
     <>
@@ -56,13 +42,7 @@ function AgentRow({
         <span className="truncate text-sm font-medium">{title}</span>
         <span className="truncate text-xs text-muted-foreground">{agent.cwd}</span>
       </div>
-      <AttentionBadge attention={agent.attention} />
-      {status && (
-        <Badge variant="outline" className="gap-1">
-          {agent.isStreaming && <LoaderIcon className="animate-spin" />}
-          {status}
-        </Badge>
-      )}
+      <StatusBadge status={agentStatus(agent)} />
     </>
   );
   return (

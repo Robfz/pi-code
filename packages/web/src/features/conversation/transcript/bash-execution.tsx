@@ -1,6 +1,6 @@
 import type { BashExecutionMessage, BashResult } from "@pi-code/protocol";
-import { TerminalIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { SquareTerminalIcon } from "lucide-react";
+import { CollapsibleRow } from "@/components/collapsible-row";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_LINES = 12;
@@ -21,7 +21,17 @@ export function bashFromResult(command: string, output: string, result?: BashRes
   };
 }
 
-/** `!` / `!!` command: command, output (collapsed if long), exit code; muted when `!!`. */
+function Status({ bash, running }: { bash: BashView; running: boolean }) {
+  if (running) return <span className="shimmer shrink-0">running…</span>;
+  if (bash.cancelled) return <span className="shrink-0 text-muted-foreground">cancelled</span>;
+  if (bash.exitCode === undefined || bash.exitCode === 0) return null;
+  return <span className="shrink-0 text-status-error tabular-nums">exit {bash.exitCode}</span>;
+}
+
+/**
+ * `!` / `!!` command: command and a non-zero exit code over its output (open unless long); muted
+ * when `!!`.
+ */
 export function BashExecutionView({
   bash,
   running = false,
@@ -31,47 +41,39 @@ export function BashExecutionView({
 }) {
   const output = bash.output.replace(/\n$/, "");
   const lines = output === "" ? 0 : output.split("\n").length;
-  const outputBlock = (
-    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2 font-mono text-xs">
-      {output}
-    </pre>
-  );
+  const hasBody = lines > 0 || bash.truncated;
   return (
-    <div
+    <CollapsibleRow
       data-testid="bash-execution"
       data-excluded={bash.excludeFromContext ? "true" : undefined}
-      className={cn("rounded-lg border bg-card/40", bash.excludeFromContext && "opacity-60")}
+      className={cn(bash.excludeFromContext && "opacity-60")}
+      icon={<SquareTerminalIcon />}
+      defaultOpen={running || lines <= COLLAPSE_LINES}
+      label={
+        <>
+          <code className="min-w-0 truncate font-mono text-[12.5px] tracking-[-0.01em] text-subtle-foreground">
+            {bash.excludeFromContext ? "!! " : "$ "}
+            {bash.command}
+          </code>
+          <Status bash={bash} running={running} />
+        </>
+      }
     >
-      <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5">
-        <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 flex-1 truncate font-mono text-xs">
-          {bash.excludeFromContext ? "!! " : "$ "}
-          {bash.command}
-        </code>
-        {running && <span className="text-xs text-muted-foreground">running…</span>}
-        {bash.cancelled && <Badge variant="outline">cancelled</Badge>}
-        {!running && !bash.cancelled && bash.exitCode !== undefined && (
-          <Badge variant={bash.exitCode === 0 ? "secondary" : "destructive"}>
-            exit {bash.exitCode}
-          </Badge>
-        )}
-      </div>
-      {lines > 0 &&
-        (lines > COLLAPSE_LINES && !running ? (
-          <details>
-            <summary className="cursor-pointer px-2.5 pb-1.5 text-xs text-muted-foreground select-none">
-              {lines} lines of output
-            </summary>
-            {outputBlock}
-          </details>
-        ) : (
-          outputBlock
-        ))}
-      {bash.truncated && (
-        <p className="px-2.5 pb-2 text-xs text-muted-foreground">
-          Output truncated{bash.fullOutputPath ? ` · full output in ${bash.fullOutputPath}` : ""}
-        </p>
+      {hasBody && (
+        <div className="mt-0.5 mb-2 flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5">
+          {lines > 0 && (
+            <pre className="max-h-96 overflow-auto font-mono text-[12.5px] leading-[1.6] tracking-[-0.01em] whitespace-pre-wrap break-words text-subtle-foreground">
+              {output}
+            </pre>
+          )}
+          {bash.truncated && (
+            <p className="text-xs text-muted-foreground">
+              Output truncated
+              {bash.fullOutputPath ? ` · full output in ${bash.fullOutputPath}` : ""}
+            </p>
+          )}
+        </div>
       )}
-    </div>
+    </CollapsibleRow>
   );
 }

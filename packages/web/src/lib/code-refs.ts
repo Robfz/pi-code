@@ -3,7 +3,7 @@
 import { type CodeRefMatch, findCodeRefs } from "@pi-code/protocol";
 
 /** The color of a line reference wherever it shows. */
-export const CODE_REF_COLOR = "text-blue-600 dark:text-blue-400";
+export const CODE_REF_COLOR = "text-link";
 
 /** A run of text: a reference with its `match`, or plain text. */
 export interface CodeRefPart {

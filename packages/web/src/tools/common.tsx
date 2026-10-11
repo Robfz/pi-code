@@ -6,12 +6,14 @@ import type { ReactNode } from "react";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { contentImages, imageSrc, toolResultText } from "@/lib/content";
-import { asRecord, str } from "@/lib/record";
+import { asRecord } from "@/lib/record";
 import { cn } from "@/lib/utils";
+import { isActive } from "@/store/tool-status";
 import { OutputBlock } from "./generic";
-import type { ToolRendererProps } from "./registry";
+import type { ToolRendererProps, ToolStatus } from "./registry";
 
-export { asRecord, num, type Rec, str } from "@/lib/record";
+export { argPath, asRecord, num, type Rec, str } from "@/lib/record";
+export { isActive } from "@/store/tool-status";
 
 export function strList(value: unknown, key: string): string[] {
   const v = asRecord(value)?.[key];
@@ -19,11 +21,6 @@ export function strList(value: unknown, key: string): string[] {
 }
 
 export { truncate } from "@/lib/content";
-
-/** Tool arguments' file path (`path`, or `file_path` as some models send). */
-export function argPath(args: unknown): string | undefined {
-  return str(args, "path") ?? str(args, "file_path");
-}
 
 const LANGS: Record<string, string> = {
   ts: "typescript",
@@ -89,7 +86,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const longest = Math.max(2, ...(code.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(longest + 1);
   return (
-    <div className="max-h-96 overflow-auto" data-testid="code-block" data-lang={lang}>
+    <div className="tool-code max-h-96 overflow-auto" data-testid="code-block" data-lang={lang}>
       <Markdown text={`${fence}${lang}\n${code.replace(/\n$/, "")}\n${fence}`} />
     </div>
   );
@@ -146,9 +143,20 @@ export function Pending({ label = "Running…" }: { label?: string }) {
   return <p className="text-xs text-muted-foreground">{label}</p>;
 }
 
-/** Whether the call is still going (arguments streaming or executing). */
-export function isActive(status: ToolRendererProps["status"]): boolean {
-  return status === "running" || status === "streaming";
+/** A row's verb for the call's status. */
+export function statusVerb(
+  status: ToolStatus,
+  running: string,
+  done: string,
+  failed: string,
+): string {
+  if (status === "error") return failed;
+  return isActive(status) ? running : done;
+}
+
+/** "1 match", "3 matches". */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** An `http(s)://` URL: the only kind tool / extension data may turn into a link. */
@@ -167,7 +175,7 @@ export function ExternalLink({ href, children }: { href: string; children: React
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="break-all text-primary underline-offset-2 hover:underline"
+      className="break-all text-link underline-offset-2 hover:underline"
     >
       {children}
     </a>

@@ -16,7 +16,7 @@ import type { DraftSelection } from "@/store/drafts";
 
 /** Box, font and wrapping shared by the textarea and its mirror, so their text lines up. */
 const SHARED =
-  "px-3.5 pt-3 pb-1 text-base whitespace-pre-wrap break-words [scrollbar-gutter:stable] md:text-sm";
+  "px-4 pt-[13px] pb-1 text-prose whitespace-pre-wrap break-words [scrollbar-gutter:stable]";
 
 /** The text with every reference in a blue span, plus a zero-width space that keeps a final empty line's height. */
 function highlight(text: string): ReactNode[] {
@@ -212,7 +212,7 @@ export function ComposerInput({
         }}
         className={cn(
           SHARED,
-          "relative block w-full resize-none bg-transparent text-transparent caret-foreground outline-none selection:bg-blue-500/25 selection:text-transparent",
+          "relative block w-full resize-none bg-transparent text-transparent caret-foreground outline-none selection:bg-link/25 selection:text-transparent",
           className,
         )}
       />

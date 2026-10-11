@@ -187,7 +187,7 @@ describe("ProjectPicker", () => {
 });
 
 describe("Sessions", () => {
-  it("home shows open agents with attention and the 10 most recent sessions", async () => {
+  it("home shows open agents with their status and the 10 most recent sessions", async () => {
     const sessions = Array.from({ length: 12 }, (_, i) =>
       session({ file: `/s/${i}.jsonl`, firstMessage: `message ${i}` }),
     );
@@ -205,6 +205,53 @@ describe("Sessions", () => {
     expect(within(recent).getByText("message 0")).toBeInTheDocument();
     expect(within(recent).queryByText("message 10")).toBeNull();
     expect(calls.some((c) => c.url === "/api/agents")).toBe(false);
+  });
+
+  it("home's agent rows show one status badge each", async () => {
+    stubFetch((call) => (call.url === "/api/sessions" ? [200, { sessions: [] }] : undefined));
+    const agents = [
+      makeAgent({ id: "a1", sessionName: "Asking", isStreaming: true, attention: "input" }),
+      makeAgent({ id: "a2", sessionName: "Streaming", isStreaming: true }),
+      makeAgent({ id: "a3", sessionName: "Broke", attention: "failed" }),
+      makeAgent({ id: "a4", sessionName: "Done", attention: "finished" }),
+      makeAgent({ id: "a5", sessionName: "Quiet" }),
+      makeAgent({ id: "a6", sessionName: "Gone", status: "exited" }),
+    ];
+    await renderRoutes(<HomeScreen />, "/", {
+      loaded: true,
+      agents: Object.fromEntries(agents.map((agent) => [agent.id, agent])),
+      connection: "live",
+    });
+    const open = await screen.findByRole("list", { name: "Open conversations" });
+    const badges = (name: string) => {
+      const row = within(open).getByText(name).closest("li") as HTMLElement;
+      return [...row.querySelectorAll("[data-slot=badge]")].map((badge) => badge.textContent);
+    };
+    expect(badges("Asking")).toEqual(["Needs input"]);
+    expect(badges("Streaming")).toEqual(["Working"]);
+    expect(badges("Broke")).toEqual(["Failed"]);
+    expect(badges("Done")).toEqual(["Finished"]);
+    expect(badges("Quiet")).toEqual(["Idle"]);
+    expect(badges("Gone")).toEqual(["Closed"]);
+    const working = within(open).getByText("Working").closest("[data-slot=badge]");
+    expect(working?.querySelector("svg")).toHaveClass("animate-spin");
+  });
+
+  it("a recent session held by an agent shows that agent's badge", async () => {
+    const sessions = [
+      session({ file: "/s/held.jsonl", firstMessage: "held", ownedBy: "a1" }),
+      session({ file: "/s/free.jsonl", firstMessage: "free" }),
+    ];
+    stubFetch((call) => (call.url === "/api/sessions" ? [200, { sessions }] : undefined));
+    await renderRoutes(<HomeScreen />, "/", {
+      loaded: true,
+      agents: { a1: makeAgent({ id: "a1", sessionFile: "/s/held.jsonl", attention: "finished" }) },
+      connection: "live",
+    });
+    const recent = await screen.findByRole("list", { name: "Recent sessions" });
+    const [held, free] = within(recent).getAllByTestId("session-row") as HTMLElement[];
+    expect(held?.querySelector("[data-slot=badge]")).toHaveTextContent("Finished");
+    expect(free?.querySelector("[data-slot=badge]")).toBeNull();
   });
 
   it("/sessions filters by project and opens a session through POST /api/agents", async () => {
@@ -257,7 +304,8 @@ describe("Sessions", () => {
     const rows = within(list).getAllByTestId("session-row");
     expect(rows[0]).toHaveTextContent("Refactor");
     expect(rows[0]).toHaveTextContent("please refactor");
-    expect(rows[0]).toHaveTextContent("Open");
+    // Held by an agent this tab doesn't know yet: pi runs, nothing to report.
+    expect(rows[0]).toHaveTextContent("Idle");
     expect(rows[0]).toHaveTextContent("5m ago");
     expect(rows[1]).toHaveTextContent("hello there");
 

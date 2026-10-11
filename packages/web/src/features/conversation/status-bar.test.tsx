@@ -4,11 +4,11 @@ import {
   type RpcSessionState,
   type SessionStats,
 } from "@pi-code/protocol";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAgent } from "@/test/fixtures";
-import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
+import { hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
 import { useConversationUi } from "./conversation-ui";
 import { contextCells, StatusBar } from "./status-bar";
@@ -64,9 +64,6 @@ function stats(patch: Partial<SessionStats> = {}): SessionStats {
   };
 }
 
-const rpcBodies = (calls: FetchCall[]) =>
-  calls.filter((c) => c.url === "/api/agents/a1/rpc").map((c) => c.body);
-
 beforeEach(() => {
   useConversationUi.getState().reset();
 });
@@ -88,7 +85,7 @@ describe("contextCells", () => {
 });
 
 describe("StatusBar", () => {
-  it("shows folder, branch + dirty dot, context, name, model + thinking, cost and chips", async () => {
+  it("shows folder, branch + dirty dot, context, cost and chips, without model, thinking or name", async () => {
     stubFetch();
     const live: LiveState = { ...initialLiveState(), statuses: { mcp: "MCP: 2 servers" } };
     const store = hydratedStore({
@@ -105,9 +102,14 @@ describe("StatusBar", () => {
     expect(within(bar).getByTestId("status-dirty")).toBeInTheDocument();
     expect(within(bar).getByTestId("context-bar")).toHaveAttribute("data-filled", "3");
     expect(within(bar).getByTestId("context-bar")).toHaveTextContent("45%");
-    expect(within(bar).getByTestId("status-name")).toHaveTextContent("Refactor auth");
-    expect(within(bar).getByRole("button", { name: "Model: claude-sonnet-4-5" })).toBeVisible();
-    expect(within(bar).getByRole("button", { name: "Thinking: medium" })).toBeVisible();
+    expect(bar).not.toHaveTextContent("Refactor auth");
+    expect(bar).not.toHaveTextContent("claude-sonnet-4-5");
+    expect(bar).not.toHaveTextContent("medium");
+    expect(
+      within(bar)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Session stats", "Cost $0.457"]);
     expect(within(bar).getByRole("button", { name: "Cost $0.457" })).toHaveTextContent(
       /^\$0\.457$/,
     );
@@ -140,7 +142,7 @@ describe("StatusBar", () => {
     expect(within(bar).queryByTestId("status-branch")).toBeNull();
     expect(within(bar).getByTestId("context-bar")).toHaveAttribute("data-filled", "0");
     expect(within(bar).getByTestId("context-bar")).toHaveTextContent("?");
-    expect(within(bar).queryByRole("button", { name: /Model/ })).toBeNull();
+    expect(within(bar).queryByRole("button", { name: /Cost/ })).toBeNull();
   });
 
   it("unknown context percent (after compaction) shows empty cells", async () => {
@@ -166,103 +168,27 @@ describe("StatusBar", () => {
   });
 
   it.each([
-    [{ run: { active: true } }, "running"],
-    [{ run: { active: true, compaction: { reason: "manual" as const } } }, "compacting"],
+    ["running", { run: { active: true } }],
+    ["compacting", { run: { active: true, compaction: { reason: "manual" as const } } }],
     [
+      "retrying",
       {
         run: {
           active: true,
           retry: { attempt: 2, maxAttempts: 3, delayMs: 1000, errorMessage: "529", startedAt: 0 },
         },
       },
-      "retrying 2/3",
     ],
-  ])("run state indicator %#", async (patch, text) => {
+  ])("reads Working while %s", async (_, patch) => {
     stubFetch();
     await renderWithStore(
       <StatusBar />,
       hydratedStore({ state: state(), live: { ...initialLiveState(), ...patch } }),
     );
-    expect(screen.getByTestId("run-indicator")).toHaveTextContent(text);
-  });
-
-  it("model picker groups get_available_models by provider and calls set_model", async () => {
-    const { calls } = stubFetch((call) => {
-      if (call.url !== "/api/agents/a1/rpc") return undefined;
-      if ((call.body as { type: string }).type === "get_available_models") {
-        return [
-          200,
-          {
-            data: {
-              models: [
-                model("anthropic", "claude-sonnet-4-5"),
-                model("openai", "gpt-5"),
-                model("anthropic", "claude-opus-4-1"),
-              ],
-            },
-          },
-        ];
-      }
-      return [200, { data: model("openai", "gpt-5") }];
-    });
-    const store = hydratedStore({ state: state(), stats: stats() });
-    await renderWithStore(
-      <>
-        <StatusBar />
-        <ActionSheets />
-      </>,
-      store,
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Model: claude-sonnet-4-5" }));
-    const sheet = await screen.findByTestId("model-sheet");
-    const anthropic = await within(sheet).findByRole("region", { name: "anthropic" });
-    expect(
-      within(anthropic)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual(["claude-sonnet-4-5img", "claude-opus-4-1img"]);
-    expect(within(anthropic).getByRole("option", { name: /claude-sonnet-4-5/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    await user.type(within(sheet).getByLabelText("Filter models"), "gpt");
-    expect(within(sheet).queryByRole("region", { name: "anthropic" })).toBeNull();
-    const openai = within(sheet).getByRole("region", { name: "openai" });
-    await user.click(within(openai).getByRole("option", { name: /gpt-5/ }));
-    await waitFor(() =>
-      expect(rpcBodies(calls)).toEqual([
-        { type: "get_available_models" },
-        { type: "set_model", provider: "openai", modelId: "gpt-5" },
-      ]),
-    );
-    await waitFor(() => expect(screen.queryByTestId("model-sheet")).toBeNull());
-  });
-
-  it("thinking picker lists get_available_thinking_levels and calls set_thinking_level", async () => {
-    const { calls } = stubFetch((call) => {
-      if (call.url !== "/api/agents/a1/rpc") return undefined;
-      if ((call.body as { type: string }).type === "get_available_thinking_levels") {
-        return [200, { data: { levels: ["off", "low", "medium", "high"] } }];
-      }
-      return [200, {}];
-    });
-    await renderWithStore(
-      <>
-        <StatusBar />
-        <ActionSheets />
-      </>,
-      hydratedStore({ state: state(), stats: stats() }),
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Thinking: medium" }));
-    const sheet = await screen.findByTestId("thinking-sheet");
-    const options = await within(sheet).findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["off", "low", "medium", "high"]);
-    expect(options[2]).toHaveAttribute("aria-selected", "true");
-    await user.click(options[3] as HTMLElement);
-    await waitFor(() =>
-      expect(rpcBodies(calls)).toContainEqual({ type: "set_thinking_level", level: "high" }),
+    expect(screen.getByTestId("run-indicator")).toHaveTextContent(/^Working$/);
+    // Last on the line, after the context bar and the cost.
+    expect(screen.getByTestId("status-bar").lastElementChild).toBe(
+      screen.getByTestId("run-indicator"),
     );
   });
 

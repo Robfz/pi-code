@@ -15,6 +15,7 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees |
 | [`07-code-review.md`](07-code-review.md) | Code review: the project's changes and files beside the conversation, `@path:N` line references in the composer and transcript |
 | [`08-delete-sessions.md`](08-delete-sessions.md) | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu |
+| [`09-ui-overhaul.md`](09-ui-overhaul.md) | UI overhaul (phase 1): tokens, typography, motion, the status vocabulary, transcript turns, tool rows, thinking, exploration groups, density, the composer's model picker |
 
 ## Goals
 

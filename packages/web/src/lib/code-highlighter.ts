@@ -7,7 +7,7 @@
 
 import type { CodeHighlighterPlugin } from "streamdown";
 
-const THEMES = ["github-light", "github-dark"] as const satisfies [string, string];
+const THEMES = ["vitesse-light", "vitesse-dark"] as const satisfies [string, string];
 
 let plugin: CodeHighlighterPlugin | null = null;
 let loading: Promise<CodeHighlighterPlugin> | null = null;

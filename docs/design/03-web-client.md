@@ -1,6 +1,6 @@
 # Web client design
 
-React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md), the review panel, draft store and line references in [`07-code-review.md`](07-code-review.md), and Stop and Delete in [`08-delete-sessions.md`](08-delete-sessions.md); this document summarizes them.
+React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Source: `packages/web`. The live registry, desktop shell, sidebar and layout are specified in [`05-desktop.md`](05-desktop.md), listing groups and worktree actions in [`06-worktrees.md`](06-worktrees.md), the review panel, draft store and line references in [`07-code-review.md`](07-code-review.md), Stop and Delete in [`08-delete-sessions.md`](08-delete-sessions.md), and the look and feel (tokens, typography, motion, turns, tool rows, thinking, density, the composer and its model picker) in [`09-ui-overhaul.md`](09-ui-overhaul.md); this document summarizes them.
 
 | Concern | Choice |
 |---|---|
@@ -9,8 +9,8 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | Server data | TanStack Query (catalog, session search, models, commands, git diff, branches, file search and content, health) |
 | Live state | `LiveRegistry`: one `GET /api/stream` EventSource per tab feeding a Zustand overview and one Zustand store per opened conversation, through the shared reducer |
 | Client state | Zustand: composer drafts per conversation (`store/drafts.ts`), review state per conversation (`features/review/review-state.ts`), UI preferences |
-| UI | Tailwind v4 + shadcn/ui |
-| Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand; grammars and themes are lazy chunks outside the precache) |
+| UI | Tailwind v4 + shadcn/ui on the tokens of [`09-ui-overhaul.md`](09-ui-overhaul.md); Geist Sans and Geist Mono, bundled and precached |
+| Markdown / code | Streamdown + `@streamdown/code` (Shiki with the Vitesse themes, loaded on demand; grammars and themes are lazy chunks outside the precache) |
 | Diffs | `@git-diff-view/react` (split when the viewer is ≥1024px wide, unified otherwise) |
 | PWA | `vite-plugin-pwa`, `injectManifest` strategy (custom service worker) |
 | API client | Typed `fetch` wrapper per route (`src/lib/api.ts`, types from `@pi-code/protocol`) + `EventSource` |
@@ -19,13 +19,13 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 | Path | Screen |
 |---|---|
-| `/` | Phone: Home (open agents with attention badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
+| `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
 | `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree |
 | `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
-| `/settings` | Notifications permission, tool expansion default, about |
+| `/settings` | Notifications permission, transcript density, about |
 
 "New conversation" opens the **project picker**: recent projects (`GET /api/projects`, in listing groups) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
 
@@ -39,13 +39,13 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/` | "Pick a conversation or start a new one" | Home: agents from `live`, recent sessions from `GET /api/sessions` |
 | Back chevron to Home | Hidden (conversation header, settings, sessions, "Conversation closed" and other placeholder screens) | Shown |
 | Settings | Sidebar footer | Home header, sidebar sheet footer |
-| Conversation column | Full content width; half of it beside the review pane while that is open | Capped at `max-w-3xl` |
+| Conversation column | Centred, `max-w-[46rem]` with `px-6`; fits the half beside the review pane while that is open | Centred, `max-w-[46rem]` with `px-4` |
 | Review panel | Pane beside the conversation, toggled from the header or `/diff` | `/agents/$agentId/diff` page, from the header menu's Diff or `/diff` |
 
 The tree screen (on both) and the phone review page keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
 - **Rows:** every agent in `live.agents`, exited included, plus window sessions no agent holds (matched by `sessionFile`), in listing groups (below); groups and rows most recent first. Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
-- **Row:** a spinner while `isStreaming` or `starting` (or while its resume is in flight), a green dot while pi runs, nothing for exited agents; title; a compact attention icon (Home keeps text badges); relative activity time, refreshed every 60 s. The route's agent is highlighted.
+- **Row:** a `StatusMark` (the status vocabulary, [`09-ui-overhaul.md`](09-ui-overhaul.md), "Status vocabulary"): a neutral spinner for Working, a dot coloured for Needs input, Failed, Finished or Idle, nothing for Closed (exited agents, session rows); title; relative activity time, refreshed every 60 s. The route's agent is highlighted.
 - **Actions:** New conversation (project picker); per-group `+` → `POST /api/agents { cwd }` (none on missing worktrees); "New worktree" on repo headers, "Remove worktree" on linked and missing worktree headers; `×` on every row (the `×` rule below). A live row navigates to its agent; an exited agent's row restarts it (`POST /api/agents/:id/restart`) then navigates; a session row resumes it (`useOpenAgent`).
 - **Search:** non-empty text, debounced 200 ms, queries `GET /api/sessions?q=`; the results replace the window rows, and agent rows are filtered client-side on their title and cwd. The previous results stay while the next query loads; clearing the field shows the window at once. A themed × button clears the field.
 
@@ -122,67 +122,109 @@ interface ConversationState {
 
 `connection` mirrors the stream's state, or `connecting` / `reconnecting` / `offline` while the store's own snapshot is loading or being retried. A closed store makes the route show "Conversation closed" with a New conversation button.
 
-Components subscribe with selectors (`useConversation(s => s.live.streaming)`), so token deltas only re-render the streaming message.
+Components subscribe with selectors (`useConversation(s => s.live.streaming)`), so token deltas only re-render the live turn.
 
 The **active branch** is derived from `transcript`: walk `parentId` from `leafId` to the root, reverse. Memoized on `(entries.length, leafId)`.
 
 ## Conversation screen
 
 ```
-┌ header: session name · project · changes (desktop) · ⋮ (tree, diff on phone, fork…, stop, delete) ┐
-│ transcript (active branch, committed)                                                              │
-│ live: pending user message, streaming assistant message, running tools, bash output                │
-│ widgets (aboveEditor)                                                                              │
-│ composer                                                                                           │
-│ widgets (belowEditor)                                                                              │
-└ status bar ────────────────────────────────────────────────────────────────────────────────────────┘
+┌ header: session name · project · changes (desktop) · density · ⋮ (tree, diff on phone, fork…, stop, delete) ┐
+│ transcript: the active branch as turns, the live turn last, !cmd runs in flight                              │
+│ queue display                                                                                                │
+│ widgets (aboveEditor)                                                                                        │
+│ composer                                                                                                     │
+│ widgets (belowEditor)                                                                                        │
+│ status bar                                                                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop, the header's "Show changes" button (`aria-pressed`) and `/diff` toggle the review pane, which takes the right half of the content area ([`07-code-review.md`](07-code-review.md), "Desktop pane"); the header menu's Diff item exists only on phone.
+The header spans the full width; the transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop, the header's "Show changes" button (`aria-pressed`) and `/diff` toggle the review pane, which takes the right half of the content area ([`07-code-review.md`](07-code-review.md), "Desktop pane"), and the column fits the half left beside it; the header menu's Diff item exists only on phone.
 
 ### Transcript rendering
 
+Specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Transcript"; in short:
+
+- **Turns.** `selectTurns` (`store/turns.ts`, memoized on the active branch) splits the active branch at each user message; entries before the first one form a turn without a user message. `TurnView` (`transcript/turn.tsx`) renders a turn as its user message, then its steps: non-empty assistant text blocks, thinking blocks, tool calls (each paired with its `toolResult` by `toolCallId` in `ToolCallSlot`), stop notices and the other entries below. Turns are 40px apart.
+- **The live turn** is the last turn while a run is active, a message streams or a user message is pending: its steps continue with the streaming message's blocks and the orphan tool runs, and it ends with the live-status row. Only it subscribes to live state, so token deltas re-render only it. `!cmd` runs in flight render after the turns.
+- **User message:** a full-column-width box (`--user-message` surface, hairline, 10px radius, 15px prose) with clickable line references and image thumbnails; leading `<file>` blocks (attached text files) are collapsed rows that expand to the content. A pending message is at 70% opacity.
+- **Assistant text:** bare 15px prose (Streamdown, with clickable line references).
+- **Rows.** `CollapsibleRow` (`components/collapsible-row.tsx`, on Radix Collapsible) is the only disclosure: a borderless 28px row (14px icon, label, and a tail with duration and chevron shown on hover, on focus and while open) whose body opens with a 150ms height animation. Tool calls are `ToolRow`s (Tool renderers, below).
+- **Thinking:** a `Brain` row. Live: "Thinking" with a shimmer and, while collapsed, a one-line preview of the latest line. Done: "Thought for 12s" (from the block's `startedAt` / `endedAt`, else `live.thinkingMs`), "Thought" when the duration is unknown, "Thought (redacted)" without a body. The body is 13px muted text behind a left hairline.
+- **Exploration groups** (Balanced and Compact): two or more consecutive `read`, `grep`, `find`, `ls`, `web_search`, `fetch_content`, `source_check` and `get_search_content` calls, with the thinking between them, fold into one row (`groupSteps`, `transcript/grouping.ts`): "Explored 3 files, 2 searches", or "Exploring · Reading foo.ts" with a shimmer while a child runs. A failed call stays its own row.
+- **Density:** one persisted preference, `density` (`store/ui-prefs.ts`), chosen from the header's density dropdown and in Settings:
+  - **Compact:** a finished turn folds its thinking, tool calls and intermediate text into one "Worked for 2m 14s" row, followed by the final text; a live turn shows only its streaming text and the live-status row.
+  - **Balanced** (default): every step, exploration grouped, every row collapsed; running `bash` and fallback-renderer rows are expanded while they run.
+  - **Detailed:** every step, no grouping, every row expanded, thinking included.
+  - Toggling a row by hand holds until the density changes.
+- **Live-status row:** the live turn's last line, a shimmering phrase for the current activity ("Thinking", "Reading foo.ts", "Running pnpm test", "Compacting context", "Retrying 2/3 · reason", "Working") and a faint timer counting from `live.run.startedAt`. Compact always shows it; Balanced and Detailed only while no row above it shimmers. A run error shows its red alert box under it.
+- **Turn footer:** one 12px faint line under each finished turn with an assistant message: the duration (not in Compact), the cost (the turn's assistant usage plus its `spawn` spend), a files chip ("4 files +120 −30", from the turn's successful `edit` and `write` calls) that opens the review pane's Changes tab on desktop and `/agents/$agentId/diff` on phone, and "Copy response" for the final text (shown on hover and focus where the pointer can hover, always on touch).
+
 | Entry / role | Rendering |
 |---|---|
-| `user` message | Text with clickable line references + image thumbnails; leading `<file>` blocks (attached text files) as collapsed chips that expand to the content |
-| `assistant` message | Text (Streamdown, with clickable line references), thinking (collapsed, expandable), each tool call paired with its `toolResult` by `toolCallId` → tool renderer |
-| `bashExecution` | Command, output (collapsed if long), exit code; muted when `excludeFromContext` (`!!`) |
+| `user` message | The user message box |
+| `assistant` message | Its text, thinking and tool-call blocks as steps of the turn |
+| `bashExecution` | Row: command, output (collapsed if long), exit code; muted when `excludeFromContext` (`!!`) |
 | `custom` message (`display: true`) | Markdown of `content`; known `customType`s from pi-web-access / pi-mcp-adapter get small cards; others generic |
 | `compactionSummary` / `compaction` | Divider "Context compacted (N tokens)", expandable summary |
 | `branchSummary` | Divider "Branch summary", expandable |
 | `model_change`, `thinking_level_change` | Inline muted marker |
-| `label` | Badge on the target entry |
+| `label` | Badge on the target entry's first step |
 | `custom` entries (extension state), `session_info`, `usage` | Not shown |
 
-Assistant errors (`stopReason: error`) show the error message; `aborted` shows "Stopped".
+Assistant errors (`stopReason: error`) show the error message as a stop step; `aborted` shows "Stopped".
 
-**Line references.** `@path:N`, `@path:N-M`, `@"quoted path":N` and the version-named `@<sha>:./path:N` (syntax in [`07-code-review.md`](07-code-review.md), "References"; parsed by `findCodeRefs` from `@pi-code/protocol`) render blue and clickable in user messages (`CodeRefText`, inline code included) and in assistant text blocks (the `rehypeCodeRefs` plugin, skipping code blocks and links). The pi-code extension asks the model to write them. A click or Enter opens the Files tab at those lines (`useOpenReference`): the pane on desktop, the review page on phone; a version-named reference opens the current file with a toast.
+**Line references.** `@path:N`, `@path:N-M`, `@"quoted path":N` and the version-named `@<sha>:./path:N` (syntax in [`07-code-review.md`](07-code-review.md), "References"; parsed by `findCodeRefs` from `@pi-code/protocol`) render clickable in the `link` colour: plain `text-link` text in user messages (`CodeRefText`, inline code included), and mono `text-link` chips on `bg-link/12` in assistant text blocks (the `rehypeCodeRefs` plugin, skipping code blocks and links). The pi-code extension asks the model to write them. A click or Enter opens the Files tab at those lines (`useOpenReference`): the pane on desktop, the review page on phone; a version-named reference opens the current file with a toast.
 
 Markdown is untrusted (model output, fetched pages, extension messages), so it never loads remote resources on its own: `https:` images render as a placeholder (alt text + host) that loads the image on tap, inline `data:image/…` images render directly, and other image URLs never load. Raw HTML goes through Streamdown's sanitizer with `<picture>` / `<source>` removed, so `<img>` is the only resource-loading element left. Links rendered from tool or extension data are links only for `http(s)://` URLs (opened with `rel="noopener noreferrer"`), plain text otherwise.
 
 ### Tool renderers
 
-A registry keyed by `toolName`. Each renderer receives `{ args, status, partialResult, result: { content, details }, isError, expanded }`. Every tool has a collapsed one-line summary and an expanded body; a header toggle expands/collapses all (the TUI's Ctrl+O).
+A registry keyed by `toolName` (`tools/registry.ts`). Each renderer receives `ToolRendererProps` (`{ args, argsText, status, partialResult, result: { content, details }, isError, expanded, curatorUrl, durationMs, startedAt, … }`) and describes its row through `label()`; `Body` is the expanded content:
 
-| Tool | Collapsed | Expanded |
+```ts
+interface ToolRenderer {
+  label(props: ToolRendererProps): ToolLabel; // { icon, verb, target?: { kind: "path" | "code" | "text"; text }, meta? }
+  Body: ComponentType<ToolRendererProps>;
+  expandWhileRunning?: boolean;               // Balanced: expanded while running (bash, the fallback)
+}
+```
+
+`ToolRow` (`tools/tool-row.tsx`) renders every call, nested subagent calls included, as one line: `[icon] Verb target meta … 1.2s ›`. The verb is present tense with a shimmer while the call runs or streams, past tense when done, and on failure a red "… failed" next to a `CircleAlert` icon, with the error's first line appended to the meta. A path target is its basename followed by its faint directory; commands and patterns are mono. The tail shows the committed result's `durationMs`, the live run's, or the time elapsed since it started. The body sits in a bordered card, and whether it starts open follows the density; a collapsed call with a curator URL shows its Review button under the row. Icons, verbs, targets and meta per tool are in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Tool rows".
+
+| Tool | Row (done) | Body |
 |---|---|---|
-| `read` | path, line range | highlighted content |
-| `bash` | command, exit code | output (streams from `partialResult`) |
-| `edit` | path, `+n −m` | `details.patch` in a selectable diff viewer (line numbers insert references) |
-| `write` | path, line count | content (new files as an all-added, selectable diff) |
-| `grep` / `find` / `ls` | pattern / path, match count | result list |
-| `spawn` | mode, agents, status | progress widget from `SubagentDetails`: per-agent cards (agent, task, status, duration, usage), markdown output, nested tool calls |
-| `web_search` / `source_check` | queries, result count | results with links, summary; **Review in curator** button when a `curator` event exists for the call |
-| `fetch_content` / `get_search_content` | URL(s) | extracted content (markdown) |
-| `mcp` and MCP namespace tools | server · tool | arguments, result content |
-| anything else | tool name | arguments (JSON), text result |
+| `read` | Read path `:a-b` | highlighted content |
+| `bash` | Ran command, `exit N` when non-zero | output (streams from `partialResult`) |
+| `edit` | Edited path `+n −m` | `details.patch` in a selectable diff viewer (line numbers insert references) |
+| `write` | Wrote path · N lines | content (new files as an all-added, selectable diff) |
+| `grep` / `find` / `ls` | Searched /pattern/ · N matches; Found pattern · N files; Listed dir · N entries | result list |
+| `spawn` | Ran N agents · progress | progress widget from `SubagentDetails`: per-agent cards (agent, task, status, duration, usage), markdown output, nested tool calls as body-less `ToolRow`s |
+| `web_search` / `source_check` | Searched web "query" · N sources; Checked claim · N sources | results with links, summary; **Review in curator** button when a `curator` event exists for the call |
+| `fetch_content` / `get_search_content` | Fetched title or URL; Got content | extracted content (markdown) |
+| `mcp` and MCP namespace tools | Called server · tool | arguments, result content |
+| anything else | tool name, first string argument | arguments (JSON), text result |
 
 ### Composer
 
+Specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Composer".
+
+```
+┌ composer ─────────────────────────────────────────────────────────┐
+│ attachments                                                       │
+│ textarea (15px, auto-growing)                                     │
+│ (+)                          Opus 5 · High ⌄   Queue  (■)  (↑)    │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+- **Box:** a card with a strong hairline and 16px corners; focused, its border takes the ring colour with a 3px halo. Attachments, the textarea and a footer row sit inside it.
+- **Footer:** "Attach file" (a round `+` button) on the left. On the right the model picker, then, idle, Send (round, solid foreground, `ArrowUp`). While running: Queue (a small outlined text button), Stop (round, raised surface, a square icon) and Steer (round, solid foreground); Stop is always there, Queue and Steer only while the draft has text or attachments.
+- **Model picker** (`ModelPicker`, `model-picker.tsx`): one button reading "{model} · {level}" ("Opus 5 · High"; "No thinking" for `off`; the name alone for models without `reasoning`), 13px muted with a chevron, disabled until pi is ready. On desktop it opens a 300px popover: a searchable cmdk list of `get_available_models` grouped by provider, the current model checked (choosing one sends `set_model` and closes), and for reasoning models a "Thinking" segmented control of `get_available_thinking_levels` (choosing a level sends `set_thinking_level` and keeps it open). On phone it opens the model sheet, which shows the same control at its bottom for reasoning models.
 - Text, caret and attachments live in the draft store (`store/drafts.ts`), one draft per conversation, so they survive navigation (tree, review page, other conversations) but not a reload. Sending clears the draft; a failed send restores it only into a still-empty draft.
-- `ComposerInput` lays the textarea over a mirror that colors line references blue. A deletion that touches a reference without covering it removes the whole reference; typing inside one turns it plain. References selected in a diff or the file viewer are inserted at the saved caret (`insertReference`) and focus the composer ([`07-code-review.md`](07-code-review.md), "Composer").
+- `ComposerInput` lays the textarea over a mirror that colours line references in `text-link`. A deletion that touches a reference without covering it removes the whole reference; typing inside one turns it plain. References selected in a diff or the file viewer are inserted at the saved caret (`insertReference`) and focus the composer ([`07-code-review.md`](07-code-review.md), "Composer").
 - Enter/Send: idle → `prompt`. While running, two actions: **Steer** (`streamingBehavior: "steer"`) and **Queue** (`"followUp"`). **Stop** → `abort`. **Stop & edit** → `clear_queue` then `abort`, restoring queued text into the composer.
-- Queue display (from `live.queue`) above the composer.
+- Keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter is a newline; on touch devices Enter is a newline.
+- Queue display (from `live.queue`) above the composer, with **Stop & edit** after the queued messages while the queue is non-empty.
 - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
 - File attach (any file type). Images are sent as `prompt.images` and rejected with a toast when the current model's `input` lacks `"image"` (attached images are dropped when the model changes to one without it). Other files are read as UTF-8 text (max 512 KB each; binary — a NUL byte or invalid UTF-8 — and empty files are rejected with a toast) and prepended to `message` as `<file name="…" length="…">\n…\n</file>\n` blocks (pi's CLI convention for `@file` arguments, plus a content length; see the API contract). Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
 - `set_editor_text` UI requests, fork and share replace the draft text.
@@ -195,8 +237,8 @@ Built-in commands:
 | `/new` | `new_session` |
 | `/resume` | session list for this project |
 | `/name <name>` | `set_session_name` |
-| `/model [provider/id]` | model picker / `set_model` |
-| `/thinking [level]` | thinking picker / `set_thinking_level` |
+| `/model [provider/id]` | model sheet / `set_model` |
+| `/thinking [level]` | thinking sheet / `set_thinking_level` |
 | `/compact [instructions]` | `compact` |
 | `/tree` | tree screen |
 | `/fork` | picker from `get_fork_messages` → `fork` |
@@ -226,7 +268,7 @@ On phone, dialogs and the trust sheet are modal bottom sheets; outside taps don'
 
 ### Status bar
 
-Mirrors the TUI status-bar extension: folder name · git branch + dirty dot · context bar (5 cells from `stats.contextUsage.percent`) · session name · model + thinking level · cost, with `(sa $x)` once the conversation has a `spawn` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools`. Extension `setStatus` chips follow. Run state (running / compacting / retrying n/m) shows as a leading indicator.
+One 12px faint line under the composer: folder name (from 1024px) · git branch + dirty dot, then on the right the context bar (5 cells from `stats.contextUsage.percent`, with its percentage from 1024px) · cost, with `(sa $x)` once the conversation has a `spawn` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools` · "Working" with a spinner while the run is active, compacting or retrying. The context bar and cost open the stats sheet. Extension `setStatus` chips sit below. The session name is in the header; the model and its thinking level are in the composer's picker.
 
 ## Tree screen
 
