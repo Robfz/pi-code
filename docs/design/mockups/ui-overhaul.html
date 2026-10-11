@@ -1,0 +1,1393 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="balanced" data-layout="desktop">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pi-code — conversation (mockup)</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono/index.css">
+<style>
+/* ───────────────────────── Tokens ───────────────────────── */
+:root {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --col: 46rem;
+  --sidebar-w: 280px;
+  --row-h: 28px;
+  --icon: 14px;
+  --indent: 22px; /* icon + gap: bodies align under the verb */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+
+  /* status vocabulary (A2a) */
+  --status-working: var(--accent);
+  --status-input: var(--amber);
+  --status-error: var(--red);
+  --status-done: var(--emerald);
+  --status-idle: var(--fg-faint);
+  --diff-add: var(--emerald);
+  --diff-del: var(--red);
+}
+
+
+/* The approved "mono" palette: zero-chroma neutrals (--nk: 0), no accent hue, a blue link (--lh 250). */
+:root, [data-palette="mono"] { --nh: 275; --nk: 0; --ah: 275; --ak: 0; --lh: 250; --lk: 0.75; }
+[data-palette="mono"][data-theme] { --accent: var(--fg-muted); --accent-hi: var(--fg); --accent-fg: var(--bg); }
+[data-palette="mono"] .round.send { background: var(--fg); }
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(0.16 calc(0.006 * var(--nk)) var(--nh));
+  --sidebar: oklch(0.145 calc(0.006 * var(--nk)) var(--nh));
+  --surface: oklch(0.188 calc(0.007 * var(--nk)) var(--nh));
+  --surface-2: oklch(0.215 calc(0.008 * var(--nk)) var(--nh));
+  --popover: oklch(0.2 calc(0.008 * var(--nk)) var(--nh));
+  --user-bg: oklch(0.2 calc(0.011 * var(--nk)) var(--nh));
+  --hover: oklch(0.96 calc(0.02 * var(--nk)) var(--nh) / 0.045);
+  --active: oklch(0.96 calc(0.02 * var(--nk)) var(--nh) / 0.075);
+  --border: oklch(0.96 calc(0.02 * var(--nk)) var(--nh) / 0.085);
+  --border-strong: oklch(0.96 calc(0.02 * var(--nk)) var(--nh) / 0.14);
+  --fg: oklch(0.93 calc(0.006 * var(--nk)) var(--nh));
+  --fg-2: oklch(0.82 calc(0.008 * var(--nk)) var(--nh));
+  --fg-muted: oklch(0.66 calc(0.012 * var(--nk)) var(--nh));
+  --fg-faint: oklch(0.5 calc(0.012 * var(--nk)) var(--nh));
+  --accent: oklch(0.70 calc(0.15 * var(--ak)) var(--ah));
+  --accent-hi: oklch(0.88 calc(0.08 * var(--ak)) var(--ah));
+  --accent-fg: oklch(0.16 calc(0.03 * var(--ak)) var(--ah));
+  --accent-soft: oklch(0.70 calc(0.15 * var(--ak)) var(--ah) / 0.13);
+  --accent-line: oklch(0.70 calc(0.15 * var(--ak)) var(--ah) / 0.35);
+  --link: oklch(0.70 calc(0.15 * var(--lk)) var(--lh));
+  --link-soft: oklch(0.70 calc(0.15 * var(--lk)) var(--lh) / 0.13);
+  --amber: oklch(0.80 0.15 75);
+  --red: oklch(0.69 0.19 22);
+  --emerald: oklch(0.76 0.15 160);
+  --chip-bg: oklch(0.96 calc(0.02 * var(--nk)) var(--nh) / 0.075);
+  --shadow-pop: 0 16px 48px -12px oklch(0 0 0 / 0.7), 0 2px 8px oklch(0 0 0 / 0.3);
+  --diff-add-bg: oklch(0.76 0.15 160 / 0.11);
+  --diff-del-bg: oklch(0.69 0.19 22 / 0.11);
+  /* Vitesse dark */
+  --code-fg: #dbd7cacc;
+  --tk: #4d9375; --ts: #c98a7d; --tf: #80a665; --tc: #758575; --tn: #4c9a91;
+  --tp: #b8a965; --tv: #bd976a; --tt: #5da994; --tu: #666f78; --tg: #4d9375;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(0.992 calc(0.002 * var(--nk)) var(--nh));
+  --sidebar: oklch(0.975 calc(0.004 * var(--nk)) var(--nh));
+  --surface: oklch(0.972 calc(0.005 * var(--nk)) var(--nh));
+  --surface-2: oklch(0.95 calc(0.006 * var(--nk)) var(--nh));
+  --popover: oklch(1 0 0);
+  --user-bg: oklch(0.966 calc(0.008 * var(--nk)) var(--nh));
+  --hover: oklch(0.3 calc(0.04 * var(--nk)) var(--nh) / 0.05);
+  --active: oklch(0.3 calc(0.04 * var(--nk)) var(--nh) / 0.08);
+  --border: oklch(0.3 calc(0.04 * var(--nk)) var(--nh) / 0.11);
+  --border-strong: oklch(0.3 calc(0.04 * var(--nk)) var(--nh) / 0.17);
+  --fg: oklch(0.21 calc(0.012 * var(--nk)) var(--nh));
+  --fg-2: oklch(0.32 calc(0.012 * var(--nk)) var(--nh));
+  --fg-muted: oklch(0.49 calc(0.014 * var(--nk)) var(--nh));
+  --fg-faint: oklch(0.63 calc(0.012 * var(--nk)) var(--nh));
+  --accent: oklch(0.55 calc(0.20 * var(--ak)) var(--ah));
+  --accent-hi: oklch(0.75 calc(0.15 * var(--ak)) var(--ah));
+  --accent-fg: oklch(0.99 0 0);
+  --accent-soft: oklch(0.55 calc(0.20 * var(--ak)) var(--ah) / 0.09);
+  --accent-line: oklch(0.55 calc(0.20 * var(--ak)) var(--ah) / 0.3);
+  --link: oklch(0.55 calc(0.20 * var(--lk)) var(--lh));
+  --link-soft: oklch(0.55 calc(0.20 * var(--lk)) var(--lh) / 0.09);
+  --amber: oklch(0.72 0.16 65);
+  --red: oklch(0.58 0.21 25);
+  --emerald: oklch(0.62 0.14 160);
+  --chip-bg: oklch(0.3 calc(0.04 * var(--nk)) var(--nh) / 0.065);
+  --shadow-pop: 0 16px 48px -12px oklch(0.2 calc(0.03 * var(--nk)) var(--nh) / 0.25), 0 2px 8px oklch(0.2 calc(0.03 * var(--nk)) var(--nh) / 0.08);
+  --diff-add-bg: oklch(0.62 0.14 160 / 0.1);
+  --diff-del-bg: oklch(0.58 0.21 25 / 0.09);
+  /* Vitesse light */
+  --code-fg: #393a34;
+  --tk: #1e754f; --ts: #b56959; --tf: #59873a; --tc: #a0ada0; --tn: #2f798a;
+  --tp: #998418; --tv: #b07d48; --tt: #2e8f82; --tu: #999999; --tg: #1e754f;
+}
+
+/* ───────────────────────── Base ───────────────────────── */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.i { width: var(--icon); height: var(--icon); flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.mono { font-family: var(--font-mono); font-size: 0.95em; letter-spacing: -0.01em; }
+.muted { color: var(--fg-muted); }
+.faint { color: var(--fg-faint); }
+.add { color: var(--diff-add); }
+.del { color: var(--diff-del); }
+
+/* ───────────────────────── Motion ───────────────────────── */
+.shimmer {
+  background: linear-gradient(90deg, var(--accent) 0 40%, var(--accent-hi) 50%, var(--accent) 60% 100%) 0 0 / 300% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .shimmer { animation: none; background: none; color: var(--accent); }
+  .spinner { animation-duration: 2.4s; }
+}
+.spinner {
+  width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--accent-line); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+
+/* ───────────────────────── Shell ───────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+[data-layout="phone"] .app { grid-template-columns: minmax(0, 1fr); }
+[data-layout="phone"] .sidebar { display: none; }
+.framed { display: grid; place-items: center; background: var(--sidebar); }
+.framed .app {
+  width: 390px; height: 844px; border-radius: 28px;
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-pop);
+}
+
+/* ───────────────────────── Sidebar ───────────────────────── */
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.sb-top { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; letter-spacing: -0.01em; }
+.brand-mark {
+  width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+  background: var(--fg); color: var(--bg); font: 600 13px/1 var(--font-mono);
+}
+.sb-top .spacer { flex: 1; }
+.icon-btn {
+  width: 28px; height: 28px; border-radius: 7px; display: inline-grid; place-items: center;
+  color: var(--fg-muted); transition: background .12s, color .12s;
+}
+.icon-btn:hover { background: var(--hover); color: var(--fg); }
+.sb-actions { padding: 4px 10px 8px; display: grid; gap: 4px; }
+.sb-new {
+  height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 8px;
+  color: var(--fg); font-weight: 500;
+}
+.sb-new:hover { background: var(--hover); }
+.sb-new .i { color: var(--fg-muted); }
+.sb-search {
+  height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 8px;
+  color: var(--fg-faint); border: 1px solid var(--border); background: oklch(from var(--bg) l c h / 0.5);
+}
+.sb-search span { flex: 1; }
+.sb-scroll { flex: 1; overflow-y: auto; padding: 6px 10px 12px; min-height: 0; }
+.sb-group { margin-top: 10px; }
+.sb-group-head {
+  height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 8px;
+  color: var(--fg-muted); font-weight: 500; border-radius: 7px;
+}
+.sb-group-head .i { width: 13px; height: 13px; color: var(--fg-faint); }
+.sb-group-head .count { margin-left: auto; color: var(--fg-faint); font-size: 12px; font-weight: 400; }
+.sb-wt { margin: 2px 0 4px; }
+.sb-wt-head {
+  height: 26px; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 26px;
+  color: var(--fg-muted); font-size: 12px;
+}
+.sb-wt-head .i { width: 12px; height: 12px; color: var(--fg-faint); }
+.branch-label {
+  font: 11.5px/1 var(--font-mono); color: var(--fg-faint); padding: 3px 5px; border-radius: 4px;
+  background: var(--chip-bg); margin-left: auto; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-row {
+  height: 30px; display: flex; align-items: center; gap: 9px; padding: 0 8px 0 10px; border-radius: 7px;
+  color: var(--fg-2); position: relative;
+}
+.sb-wt .sb-row { padding-left: 26px; }
+.sb-row:hover { background: var(--hover); color: var(--fg); }
+.sb-row .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sb-row .when { color: var(--fg-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sb-row.active { background: var(--accent-soft); color: var(--fg); }
+.sb-row.active .when { color: var(--accent); }
+.sb-row.closed { color: var(--fg-muted); }
+.st { width: 12px; height: 12px; display: grid; place-items: center; flex: none; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-idle); }
+.dot.input { background: var(--status-input); box-shadow: 0 0 0 3px oklch(from var(--amber) l c h / 0.16); }
+.dot.error { background: var(--status-error); }
+.dot.done { background: var(--status-done); }
+.sb-foot {
+  border-top: 1px solid var(--border); padding: 8px 10px; display: flex; align-items: center; gap: 8px;
+}
+.sb-foot .conn { display: flex; align-items: center; gap: 7px; color: var(--fg-muted); font-size: 12px; padding-left: 8px; flex: 1; }
+.sb-foot .conn .dot { width: 6px; height: 6px; background: var(--status-done); }
+
+/* ───────────────────────── Main / header ───────────────────────── */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.header {
+  height: 48px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+.hamburger { display: none; margin-left: -8px; }
+[data-layout="phone"] .hamburger { display: inline-grid; }
+[data-layout="phone"] .header { padding: 0 8px 0 14px; }
+.h-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.h-title .t { font-weight: 500; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-title .f { color: var(--fg-faint); white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+.h-title .f .sep { opacity: .6; }
+[data-layout="phone"] .h-title .f { display: none; }
+.h-btn {
+  height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border-radius: 7px;
+  color: var(--fg-muted); white-space: nowrap;
+}
+.h-btn:hover, .h-btn.on { background: var(--hover); color: var(--fg); }
+.h-btn .i { width: 14px; height: 14px; }
+.h-btn .chev { width: 12px; height: 12px; margin-left: -2px; color: var(--fg-faint); }
+.h-btn .stat { font: 12px/1 var(--font-mono); display: inline-flex; gap: 4px; }
+[data-layout="phone"] .h-btn .lbl, [data-layout="phone"] .h-btn .stat { display: none; }
+[data-layout="phone"] .h-btn { padding: 0 7px; }
+.h-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; }
+.menu-wrap { position: relative; }
+.menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 248px;
+  background: var(--popover); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-pop);
+  padding: 5px; display: none;
+}
+.menu.open { display: block; }
+.menu-label { padding: 6px 8px 4px; font-size: 12px; color: var(--fg-faint); }
+.menu-item { width: 100%; display: grid; grid-template-columns: 1fr 16px; gap: 2px 8px; text-align: left; padding: 7px 8px; border-radius: 7px; }
+.menu-item:hover { background: var(--hover); }
+.menu-item b { font-weight: 500; }
+.menu-item small { grid-column: 1; color: var(--fg-muted); font-size: 12px; }
+.menu-item .i { grid-row: 1; grid-column: 2; color: var(--accent); align-self: center; visibility: hidden; }
+.menu-item.sel .i { visibility: visible; }
+
+/* ───────────────────────── Transcript ───────────────────────── */
+.scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-gutter: stable both-edges; }
+.col { width: min(var(--col), 100% - 48px); margin: 0 auto; }
+[data-layout="phone"] .col { width: calc(100% - 32px); }
+.transcript { padding: 36px 0 28px; }
+[data-layout="phone"] .transcript { padding-top: 20px; }
+.turn + .turn { margin-top: 40px; }
+
+.prose { font-size: 15px; line-height: 1.65; color: var(--fg); }
+.prose p { margin: 0 0 0.8em; }
+.prose > :last-child { margin-bottom: 0; }
+.prose h1 { font-size: 20px; line-height: 1.35; font-weight: 600; margin: 1.2em 0 .5em; letter-spacing: -0.015em; }
+.prose h2 { font-size: 17px; line-height: 1.4; font-weight: 600; margin: 1.1em 0 .45em; letter-spacing: -0.01em; }
+.prose h3 { font-size: 15px; line-height: 1.5; font-weight: 600; margin: 1em 0 .35em; }
+.prose > h1:first-child, .prose > h2:first-child, .prose > h3:first-child { margin-top: 0; }
+.prose ul, .prose ol { margin: 0 0 .8em; padding-left: 1.35em; }
+.prose li { margin: .3em 0; padding-left: .15em; }
+.prose li::marker { color: var(--fg-faint); }
+.prose strong { font-weight: 600; }
+.prose a { color: var(--link); text-decoration: none; }
+.prose a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.prose code {
+  font-family: var(--font-mono); font-size: 0.875em; letter-spacing: -0.01em;
+  background: var(--chip-bg); border-radius: 5px; padding: .12em .38em; color: var(--fg);
+}
+.prose a.ref {
+  font-family: var(--font-mono); font-size: 0.875em; letter-spacing: -0.01em;
+  background: var(--link-soft); color: var(--link); border-radius: 5px; padding: .12em .38em;
+}
+
+.user-msg {
+  background: var(--user-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 15px 12px;
+  margin-bottom: 18px;
+}
+.user-msg code { background: var(--chip-bg); }
+
+.text-block { margin: 12px 0; }
+.flow > .text-block:first-child { margin-top: 0; }
+
+/* Tool rows (B5a) */
+.row { position: relative; }
+.row-head {
+  height: var(--row-h); display: flex; align-items: center; gap: 8px;
+  margin: 0 -8px; padding: 0 8px; border-radius: 7px; cursor: pointer; user-select: none;
+  font-size: 13px; color: var(--fg); min-width: 0;
+  transition: background .12s;
+}
+.row-head:hover { background: var(--hover); }
+.row-icon { width: var(--icon); height: var(--icon); color: var(--fg-faint); display: grid; place-items: center; flex: none; }
+.row-label { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; }
+.verb { font-weight: 500; color: var(--fg); flex: none; }
+.target { color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; display: inline-flex; gap: 6px; align-items: baseline; }
+.target .base { flex: none; }
+.target .dir { color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.target .cmd { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
+.target .pat { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg-2); letter-spacing: -0.01em; }
+.meta { color: var(--fg-muted); flex: none; display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
+.meta.shrink { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.diffstat { display: inline-flex; gap: 4px; font-variant-numeric: tabular-nums; }
+.row-tail { display: flex; align-items: center; gap: 4px; color: var(--fg-faint); flex: none; opacity: 0; transition: opacity .12s; font-size: 12px; font-variant-numeric: tabular-nums; }
+.row-tail .chev { width: 13px; height: 13px; transition: transform .15s var(--ease); }
+.row-head:hover .row-tail { opacity: 1; }
+.row.open > .row-head .row-tail { opacity: 1; }
+.row.open > .row-head:not(:hover) .row-tail .dur { display: none; }
+.row.open > .row-head .chev { transform: rotate(90deg); }
+.row.no-body .row-tail .chev { display: none; }
+
+.row.dim > .row-head .verb { color: var(--fg-muted); font-weight: 450; }
+.row .verb.shimmer { color: transparent; }
+@media (prefers-reduced-motion: reduce) { .row .verb.shimmer { color: var(--accent); } }
+.row.error > .row-head .row-icon { color: var(--status-error); }
+.row.error > .row-head .verb { color: var(--status-error); }
+.row.error > .row-head .meta .err { color: var(--fg-muted); }
+
+/* Collapsible (B10): 150ms height animation */
+.collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 150ms var(--ease); }
+.row.open > .collapse { grid-template-rows: 1fr; }
+.collapse > .inner { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) { .collapse { transition: none; } }
+
+.body {
+  margin: 2px 0 8px var(--indent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.children { padding: 0 0 4px var(--indent); }
+.thought {
+  margin: 2px 0 10px 6px;
+  padding: 2px 0 2px 15px;
+  border-left: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  font-size: 13px; line-height: 1.6;
+}
+.thought p { margin: 0 0 .6em; }
+.thought code { font-family: var(--font-mono); font-size: 0.92em; color: var(--fg-2); letter-spacing: -0.01em; }
+.thought p:last-child { margin: 0; }
+.live-preview {
+  margin: -2px 0 4px var(--indent); color: var(--fg-faint); font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* code inside bodies */
+.code {
+  font: 12.5px/1.6 var(--font-mono); letter-spacing: -0.01em;
+  color: var(--code-fg); padding: 8px 0; overflow-x: auto; max-height: 340px; overflow-y: auto;
+}
+.code.fade { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
+.ln { display: flex; min-width: max-content; padding-right: 14px; }
+.ln .gut { width: 44px; flex: none; text-align: right; padding-right: 14px; color: var(--fg-faint); opacity: .7; user-select: none; }
+.ln .sign { width: 14px; flex: none; color: var(--fg-faint); user-select: none; }
+.ln .src { white-space: pre; }
+.ln.add { background: var(--diff-add-bg); }
+.ln.add .sign, .ln.add .gut { color: var(--diff-add); opacity: 1; }
+.ln.del { background: var(--diff-del-bg); }
+.ln.del .sign, .ln.del .gut { color: var(--diff-del); opacity: 1; }
+.ln.hunk { color: var(--fg-faint); padding: 4px 0; }
+.ln.hunk:not(:first-child) { margin-top: 4px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.code.term { padding: 10px 14px; color: var(--fg-2); max-height: 260px; }
+.term .l { white-space: pre; }
+.term .prompt { color: var(--fg-faint); }
+.term .cmdline { color: var(--fg); }
+.term .ok { color: var(--emerald); }
+.term .err { color: var(--red); }
+.term .run { color: var(--accent); }
+.term .cursor { display: inline-block; width: 7px; height: 14px; background: var(--fg-muted); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.term .exit { color: var(--fg-faint); margin-top: 6px; }
+.match-list { padding: 6px 0; font-size: 12.5px; }
+.match { display: flex; gap: 12px; padding: 2px 14px; white-space: nowrap; overflow: hidden; }
+.match .loc { color: var(--fg-faint); font-family: var(--font-mono); font-size: 12px; flex: none; width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.match .txt { font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; }
+.match mark { background: var(--accent-soft); color: var(--accent); border-radius: 3px; padding: 0 1px; }
+.body-foot { border-top: 1px solid var(--border); padding: 6px 12px; color: var(--fg-faint); font-size: 12px; display: flex; gap: 8px; }
+
+/* syntax */
+.tk { color: var(--tk); } .ts { color: var(--ts); } .tf { color: var(--tf); } .tc { color: var(--tc); font-style: italic; }
+.tn { color: var(--tn); } .tp { color: var(--tp); } .tv { color: var(--tv); } .tt { color: var(--tt); } .tu { color: var(--tu); } .tg { color: var(--tg); }
+
+/* code block in markdown */
+.codeblock { margin: 14px 0 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.codeblock-head {
+  height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: 12px;
+}
+.codeblock-head .icon-btn { width: 24px; height: 24px; }
+.codeblock-head .icon-btn .i { width: 13px; height: 13px; }
+.codeblock pre { margin: 0; padding: 12px 16px 13px; font: 13px/1.62 var(--font-mono); letter-spacing: -0.01em; color: var(--code-fg); overflow-x: auto; }
+
+/* Live status (B5e) */
+.live-status { display: flex; align-items: center; gap: 6px; height: var(--row-h); margin-top: 6px; font-size: 13px; }
+.live-status .timer { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+
+/* Turn footer (B9) */
+.turn-foot {
+  display: flex; align-items: center; gap: 7px; margin-top: 14px; font-size: 12px; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.turn-foot .chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 6px;
+  border: 1px solid var(--border); color: var(--fg-muted); font-size: 12px;
+}
+.turn-foot .chip:hover { background: var(--hover); color: var(--fg); border-color: var(--border-strong); }
+.turn-foot .chip .i { width: 12px; height: 12px; }
+.turn-foot .copy { width: 24px; height: 24px; opacity: 0; transition: opacity .12s; }
+.turn-foot .copy .i { width: 13px; height: 13px; }
+.turn:hover .turn-foot .copy { opacity: 1; }
+[data-layout="phone"] .turn-foot .copy { opacity: 1; margin-left: auto; }
+
+/* ───────────────────────── Composer (C11) ───────────────────────── */
+.dock { flex: none; position: relative; padding-bottom: 8px; }
+.dock::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+}
+.composer {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 1px 0 oklch(1 0 0 / 0.02) inset, 0 8px 24px -16px oklch(0 0 0 / 0.5);
+  transition: border-color .15s, box-shadow .15s;
+}
+.composer:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer textarea {
+  display: block; width: 100%; resize: none; border: 0; outline: none; background: transparent;
+  padding: 13px 16px 4px; font-size: 15px; line-height: 1.55; max-height: 220px; min-height: 36px; color: var(--fg);
+}
+.composer textarea::placeholder { color: var(--fg-faint); }
+.c-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px 8px 8px; }
+.c-foot .spacer { flex: 1; }
+.c-foot .icon-btn { width: 30px; height: 30px; border-radius: 50%; }
+.c-foot .icon-btn .i { width: 17px; height: 17px; }
+.picker-btn {
+  height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 10px; border-radius: 8px;
+  color: var(--fg-muted); font-size: 13px; white-space: nowrap;
+}
+.picker-btn:hover, .picker-btn.on { background: var(--hover); color: var(--fg); }
+.picker-btn .sep { color: var(--fg-faint); }
+.picker-btn .i { width: 13px; height: 13px; color: var(--fg-faint); }
+.queue-btn {
+  height: 28px; padding: 0 10px; border-radius: 8px; color: var(--fg-muted); font-size: 13px;
+  border: 1px solid var(--border-strong);
+}
+.queue-btn:hover { color: var(--fg); background: var(--hover); }
+.round { width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; transition: transform .1s, filter .15s; }
+.round:active { transform: scale(.94); }
+.round .i { width: 16px; height: 16px; stroke-width: 2.25; }
+.round.send { background: var(--accent); color: var(--accent-fg); }
+.round.send:hover { filter: brightness(1.08); }
+.round.send[disabled] { background: var(--chip-bg); color: var(--fg-faint); cursor: default; }
+.round.stop { background: var(--surface-2); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.round.stop .sq { width: 10px; height: 10px; border-radius: 2.5px; background: currentColor; }
+.hidden { display: none !important; }
+
+/* Status bar (C11c) */
+.statusbar {
+  display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px; font-size: 12px; color: var(--fg-faint);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.statusbar .seg { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .i { width: 12px; height: 12px; }
+.statusbar .spacer { flex: 1; }
+.statusbar .dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--status-input); }
+.statusbar .br { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-muted); }
+.ctx { display: inline-flex; gap: 2px; }
+.ctx i { width: 7px; height: 8px; border-radius: 2px; background: var(--border-strong); }
+.ctx i.f { background: var(--fg-muted); }
+.statusbar .working { color: var(--accent); display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .working .spinner { width: 11px; height: 11px; }
+.statusbar .dotsep { color: var(--border-strong); }
+[data-layout="phone"] .statusbar .hide-phone { display: none; }
+[data-layout="phone"] .target .dir { display: none; }
+[data-layout="phone"] .term .l { white-space: pre-wrap; word-break: break-all; }
+[data-layout="phone"] .body { margin-left: 0; }
+[data-layout="phone"] .ln .gut { width: 34px; padding-right: 10px; }
+[data-layout="phone"] .children { padding-left: 12px; }
+[data-layout="phone"] .statusbar { padding: 0 2px; gap: 9px; }
+
+/* Picker popover */
+.picker-pop {
+  position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 40; width: 300px;
+  background: var(--popover); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-pop);
+  overflow: hidden; display: none; transform-origin: bottom right;
+  animation: pop .14s var(--ease);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+.picker-pop.open { display: block; }
+.pp-search { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--fg-faint); }
+.pp-search input { flex: 1; border: 0; outline: 0; background: none; font-size: 13px; color: var(--fg); }
+.pp-search input::placeholder { color: var(--fg-faint); }
+.pp-search kbd { font: 11.5px/1 var(--font-mono); color: var(--fg-faint); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.pp-list { padding: 4px 5px 6px; max-height: 340px; overflow-y: auto; }
+.pp-group { padding: 8px 8px 3px; font-size: 12px; color: var(--fg-faint); }
+.pp-item { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 7px; color: var(--fg-2); }
+.pp-item .name { flex: 1; }
+.pp-item .note { color: var(--fg-faint); font-size: 12px; }
+.pp-item .i { color: var(--accent); width: 14px; height: 14px; }
+.pp-item.hl { background: var(--hover); color: var(--fg); }
+.pp-item:hover { background: var(--hover); color: var(--fg); }
+.pp-think { border-top: 1px solid var(--border); padding: 10px 12px 12px; }
+.pp-think-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-muted); margin-bottom: 8px; }
+.pp-think-head span:last-child { color: var(--fg-faint); }
+.segmented { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--chip-bg); border-radius: 8px; padding: 2px; gap: 2px; }
+.segmented button { height: 26px; border-radius: 6px; font-size: 12px; color: var(--fg-muted); }
+.segmented button:hover { color: var(--fg); }
+.segmented button.sel { background: var(--surface-2); color: var(--fg); font-weight: 500; box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0 0 0 / 0.2); }
+[data-theme="light"] .segmented button.sel { background: oklch(1 0 0); }
+
+/* ───────────────────────── Mockup controls (not part of the design) ───────────────────────── */
+.mock {
+  position: fixed; right: 12px; bottom: 12px; z-index: 100; width: 178px;
+  font: 11px/1.3 ui-monospace, Menlo, monospace; color: #e8e2c8;
+  background: oklch(0.24 0.03 90 / 0.92); backdrop-filter: blur(8px);
+  border: 1px dashed oklch(0.8 0.12 90 / 0.6); border-radius: 10px; padding: 8px 9px 9px;
+  box-shadow: 0 10px 30px oklch(0 0 0 / 0.35);
+}
+.mock-tag { display: flex; justify-content: space-between; align-items: center; letter-spacing: .08em; color: oklch(0.85 0.13 90); font-weight: 700; margin-bottom: 7px; }
+.mock-tag button { color: oklch(0.85 0.13 90); font: inherit; }
+.mock.min .mock-body { display: none; }
+.mock.min .mock-tag { margin: 0; }
+.mock-row { margin-top: 6px; }
+.mock-row > span { display: block; opacity: .7; margin-bottom: 3px; }
+.mock-seg { display: flex; gap: 2px; background: oklch(0 0 0 / 0.25); padding: 2px; border-radius: 6px; }
+.mock-seg button { flex: 1; font: inherit; color: #d8d2b8; padding: 3px 0; border-radius: 4px; }
+.mock-seg button.sel { background: oklch(0.85 0.13 90); color: #222; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- ═════════════ Sidebar ═════════════ -->
+  <aside class="sidebar">
+    <div class="sb-top">
+      <div class="brand"><span class="brand-mark">π</span>pi-code</div>
+      <span class="spacer"></span>
+      <button class="icon-btn" title="Collapse sidebar"><svg class="i" data-i="panel-left"></svg></button>
+    </div>
+    <div class="sb-actions">
+      <button class="sb-new"><svg class="i" data-i="square-pen"></svg>New conversation</button>
+      <div class="sb-search"><svg class="i" data-i="search"></svg><span>Search</span></div>
+    </div>
+    <nav class="sb-scroll">
+      <div class="sb-group">
+        <div class="sb-group-head"><svg class="i" data-i="chevron-down"></svg>pi-code<span class="count">7</span></div>
+        <div class="sb-wt">
+          <div class="sb-wt-head"><svg class="i" data-i="git-branch"></svg>ui-overhaul<span class="branch-label">feat/ui-overhaul</span></div>
+          <a class="sb-row active" title="Working"><span class="st"><span class="spinner"></span></span><span class="title">Redesign the transcript</span><span class="when">now</span></a>
+          <a class="sb-row" title="Needs input"><span class="st"><span class="dot input"></span></span><span class="title">Vitesse themes for Shiki</span><span class="when">4m</span></a>
+        </div>
+        <a class="sb-row" title="Finished"><span class="st"><span class="dot done"></span></span><span class="title">Precache fonts in the service worker</span><span class="when">18m</span></a>
+        <a class="sb-row" title="Failed"><span class="st"><span class="dot error"></span></span><span class="title">Flaky reduceLive timing test</span><span class="when">1h</span></a>
+        <a class="sb-row" title="Idle"><span class="st"><span class="dot idle"></span></span><span class="title">Sidebar unread state</span><span class="when">3h</span></a>
+        <a class="sb-row closed" title="Closed"><span class="st"></span><span class="title">Status bar overflow on phone</span><span class="when">1d</span></a>
+        <a class="sb-row closed" title="Closed"><span class="st"></span><span class="title">Bump pi to 0.71</span><span class="when">3d</span></a>
+      </div>
+      <div class="sb-group">
+        <div class="sb-group-head"><svg class="i" data-i="chevron-down"></svg>kepi<span class="count">3</span></div>
+        <a class="sb-row" title="Idle"><span class="st"><span class="dot idle"></span></span><span class="title">Passkey sign-in</span><span class="when">2d</span></a>
+        <a class="sb-row closed" title="Closed"><span class="st"></span><span class="title">CSV import for bank statements</span><span class="when">5d</span></a>
+        <a class="sb-row closed" title="Closed"><span class="st"></span><span class="title">Recurring transactions view</span><span class="when">1w</span></a>
+      </div>
+    </nav>
+    <div class="sb-foot">
+      <span class="conn"><span class="dot"></span>Connected · mac-studio</span>
+      <button class="icon-btn" title="Settings"><svg class="i" data-i="settings"></svg></button>
+    </div>
+  </aside>
+
+  <!-- ═════════════ Main ═════════════ -->
+  <main class="main">
+    <header class="header">
+      <button class="icon-btn hamburger" title="Conversations"><svg class="i" data-i="menu"></svg></button>
+      <div class="h-title">
+        <span class="t">Redesign the transcript</span>
+        <span class="f"><svg class="i" data-i="folder" style="width:13px;height:13px"></svg>pi-code<span class="sep">/</span>ui-overhaul</span>
+      </div>
+      <button class="h-btn" title="Changes"><svg class="i" data-i="git-compare"></svg><span class="lbl">Changes</span><span class="stat"><span class="add">+71</span><span class="del">−23</span></span></button>
+      <div class="menu-wrap">
+        <button class="h-btn" id="densityBtn" title="Density"><svg class="i" data-i="list-collapse"></svg><span class="lbl" id="densityLbl">Balanced</span><svg class="i chev" data-i="chevron-down"></svg></button>
+        <div class="menu" id="densityMenu">
+          <div class="menu-label">Transcript density</div>
+          <button class="menu-item" data-density="compact"><b>Compact</b><svg class="i" data-i="check"></svg><small>Finished turns fold into “Worked for …”</small></button>
+          <button class="menu-item" data-density="balanced"><b>Balanced</b><svg class="i" data-i="check"></svg><small>Every step, exploration grouped</small></button>
+          <button class="menu-item" data-density="detailed"><b>Detailed</b><svg class="i" data-i="check"></svg><small>No grouping, everything expanded</small></button>
+        </div>
+      </div>
+      <button class="icon-btn" title="More"><svg class="i" data-i="ellipsis"></svg></button>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <div class="col transcript" id="transcript"></div>
+    </div>
+
+    <div class="dock">
+      <div class="col">
+        <div class="composer" id="composer">
+          <textarea id="draft" rows="1" placeholder="Ask pi…">also update the tests</textarea>
+          <div class="c-foot">
+            <button class="icon-btn" title="Attach"><svg class="i" data-i="plus"></svg></button>
+            <span class="spacer"></span>
+            <button class="picker-btn" id="pickerBtn" title="Model and thinking">Opus 5<span class="sep">·</span>High<svg class="i" data-i="chevron-down"></svg></button>
+            <button class="queue-btn" id="queueBtn" title="Queue after this run">Queue</button>
+            <button class="round stop" title="Stop"><span class="sq"></span></button>
+            <button class="round send" id="sendBtn" title="Steer — send now"><svg class="i" data-i="arrow-up"></svg></button>
+
+            <div class="picker-pop" id="pickerPop">
+              <div class="pp-search"><svg class="i" data-i="search"></svg><input placeholder="Search models"><kbd>esc</kbd></div>
+              <div class="pp-list">
+                <div class="pp-group">Anthropic</div>
+                <div class="pp-item hl"><span class="name">Opus 5</span><svg class="i" data-i="check"></svg></div>
+                <div class="pp-item"><span class="name">Sonnet 5</span></div>
+                <div class="pp-group">OpenAI</div>
+                <div class="pp-item"><span class="name">GPT-6</span></div>
+                <div class="pp-item"><span class="name">GPT-6 mini</span></div>
+                <div class="pp-group">Google</div>
+                <div class="pp-item"><span class="name">Gemini 3 Pro</span></div>
+              </div>
+              <div class="pp-think">
+                <div class="pp-think-head"><span>Thinking</span><span>Opus 5</span></div>
+                <div class="segmented" id="thinkSeg">
+                  <button>off</button><button>low</button><button>medium</button><button class="sel">high</button><button>xhigh</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="statusbar">
+          <span class="seg hide-phone"><svg class="i" data-i="folder"></svg>pi-code</span>
+          <span class="seg"><svg class="i" data-i="git-branch"></svg><span class="br">feat/ui-overhaul</span><span class="dirty" title="Uncommitted changes"></span></span>
+          <span class="spacer"></span>
+          <span class="seg" title="Context 38%"><span class="ctx"><i class="f"></i><i class="f"></i><i></i><i></i><i></i></span><span class="hide-phone">38%</span></span>
+          <span class="seg">$1.24</span>
+          <span class="seg working"><span class="spinner"></span>Working</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Mockup controls -->
+<div class="mock" id="mock">
+  <div class="mock-tag"><span>▚ MOCKUP CONTROLS</span><button id="mockMin" title="Minimise">–</button></div>
+  <div class="mock-body">
+    <div class="mock-row"><span>theme</span><div class="mock-seg" data-ctl="theme"><button data-v="dark">dark</button><button data-v="light">light</button></div></div>
+    <div class="mock-row"><span>density</span><div class="mock-seg" data-ctl="density"><button data-v="compact">cmpct</button><button data-v="balanced">bal</button><button data-v="detailed">detail</button></div></div>
+    <div class="mock-row"><span>live turn is…</span><div class="mock-seg" data-ctl="live"><button data-v="tests">test</button><button data-v="exploring">explr</button><button data-v="thinking">think</button><button data-v="editing">edit</button></div></div>
+    <div class="mock-row"><span>overlays</span><div class="mock-seg" data-ctl="toggles"><button data-v="picker">picker</button><button data-v="phone">phone</button></div></div>
+  </div>
+</div>
+
+<!-- ═════════════ Source snippets (rendered by the script) ═════════════ -->
+<script type="text/plain" id="src-index-css">@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --radius-lg: var(--radius);
+}</script>
+<script type="text/plain" id="src-package-json">{
+  "name": "@pi-code/web",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.2.5",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "lucide-react": "^0.544.0",
+    "react": "^19.1.1",
+    "shiki": "^3.12.2"
+  },</script>
+<script type="text/plain" id="src-tcv">import { ChevronRight, Wrench } from "lucide-react";
+import { useState } from "react";
+import type { ToolRun } from "@pi-code/protocol";
+import { cn } from "@/lib/utils";
+import { toolSummary } from "./summary";
+
+export function ToolCallView({ run }: { run: ToolRun }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border bg-card text-xs">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-2 py-1.5">
+        <Wrench className="size-3.5" />
+        <span className="font-mono">{run.name}</span></script>
+<script type="text/plain" id="diff-index-css">@@ -1,8 +1,10 @@
+ @import "tailwindcss";
+ @import "tw-animate-css";
+ @import "@fontsource-variable/geist";
++@import "@fontsource-variable/geist-mono";
+ 
+ @theme inline {
+-  --font-sans: "Geist Variable", sans-serif;
++  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
++  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+   --color-background: var(--background);
+@@ -209,3 +211,16 @@
+ @layer base {
+   body { @apply bg-background text-foreground; }
+ }
++
++@utility shimmer {
++  background: linear-gradient(90deg, var(--shimmer-base) 35%,
++    var(--accent) 50%, var(--shimmer-base) 65%) 0 0 / 300% 100%;
++  background-clip: text;
++  color: transparent;
++  animation: shimmer 1.6s linear infinite;
++}
++
++@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
++
++@media (prefers-reduced-motion: reduce) {
++  .shimmer { animation: none; background: none; color: var(--accent); }
++}</script>
+<script type="text/plain" id="src-shimmer">import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/** Accent sweep for live text; static accent under reduced motion. */
+export function Shimmer({ active = true, className, children }: {
+  active?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className={cn(active && "shimmer", className)}>
+      {children}
+    </span>
+  );
+}</script>
+<script type="text/plain" id="diff-tcv-1">@@ -1,14 +1,18 @@
+-import { ChevronRight, Wrench } from "lucide-react";
++import { ChevronRight } from "lucide-react";
+ import { useState } from "react";
+ import type { ToolRun } from "@pi-code/protocol";
++import { Shimmer } from "@/components/ui/shimmer";
+ import { cn } from "@/lib/utils";
+-import { toolSummary } from "./summary";
++import { toolIcon, toolLabel } from "./labels";
+ 
+ export function ToolCallView({ run }: { run: ToolRun }) {
+   const [open, setOpen] = useState(false);
++  const Icon = toolIcon(run.name);
++  const { verb, target, meta } = toolLabel(run);
+   return (
+-    <div className="rounded-md border bg-card text-xs">
++    <div className="text-[13px] leading-[1.4]"></script>
+<script type="text/plain" id="diff-tcv-2">@@ -86,7 +86,9 @@
+   const elapsed = useElapsed(run.startedAt);
+-  const duration = run.durationMs;
++  // Committed runs carry durationMs on the tool result; live runs count up.
++  const duration =
++    run.result?.durationMs ?? (run.status === "running" ? elapsed : undefined);
+   return (</script>
+<script type="text/plain" id="src-map">- [settled] B5a Tool row anatomy: a borderless single line, 28px tall, in 13px text.
+  - A muted 14px icon per tool.
+  - A verb in the foreground color.
+  - The target: the file basename in the foreground color, its directory muted;
+    commands in mono.
+  - Muted meta: line range, `+n −m` in diff colors, match count, `exit N`.
+  - Duration, muted, shown on hover.</script>
+<script type="text/plain" id="src-tool-row">import { ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
+import { Shimmer } from "@/components/ui/shimmer";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+
+export function ToolRow({ icon: Icon, verb, target, meta, durationMs, running, error, children }: ToolRowProps) {
+  return (
+    <Collapsible className="group/row">
+      <CollapsibleTrigger className="flex h-7 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-hover">
+        <Icon className={cn("size-3.5", error ? "text-status-error" : "text-muted-foreground")} />
+        <Shimmer active={running} className="font-medium">{verb}</Shimmer></script>
+<script type="text/plain" id="diff-tcv-3">@@ -9,64 +9,18 @@
+ export function ToolCallView({ run }: { run: ToolRun }) {
+-  const [open, setOpen] = useState(false);
+   const Icon = toolIcon(run.name);
+   const { verb, target, meta } = toolLabel(run);
+   return (
+-    <div className="text-[13px] leading-[1.4]">
+-      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2">
+-        <Icon className="size-3.5 text-muted-foreground" />
++    <ToolRow icon={Icon} verb={verb} target={target} meta={meta}
++      running={run.status === "running"} error={run.isError} durationMs={run.durationMs}>
++      <ToolBody run={run} />
++    </ToolRow></script>
+
+<script>
+/* ───────────────────────── Icons (lucide) ───────────────────────── */
+const ICONS = {
+  "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  "square-terminal": '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+  "text-search": '<path d="M21 5H3"/><path d="M10 12H3"/><path d="M10 19H3"/><circle cx="17" cy="15" r="3"/><path d="m21 19-1.9-1.9"/>',
+  "file-search": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><circle cx="11.5" cy="14.5" r="2.5"/><path d="M13.3 16.3 15 18"/>',
+  "folder-open": '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+  "file-pen": '<path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/>',
+  "file-plus": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M9 15h6"/><path d="M12 18v-6"/>',
+  "bot": '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  "globe": '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  "link": '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  "plug": '<path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/>',
+  "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
+  "brain": '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/>',
+  "telescope": '<path d="m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44"/><path d="m13.56 11.747 4.332-.924"/><path d="m16 21-3.105-6.21"/><path d="M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455z"/><path d="m6.158 8.633 1.114 4.456"/><path d="m8 21 3.105-6.21"/><circle cx="12" cy="13" r="2"/>',
+  "list-checks": '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/>',
+  "list-collapse": '<path d="M10 5h11"/><path d="M10 12h11"/><path d="M10 19h11"/><path d="m3 10 3-3-3-3"/><path d="m3 20 3-3-3-3"/>',
+  "circle-alert": '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+  "chevron-right": '<path d="m9 18 6-6-6-6"/>',
+  "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  "plus": '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  "search": '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
+  "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
+  "folder": '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  "git-branch": '<path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>',
+  "git-compare": '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/>',
+  "ellipsis": '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  "menu": '<path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/>',
+  "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  "check": '<path d="M20 6 9 17l-5-5"/>',
+  "settings": '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>',
+  "panel-left": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
+};
+const svg = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+function hydrateIcons(root = document) {
+  root.querySelectorAll("svg[data-i]").forEach((el) => {
+    el.setAttribute("viewBox", "0 0 24 24");
+    el.innerHTML = ICONS[el.dataset.i] || "";
+    el.removeAttribute("data-i");
+  });
+}
+
+/* ───────────────────────── Helpers ───────────────────────── */
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const src = (id) => document.getElementById(id).textContent;
+
+const KW = {
+  ts: new Set("import from export const let var function return if else type interface extends new await async default as null undefined true false typeof".split(" ")),
+  css: new Set("from to none infinite linear transparent reduce inline text".split(" ")),
+};
+/** Tiny line highlighter, Vitesse-flavoured. Good enough for a mockup. */
+function hl(line, lang) {
+  if (!lang || lang === "plain") return esc(line);
+  if (lang === "md") {
+    return esc(line)
+      .replace(/^(\s*- )(\[settled\])/, '$1<span class="tk">$2</span>')
+      .replace(/`([^`]+)`/g, '<span class="ts">`$1`</span>');
+  }
+  const re = /(\/\/.*$|\/\*.*?\*\/)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(@[\w-]+)|(--[\w-]+)|(<\/?[A-Za-z][\w.]*)|((?<![\w$.-])\d+(?:\.\d+)?(?:px|ms|s|%|rem|em|deg)?)|([A-Za-z_$][\w$]*(?:-[A-Za-z_$][\w$]*)*)|([^\sA-Za-z0-9_$"'@<]+|<)/g;
+  let out = "", last = 0, m;
+  while ((m = re.exec(line))) {
+    out += esc(line.slice(last, m.index));
+    last = re.lastIndex;
+    const [tok, com, str, at, cvar, tag, num, id, pun] = m;
+    let cls = "";
+    if (com) cls = "tc";
+    else if (str) cls = lang === "json" && /^\s*:/.test(line.slice(last)) ? "tp" : "ts";
+    else if (at) cls = "tk";
+    else if (cvar) cls = "tv";
+    else if (tag) {
+      const open = tok.startsWith("</") ? "</" : "<";
+      const name = tok.slice(open.length);
+      out += `<span class="tu">${esc(open)}</span><span class="${/^[A-Z]/.test(name) ? "tt" : "tg"}">${esc(name)}</span>`;
+      continue;
+    } else if (num) cls = "tn";
+    else if (id) {
+      const after = (line.slice(last).match(/^\s*(\S)/) || [])[1];
+      const before = line[m.index - 1];
+      if (lang === "css") {
+        if (before === ".") cls = "tf";
+        else if (after === "(") cls = "tf";
+        else if (after === ":" && /^\s*$/.test(line.slice(0, m.index))) cls = "tp";
+        else if (KW.css.has(tok)) cls = "tk";
+        else if (/^@utility\s/.test(line)) cls = "tf";
+      } else {
+        if (KW.ts.has(tok)) cls = "tk";
+        else if (after === "(") cls = "tf";
+        else if (before === ".") cls = "tp";
+        else if (after === "=" && line[last] === "=" && line[last + 1] !== "=" && line[last + 1] !== ">") cls = "tp";
+        else if (/^[A-Z]/.test(tok)) cls = "tt";
+        else cls = "tv";
+      }
+    } else if (pun) cls = "tu";
+    out += cls ? `<span class="${cls}">${esc(tok)}</span>` : esc(tok);
+  }
+  return out + esc(line.slice(last));
+}
+
+const codeBody = (text, lang, start = 1) =>
+  `<div class="code">${text.split("\n").map((l, i) =>
+    `<div class="ln"><span class="gut">${start + i}</span><span class="src">${hl(l, lang) || " "}</span></div>`).join("")}</div>`;
+
+function diffBody(text, lang) {
+  let o = 0, n = 0;
+  const rows = text.split("\n").map((l) => {
+    if (l.startsWith("@@")) {
+      const mm = l.match(/-(\d+)(?:,\d+)? \+(\d+)/);
+      o = +mm[1]; n = +mm[2];
+      return `<div class="ln hunk"><span class="gut"></span><span class="sign"></span><span class="src">${esc(l)}</span></div>`;
+    }
+    const s = l[0], code = l.slice(1);
+    let cls = "", no;
+    if (s === "+") { cls = "add"; no = n++; }
+    else if (s === "-") { cls = "del"; no = o++; }
+    else { no = n; o++; n++; }
+    return `<div class="ln ${cls}"><span class="gut">${no}</span><span class="sign">${s === " " ? "" : s === "-" ? "−" : s}</span><span class="src">${hl(code, lang) || " "}</span></div>`;
+  });
+  return `<div class="code">${rows.join("")}</div>`;
+}
+
+function termBody(lines, { running = false, exit } = {}) {
+  const body = lines.map((l) => {
+    if (l.startsWith("$ ")) return `<div class="l"><span class="prompt">$ </span><span class="cmdline">${esc(l.slice(2))}</span></div>`;
+    let cls = "";
+    if (/error|ELIFECYCLE|✗/.test(l)) cls = "err";
+    else if (/^\s*✓/.test(l)) cls = "ok";
+    else if (/^\s*❯/.test(l)) cls = "run";
+    return `<div class="l ${cls}">${esc(l) || " "}</div>`;
+  }).join("");
+  const tail = running ? `<div class="l"><span class="cursor"></span></div>` : "";
+  return `<div class="code term">${body}${tail}</div>`;
+}
+
+function matchesBody(pattern, rows) {
+  const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+  return `<div class="match-list">${rows.map(([loc, txt]) =>
+    `<div class="match"><span class="loc">${esc(loc)}</span><span class="txt">${esc(txt.trim()).replace(re, (x) => `<mark>${x}</mark>`)}</span></div>`).join("")}</div>`;
+}
+const listBody = (paths) => `<div class="match-list">${paths.map((p) => `<div class="match"><span class="txt">${esc(p)}</span></div>`).join("")}</div>`;
+
+/* ───────────────────────── Conversation data ───────────────────────── */
+const EXPLORE = new Set(["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"]);
+
+const T1 = {
+  id: "t1",
+  user: "Add Geist Mono for all code — inline code, code blocks and the paths in tool rows — and a shimmer utility we can use for running states: accent gradient sweep, ~1.6s loop, static under reduced motion.",
+  items: [
+    { id: "t1-think", kind: "thinking", secs: 12, text: [
+      "Two pieces. Geist Mono ships separately as <code>@fontsource-variable/geist-mono</code>, so it needs its own install and an import next to Geist in <code>index.css</code>, then a <code>--font-mono</code> token in the <code>@theme</code> block so Tailwind’s <code>font-mono</code> resolves to it.",
+      "For the shimmer: a <code>background-clip: text</code> gradient with the accent in the middle, animating <code>background-position</code> on a 1.6s linear loop. Under reduced motion drop the animation and the gradient and just paint the accent. Let me see where <code>font-mono</code> is used today before touching anything.",
+    ] },
+    { id: "t1-r1", kind: "tool", tool: "read", path: "packages/web/src/index.css", meta: "L1–148", dur: "12ms", body: () => codeBody(src("src-index-css"), "css") },
+    { id: "t1-r2", kind: "tool", tool: "read", path: "packages/web/package.json", meta: "L1–64", dur: "8ms", body: () => codeBody(src("src-package-json"), "json") },
+    { id: "t1-g1", kind: "tool", tool: "grep", pattern: "font-mono", scope: "packages/web/src", count: 7, dur: "41ms", body: () => matchesBody("font-mono", [
+      ["components/markdown.tsx:42", 'className="rounded bg-muted px-1 font-mono text-[0.85em]"'],
+      ["components/markdown.tsx:67", '<pre className="font-mono text-xs leading-relaxed">'],
+      ["tools/tool-call-view.tsx:31", '<span className="font-mono text-xs">{name}</span>'],
+      ["tools/tool-call-view.tsx:58", '<code className="font-mono">{summary}</code>'],
+      ["tools/bash-view.tsx:19", '<pre className="font-mono text-xs whitespace-pre-wrap">'],
+      ["components/diff/diff-view.tsx:88", '"font-mono text-[11px] leading-5",'],
+      ["features/conversation/status-bar.tsx:121", '<span className="font-mono">{git.branch}</span>'],
+    ]) },
+    { id: "t1-r3", kind: "tool", tool: "read", path: "packages/web/src/tools/tool-call-view.tsx", meta: "L1–212", dur: "9ms", body: () => codeBody(src("src-tcv"), "ts") },
+    { id: "t1-f1", kind: "tool", tool: "find", pattern: "*.css", scope: "packages/web/src", count: 2, dur: "18ms", body: () => listBody(["packages/web/src/index.css", "packages/web/src/components/diff/diff.css"]) },
+    { id: "t1-e1", kind: "tool", tool: "edit", path: "packages/web/src/index.css", add: 16, del: 1, dur: "0.2s", body: () => diffBody(src("diff-index-css"), "css") },
+    { id: "t1-b1", kind: "tool", tool: "bash", cmd: "pnpm --filter web add @fontsource-variable/geist-mono", dur: "3.8s", body: () => termBody([
+      "$ pnpm --filter web add @fontsource-variable/geist-mono",
+      "Progress: resolved 412, reused 398, downloaded 1, added 1, done",
+      "",
+      "dependencies:",
+      "+ @fontsource-variable/geist-mono 5.2.6",
+      "",
+      "Done in 3.8s",
+    ]) },
+    { id: "t1-w1", kind: "tool", tool: "write", path: "packages/web/src/components/ui/shimmer.tsx", lines: 15, dur: "0.1s", body: () => codeBody(src("src-shimmer"), "ts") },
+    { id: "t1-e2", kind: "tool", tool: "edit", path: "packages/web/src/tools/tool-call-view.tsx", add: 37, del: 21, dur: "0.3s", body: () => diffBody(src("diff-tcv-1"), "ts") },
+    { id: "t1-b2", kind: "tool", tool: "bash", cmd: "pnpm typecheck", dur: "9.2s", error: true, exit: 2,
+      errLine: "TS2339: Property 'durationMs' does not exist on type 'ToolRun'.", body: () => termBody([
+      "$ pnpm typecheck",
+      "> @pi-code/web@0.0.0 typecheck",
+      "> tsc -b --noEmit",
+      "",
+      "src/tools/tool-call-view.tsx(88,24): error TS2339: Property 'durationMs' does not exist on type 'ToolRun'.",
+      "src/tools/tool-call-view.tsx(91,9): error TS2322: Type 'number | undefined' is not assignable to type 'number'.",
+      "",
+      "Found 2 errors in the same file, starting at: src/tools/tool-call-view.tsx:88",
+      " ELIFECYCLE  Command failed with exit code 2.",
+    ]) },
+    { id: "t1-e3", kind: "tool", tool: "edit", path: "packages/web/src/tools/tool-call-view.tsx", add: 3, del: 1, dur: "0.1s", body: () => diffBody(src("diff-tcv-2"), "ts") },
+    { id: "t1-b3", kind: "tool", tool: "bash", cmd: "pnpm typecheck", dur: "8.7s", body: () => termBody([
+      "$ pnpm typecheck",
+      "> @pi-code/web@0.0.0 typecheck",
+      "> tsc -b --noEmit",
+    ]) + `<div class="body-foot">No output · exit 0</div>` },
+  ],
+  final: () => `
+    <h2>Geist Mono and the shimmer are in</h2>
+    <p>Typecheck passes. What changed:</p>
+    <ul>
+      <li>Installed <code>@fontsource-variable/geist-mono</code> and added a <code>--font-mono</code> token, so Tailwind’s <code>font-mono</code> now resolves to Geist Mono everywhere — inline code, code blocks and commands in tool rows.</li>
+      <li>New <code>shimmer</code> utility in <a class="ref" href="#">index.css:214</a> — an accent gradient sweeping across the text on a 1.6s loop, falling back to static accent text under <code>prefers-reduced-motion</code>.</li>
+      <li>A small <code>&lt;Shimmer&gt;</code> wrapper in <code>components/ui</code>; <code>ToolCallView</code> uses it for running verbs only, so finished rows stay quiet.</li>
+    </ul>
+    <div class="codeblock">
+      <div class="codeblock-head"><span>css</span><button class="icon-btn" title="Copy">${svg("copy")}</button></div>
+      <pre>${[
+        "@utility shimmer {",
+        "  background: linear-gradient(90deg, var(--shimmer-base) 35%,",
+        "    var(--accent) 50%, var(--shimmer-base) 65%) 0 0 / 300% 100%;",
+        "  background-clip: text;",
+        "  color: transparent;",
+        "  animation: shimmer 1.6s linear infinite;",
+        "}",
+      ].map((l) => hl(l, "css")).join("\n")}</pre>
+    </div>
+    <p>One thing I left alone: Shiki is still on <code>github-dark</code>, which fights the new ink background. Switching to Vitesse is a one-line change if you want it next.</p>`,
+  footer: { dur: "3m 12s", cost: "$0.86", files: 3, add: 71, del: 23 },
+  worked: "2m 58s",
+};
+
+/* Turn 2 is live; its tail depends on the `live` param. */
+const T2_BASE = [
+  { id: "t2-think", kind: "thinking", secs: 4, text: [
+    "B5a wants a borderless 28px row: muted icon, verb, target, meta, then duration and chevron on hover. The current card markup can’t get there by restyling alone — the label needs separate pieces. I’ll pull the row into its own <code>ToolRow</code> and keep the existing body renderers.",
+  ] },
+  { id: "t2-r1", kind: "tool", tool: "read", path: "packages/web/src/tools/tool-call-view.tsx", meta: "L1–96", dur: "7ms", body: () => codeBody(src("src-tcv"), "ts") },
+  { id: "t2-r2", kind: "tool", tool: "read", path: "maps/2026-10-10-ui-overhaul.md", meta: "L58–96", dur: "6ms", body: () => codeBody(src("src-map"), "md", 58) },
+  { id: "t2-g1", kind: "tool", tool: "grep", pattern: "ToolCallView", scope: "packages/web/src", count: 5, dur: "38ms", body: () => matchesBody("ToolCallView", [
+    ["tools/tool-call-view.tsx:7", "export function ToolCallView({ run }: { run: ToolRun }) {"],
+    ["tools/spawn-view.tsx:44", "<ToolCallView key={child.id} run={child} />"],
+    ["features/conversation/transcript.tsx:88", "return <ToolCallView key={run.id} run={run} />;"],
+    ["features/conversation/transcript.test.tsx:12", 'import { ToolCallView } from "@/tools/tool-call-view";'],
+    ["features/conversation/transcript.test.tsx:131", "render(<ToolCallView run={fixtures.bashRunning} />);"],
+  ]) },
+];
+const T2_WRITE = { id: "t2-w1", kind: "tool", tool: "write", path: "packages/web/src/tools/tool-row.tsx", lines: 126, dur: "0.1s", body: () => codeBody(src("src-tool-row"), "ts") };
+const T2_EDIT = { id: "t2-e1", kind: "tool", tool: "edit", path: "packages/web/src/tools/tool-call-view.tsx", add: 18, del: 64, dur: "0.2s", body: () => diffBody(src("diff-tcv-3"), "ts") };
+const T2_TEXT = { id: "t2-x1", kind: "text", html: "<p><code>ToolRow</code> is in and <code>ToolCallView</code> now delegates to it. Running the web suite before I move on to exploration grouping — a few transcript snapshots will likely need updating.</p>" };
+
+const LIVE = {
+  tests: {
+    items: [...T2_BASE, T2_WRITE, T2_EDIT, T2_TEXT,
+      { id: "t2-b1", kind: "tool", tool: "bash", cmd: "pnpm test", running: true, body: () => termBody([
+        "$ pnpm test",
+        " RUN  v3.2.4 /Users/roberto/Dev/pi-code/packages/web",
+        "",
+        " ✓ src/tools/tool-row.test.tsx (14 tests) 212ms",
+        " ✓ src/tools/labels.test.ts (22 tests) 31ms",
+        " ✓ src/features/conversation/status-bar.test.tsx (6 tests) 96ms",
+        " ✓ src/features/sidebar/sidebar-model.test.ts (18 tests) 44ms",
+        " ❯ src/features/conversation/transcript.test.tsx 23/41",
+      ], { running: true }) }],
+    status: "Running pnpm test", secs: 42,
+  },
+  exploring: {
+    items: [T2_BASE[0], T2_BASE[1], T2_BASE[3],
+      { id: "t2-r3", kind: "tool", tool: "read", path: "packages/web/src/features/conversation/transcript.tsx", meta: "L1–129", running: true, body: () => codeBody(src("src-tcv"), "ts") }],
+    status: "Reading transcript.tsx", secs: 6,
+  },
+  thinking: {
+    items: [{ id: "t2-think-live", kind: "thinking", running: true, text: [
+      "B5a wants a borderless 28px row: muted icon, verb, target, meta, then duration and chevron on hover.",
+      "Legacy messages have no durationMs, so the duration slot should simply stay empty for them rather than showing 0s…",
+    ] }],
+    status: "Thinking", secs: 3,
+  },
+  editing: {
+    items: [...T2_BASE, T2_WRITE, { ...T2_EDIT, add: undefined, del: undefined, running: true }],
+    status: "Editing tool-call-view.tsx", secs: 9,
+  },
+};
+
+/* ───────────────────────── State ───────────────────────── */
+const P = new URLSearchParams(location.search);
+const state = {
+  theme: P.get("theme") === "light" ? "light" : "dark",
+  density: ["compact", "balanced", "detailed"].includes(P.get("density")) ? P.get("density") : "balanced",
+  live: LIVE[P.get("live")] ? P.get("live") : "tests",
+  picker: P.get("picker") === "open",
+  phone: P.get("phone") === "1",
+  palette: "mono",
+};
+/* Local per-row overrides (B7b). The index.css diff starts expanded, as if the user opened it. */
+const overrides = { "t1-e1": true };
+
+/* ───────────────────────── Rendering ───────────────────────── */
+function fileTarget(path) {
+  const i = path.lastIndexOf("/");
+  const base = path.slice(i + 1), dir = i > 0 ? path.slice(0, i) : "";
+  return `<span class="base">${esc(base)}</span>${dir ? `<span class="dir">${esc(dir)}</span>` : ""}`;
+}
+const diffstat = (a, d) => `<span class="diffstat"><span class="add">+${a}</span><span class="del">−${d}</span></span>`;
+
+function toolLabel(it) {
+  const r = !!it.running;
+  switch (it.tool) {
+    case "read": return { icon: "file-text", verb: r ? "Reading" : "Read", target: fileTarget(it.path), meta: it.meta };
+    case "grep": return { icon: "text-search", verb: r ? "Searching" : "Searched", target: `<span class="pat">/${esc(it.pattern)}/</span>`, meta: r ? "" : `· ${it.count} matches` };
+    case "find": return { icon: "file-search", verb: r ? "Finding" : "Found", target: `<span class="pat">${esc(it.pattern)}</span>`, meta: r ? "" : `· ${it.count} files` };
+    case "ls": return { icon: "folder-open", verb: r ? "Listing" : "Listed", target: fileTarget(it.path), meta: r ? "" : `· ${it.count} entries` };
+    case "edit": return { icon: "file-pen", verb: it.error ? "Edit failed" : r ? "Editing" : "Edited", target: fileTarget(it.path), meta: it.add != null ? diffstat(it.add, it.del) : "" };
+    case "write": return { icon: "file-plus", verb: r ? "Writing" : "Wrote", target: fileTarget(it.path), meta: r ? "" : `· ${it.lines} lines` };
+    case "bash": return { icon: "square-terminal", verb: r ? "Running" : "Ran", target: `<span class="cmd">${esc(it.cmd)}</span>`, meta: it.exit ? `exit ${it.exit}` : "" };
+    default: return { icon: "wrench", verb: it.tool, target: "", meta: "" };
+  }
+}
+
+/** Fold consecutive exploration calls into groups (B6). */
+function groupItems(items) {
+  const out = [];
+  let run = null;
+  const flush = () => {
+    if (!run) return;
+    out.push(run.length === 1 ? run[0] : { kind: "group", id: `g-${run[0].id}`, children: run });
+    run = null;
+  };
+  items.forEach((it, idx) => {
+    const isExplore = it.kind === "tool" && EXPLORE.has(it.tool) && !it.error;
+    const absorbThinking = it.kind === "thinking" && run && items[idx + 1]?.kind === "tool" && EXPLORE.has(items[idx + 1].tool);
+    if (isExplore || absorbThinking) (run ||= []).push(it);
+    else { flush(); out.push(it); }
+  });
+  flush();
+  return out;
+}
+
+function groupLabel(children) {
+  const c = { files: 0, searches: 0, listings: 0, web: 0 };
+  for (const it of children) {
+    if (it.tool === "read") c.files++;
+    else if (it.tool === "grep" || it.tool === "find") c.searches++;
+    else if (it.tool === "ls") c.listings++;
+    else if (it.kind === "tool") c.web++;
+  }
+  const pl = (n, s, p) => `${n} ${n === 1 ? s : p}`;
+  return [c.files && pl(c.files, "file", "files"), c.searches && pl(c.searches, "search", "searches"),
+    c.listings && pl(c.listings, "listing", "listings"), c.web && pl(c.web, "web search", "web searches")].filter(Boolean).join(", ");
+}
+
+function defaultOpen(b) {
+  if (state.density === "detailed") return true;
+  if (b.kind === "tool" && b.running && (b.tool === "bash" || !["read", "grep", "find", "ls", "edit", "write"].includes(b.tool))) return true;
+  return false;
+}
+const isOpen = (b, ctxDefault) => (b.id in overrides ? overrides[b.id] : ctxDefault ?? defaultOpen(b));
+
+function rowShell({ id, open, cls = "", icon, label, tail = "", body = "", hasBody = true, after = "" }) {
+  return `<div class="row ${open ? "open" : ""} ${hasBody ? "" : "no-body"} ${cls}" data-id="${id}">
+    <div class="row-head" role="button" tabindex="0" aria-expanded="${open}">
+      <span class="row-icon">${icon}</span>
+      <span class="row-label">${label}</span>
+      <span class="row-tail">${tail}${hasBody ? svg("chevron-right", "chev") : ""}</span>
+    </div>${after}
+    ${hasBody ? `<div class="collapse"><div class="inner">${body}</div></div>` : ""}
+  </div>`;
+}
+
+function renderTool(it) {
+  const L = toolLabel(it);
+  const verb = it.running ? `<span class="verb shimmer">${L.verb}</span>` : `<span class="verb">${L.verb}</span>`;
+  let meta = L.meta ? `<span class="meta">${L.meta}</span>` : "";
+  if (it.error && it.errLine) meta = `<span class="meta shrink">${L.meta ? `${L.meta} · ` : ""}<span class="err">${esc(it.errLine)}</span></span>`;
+  return rowShell({
+    id: it.id,
+    open: isOpen(it),
+    cls: `${it.running ? "running" : ""} ${it.error ? "error" : ""}`,
+    icon: it.error ? svg("circle-alert") : svg(L.icon),
+    label: `${verb}<span class="target">${L.target}</span>${meta}`,
+    tail: it.dur ? `<span class="dur">${it.dur}</span>` : "",
+    body: `<div class="body">${it.body ? it.body() : ""}</div>`,
+  });
+}
+
+function renderThinking(it) {
+  const text = `<div class="thought">${it.text.map((p) => `<p>${p}</p>`).join("")}</div>`;
+  if (it.running) {
+    const open = isOpen(it);
+    const preview = open ? "" : `<div class="live-preview">${it.text[it.text.length - 1].replace(/<[^>]+>/g, "")}</div>`;
+    return rowShell({ id: it.id, open, cls: "running", icon: svg("brain"), label: `<span class="verb shimmer">Thinking</span>`, body: text, after: preview });
+  }
+  return rowShell({
+    id: it.id, open: isOpen(it), icon: svg("brain"),
+    label: `<span class="verb">Thought</span><span class="meta">for ${it.secs}s</span>`,
+    body: text,
+  });
+}
+
+function renderGroup(g) {
+  const live = g.children.find((c) => c.running);
+  let label;
+  if (live) {
+    const L = toolLabel(live);
+    const name = live.path ? live.path.split("/").pop() : live.pattern || "";
+    label = `<span class="verb shimmer">Exploring · ${L.verb} ${esc(name)}</span>`;
+  } else {
+    label = `<span class="verb">Explored</span><span class="meta">${groupLabel(g.children)}</span>`;
+  }
+  return rowShell({
+    id: g.id, open: isOpen(g, false), cls: live ? "running" : "",
+    icon: svg("telescope"), label,
+    body: `<div class="children">${g.children.map(renderBlock).join("")}</div>`,
+  });
+}
+
+function renderBlock(b) {
+  if (b.kind === "group") return renderGroup(b);
+  if (b.kind === "thinking") return renderThinking(b);
+  if (b.kind === "text") return `<div class="text-block prose">${b.html}</div>`;
+  return renderTool(b);
+}
+
+function renderFooter(f, { withDuration = true } = {}) {
+  const parts = [];
+  if (withDuration) parts.push(`<span>${f.dur}</span><span>·</span>`);
+  parts.push(`<span>${f.cost}</span><span>·</span>`);
+  parts.push(`<button class="chip" title="Open in review pane">${svg("git-compare")}${f.files} files ${diffstat(f.add, f.del)}</button>`);
+  parts.push(`<button class="icon-btn copy" title="Copy response">${svg("copy")}</button>`);
+  return `<div class="turn-foot">${parts.join("")}</div>`;
+}
+
+function renderTurn(t) {
+  let h = `<section class="turn"><div class="user-msg prose">${t.user}</div>`;
+  const d = state.density;
+  if (d === "compact" && !t.live) {
+    const inner = groupItems(t.items).map(renderBlock).join("");
+    h += `<div class="flow">${rowShell({
+      id: `w-${t.id}`, open: isOpen({ id: `w-${t.id}` }, false), cls: "dim worked",
+      icon: svg("list-checks"), label: `<span class="verb">Worked for ${t.worked}</span>`,
+      body: `<div class="children">${inner}</div>`,
+    })}</div>`;
+  } else if (d === "compact" && t.live) {
+    const lastText = [...t.items].reverse().find((i) => i.kind === "text");
+    if (lastText) h += `<div class="flow">${renderBlock(lastText)}</div>`;
+  } else {
+    const blocks = d === "detailed" ? t.items : groupItems(t.items);
+    h += `<div class="flow">${blocks.map(renderBlock).join("")}</div>`;
+  }
+  if (t.final) h += `<div class="text-block prose final">${t.final()}</div>`;
+  if (t.live) h += `<div class="live-status"><span class="shimmer">${esc(t.status)}</span><span class="timer">· <span data-timer="${t.secs}">${t.secs}s</span></span></div>`;
+  if (t.footer) h += renderFooter(t.footer, { withDuration: d !== "compact" });
+  return h + `</section>`;
+}
+
+function render({ keepScroll = false } = {}) {
+  const root = document.documentElement;
+  root.dataset.theme = state.theme;
+  root.dataset.density = state.density;
+  root.dataset.palette = state.palette;
+  const L = LIVE[state.live];
+  const T2 = { id: "t2", live: true, user: "Now restyle the tool rows to match the spec — B5 in the ui-overhaul map.", items: L.items, status: L.status, secs: L.secs };
+  const scroller = document.getElementById("scroll");
+  const prev = scroller.scrollTop;
+  document.getElementById("transcript").innerHTML = renderTurn(T1) + renderTurn(T2);
+  document.getElementById("densityLbl").textContent = state.density[0].toUpperCase() + state.density.slice(1);
+  document.querySelectorAll("#densityMenu .menu-item").forEach((b) => b.classList.toggle("sel", b.dataset.density === state.density));
+  document.getElementById("pickerPop").classList.toggle("open", state.picker);
+  document.getElementById("pickerBtn").classList.toggle("on", state.picker);
+  document.querySelectorAll(".mock-seg").forEach((seg) => {
+    seg.querySelectorAll("button").forEach((b) => {
+      const k = seg.dataset.ctl;
+      b.classList.toggle("sel", k === "toggles" ? !!state[b.dataset.v] : state[k] === b.dataset.v);
+    });
+  });
+  applyLayout();
+  markOverflow();
+  if (keepScroll) scroller.scrollTop = prev;
+  else scrollToTarget();
+}
+
+function markOverflow() {
+  document.querySelectorAll(".code").forEach((c) => c.classList.toggle("fade", c.scrollHeight > c.clientHeight + 4));
+}
+
+function applyLayout() {
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
+  const phone = state.phone || narrow;
+  document.documentElement.dataset.layout = phone ? "phone" : "desktop";
+  document.body.classList.toggle("framed", state.phone && !narrow);
+}
+
+function scrollToTarget() {
+  const s = document.getElementById("scroll");
+  const target = P.get("scroll");
+  if (target === "top") s.scrollTop = 0;
+  else if (target === "turn2") s.scrollTop = document.querySelectorAll(".turn")[1].offsetTop - 24;
+  else s.scrollTop = s.scrollHeight;
+}
+
+/* ───────────────────────── Interactions ───────────────────────── */
+document.addEventListener("click", (e) => {
+  const head = e.target.closest(".row-head");
+  if (head) {
+    const row = head.parentElement;
+    if (row.classList.contains("no-body")) return;
+    const open = !row.classList.contains("open");
+    row.classList.toggle("open", open);
+    head.setAttribute("aria-expanded", open);
+    overrides[row.dataset.id] = open;
+    const preview = row.querySelector(":scope > .live-preview");
+    if (preview) preview.style.display = open ? "none" : "";
+    return;
+  }
+  const mi = e.target.closest("#densityMenu .menu-item");
+  if (mi) { state.density = mi.dataset.density; closeMenus(); render({ keepScroll: true }); return; }
+  if (e.target.closest("#densityBtn")) { document.getElementById("densityMenu").classList.toggle("open"); return; }
+  if (e.target.closest("#pickerBtn")) { state.picker = !state.picker; render({ keepScroll: true }); return; }
+  const seg = e.target.closest("#thinkSeg button");
+  if (seg) {
+    seg.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("sel", b === seg));
+    const lvl = seg.textContent;
+    document.getElementById("pickerBtn").childNodes[2].textContent = lvl === "off" ? "No thinking" : lvl === "xhigh" ? "XHigh" : lvl[0].toUpperCase() + lvl.slice(1);
+    return;
+  }
+  const mock = e.target.closest(".mock-seg button");
+  if (mock) {
+    const k = mock.parentElement.dataset.ctl, v = mock.dataset.v;
+    if (k === "toggles") state[v] = !state[v];
+    else state[k] = v;
+    render({ keepScroll: k === "theme" || v === "picker" });
+    return;
+  }
+  if (e.target.closest("#mockMin")) { document.getElementById("mock").classList.toggle("min"); return; }
+  if (!e.target.closest(".menu-wrap")) closeMenus();
+  if (state.picker && !e.target.closest(".picker-pop")) { state.picker = false; render({ keepScroll: true }); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.classList?.contains("row-head")) e.target.click();
+  if (e.key === "Escape") { closeMenus(); if (state.picker) { state.picker = false; render({ keepScroll: true }); } }
+});
+const closeMenus = () => document.querySelectorAll(".menu.open").forEach((m) => m.classList.remove("open"));
+
+/* Composer: auto-height + running-state buttons (C11d) */
+const draft = document.getElementById("draft");
+function syncComposer() {
+  draft.style.height = "auto";
+  draft.style.height = `${draft.scrollHeight}px`;
+  const has = draft.value.trim().length > 0;
+  document.getElementById("queueBtn").classList.toggle("hidden", !has);
+  document.getElementById("sendBtn").classList.toggle("hidden", !has);
+}
+draft.addEventListener("input", syncComposer);
+
+/* Live timer (starts after a beat so screenshots read the seeded value) */
+setTimeout(() => setInterval(() => {
+  document.querySelectorAll("[data-timer]").forEach((el) => {
+    const s = +el.dataset.timer + 1;
+    el.dataset.timer = s;
+    el.textContent = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  });
+}, 1000), 5000);
+
+window.matchMedia("(max-width: 640px)").addEventListener("change", applyLayout);
+if (P.get("controls") === "0") document.getElementById("mock").style.display = "none";
+if (window.matchMedia("(max-width: 640px)").matches) document.getElementById("mock").classList.add("min");
+
+hydrateIcons();
+render();
+syncComposer();
+document.fonts.ready.then(() => { syncComposer(); scrollToTarget(); });
+</script>
+</body>
+</html>
