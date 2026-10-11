@@ -2,7 +2,7 @@ import { initialLiveState, type LiveState } from "@pi-code/protocol";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatSeconds } from "@/lib/time";
+import { formatCost, formatSeconds } from "@/lib/time";
 import type { ConversationStore } from "@/store/conversation-store";
 import { selectTurns, turnStats } from "@/store/turns";
 import { type Density, useUiPrefs } from "@/store/ui-prefs";
@@ -62,6 +62,14 @@ describe("TurnView in Compact", () => {
     expect(worked.compareDocumentPosition(texts[0] as HTMLElement)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it("ends a finished turn with a footer without the duration", async () => {
+    const store = await renderFixture("tool-calls", "compact");
+    const { durationMs, cost } = lastTurnStats(store);
+    const footer = within(lastTurn()).getByTestId("turn-footer");
+    expect(footer).toHaveTextContent(formatCost(cost));
+    expect(footer).not.toHaveTextContent(formatSeconds(durationMs ?? 0));
   });
 
   it("expands 'Worked' to the steps as Balanced shows them, exploration grouped", async () => {

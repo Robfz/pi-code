@@ -8,6 +8,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+import { splitPath } from "@/lib/paths";
 
 export type ToolStatus =
   /** Assistant is still streaming the call's arguments. */
@@ -85,4 +86,29 @@ export function getToolRenderer(toolName: string): ToolRenderer {
   if (matched) return matched.renderer;
   if (!fallback) throw new Error("no fallback tool renderer registered (import @/tools)");
   return fallback;
+}
+
+/** A call as `runningPhrase` reads it. */
+export interface PhraseCall {
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  argsText?: string;
+  /** The assistant is still streaming its arguments. */
+  streaming?: boolean;
+}
+
+/** "Reading foo.ts": a running call's verb and short target (a path's basename, else the text). */
+export function runningPhrase(call: PhraseCall): string {
+  const { verb, target } = getToolRenderer(call.toolName).label({
+    toolCallId: call.toolCallId,
+    toolName: call.toolName,
+    args: call.args,
+    argsText: call.argsText,
+    status: call.streaming ? "streaming" : "running",
+    isError: false,
+    expanded: false,
+  });
+  const short = target && (target.kind === "path" ? splitPath(target.text).base : target.text);
+  return short ? `${verb} ${short}` : verb;
 }

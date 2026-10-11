@@ -2,6 +2,7 @@ import { CircleAlertIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { toolResultText } from "@/lib/content";
+import { splitPath } from "@/lib/paths";
 import { formatDuration, formatSeconds } from "@/lib/time";
 import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
@@ -29,15 +30,6 @@ export function errorLine(result: ToolResultPayload | undefined): string | undef
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line !== "");
-}
-
-/** Basename and directory of a path ("src/app.ts" → "app.ts", "src"). */
-export function splitPath(path: string): { base: string; dir: string } {
-  const trimmed = path.length > 1 ? path.replace(/\/+$/, "") : path;
-  const slash = trimmed.lastIndexOf("/");
-  if (slash < 0) return { base: trimmed, dir: "" };
-  if (slash === 0) return { base: trimmed.slice(1) || "/", dir: trimmed.length > 1 ? "/" : "" };
-  return { base: trimmed.slice(slash + 1), dir: trimmed.slice(0, slash) };
 }
 
 function Target({ target }: { target: NonNullable<ToolLabel["target"]> }) {

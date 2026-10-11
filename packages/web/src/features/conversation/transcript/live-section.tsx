@@ -1,15 +1,10 @@
 import type { StreamingBlock, StreamingMessage, ToolRun } from "@pi-code/protocol";
-import { CircleAlertIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
 import { useConversation } from "@/store/context";
-import {
-  selectActiveBranch,
-  selectBash,
-  selectBranchToolCallIds,
-  selectRun,
-} from "@/store/selectors";
+import { selectBash, selectBranchToolCallIds } from "@/store/selectors";
 import { blockKey, type Step } from "@/store/turns";
 import { BashExecutionView, bashFromResult } from "./bash-execution";
+import { LiveStatusRow } from "./live-status";
 
 function sortedBlocks(blocks: Record<number, StreamingBlock>): [number, StreamingBlock][] {
   return Object.entries(blocks)
@@ -124,69 +119,15 @@ function BashRuns() {
   ));
 }
 
-function RunStatus() {
-  const run = useConversation(selectRun);
-  const idle = useConversation(
-    (s) =>
-      s.live.streaming === undefined &&
-      s.live.pendingUser === undefined &&
-      !Object.values(s.live.tools).some((t) => t.status === "running"),
-  );
-  // An assistant error is already shown on its committed message.
-  const lastAssistantError = useConversation((s) => {
-    const branch = selectActiveBranch(s);
-    for (let i = branch.length - 1; i >= 0; i--) {
-      const entry = branch[i];
-      if (entry?.type === "message" && entry.message.role === "assistant") {
-        return entry.message.errorMessage;
-      }
-    }
-    return undefined;
-  });
-  if (run.compaction) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <LoaderIcon className="size-3.5 animate-spin" /> Compacting context…
-      </div>
-    );
-  }
-  if (run.retry) {
-    return (
-      <div className="flex items-start gap-2 text-xs text-muted-foreground">
-        <RefreshCwIcon className="mt-0.5 size-3.5 animate-spin" />
-        <span>
-          Retrying ({run.retry.attempt}/{run.retry.maxAttempts}) · {run.retry.errorMessage}
-        </span>
-      </div>
-    );
-  }
-  if (run.active && idle) {
-    return (
-      <div data-testid="working" className="flex items-center gap-2 text-xs text-muted-foreground">
-        <LoaderIcon className="size-3.5 animate-spin" /> Working…
-      </div>
-    );
-  }
-  if (!run.active && run.lastError && run.lastError !== lastAssistantError) {
-    return (
-      <div
-        role="alert"
-        className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-      >
-        <CircleAlertIcon className="mt-0.5 size-4 shrink-0" />
-        <span className="break-words">{run.lastError}</span>
-      </div>
-    );
-  }
-  return null;
-}
-
-/** After the turns: `!cmd` runs in flight and the run's status. */
+/**
+ * After the turns: `!cmd` runs in flight and the live-status row. Pulled up to sit 6px under the
+ * last turn, whose line it is.
+ */
 export function LiveSection() {
   return (
-    <div data-testid="live" className="flex flex-col gap-4 empty:hidden">
+    <div data-testid="live" className="-mt-2.5 flex flex-col gap-4 empty:hidden">
       <BashRuns />
-      <RunStatus />
+      <LiveStatusRow />
     </div>
   );
 }

@@ -3,34 +3,12 @@ import type { ReactNode } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { useConversation } from "@/store/context";
 import { useRowOpen } from "@/store/ui-prefs";
-import { getToolRenderer } from "@/tools";
 import { CuratorButton, isActive } from "@/tools/common";
-import type { ToolLabel } from "@/tools/registry";
-import { splitPath } from "@/tools/tool-row";
+import { runningPhrase } from "@/tools/registry";
 import { type ExplorationGroup, groupCountLabel } from "./grouping";
 import { toolStatus } from "./tool-call-slot";
 
 type ToolStep = Extract<ExplorationGroup["steps"][number], { kind: "tool" }>;
-
-/** A target as the group label shows it: a path's basename, else the pattern or query. */
-function shortTarget(target: ToolLabel["target"]): string {
-  if (!target) return "";
-  return target.kind === "path" ? splitPath(target.text).base : target.text;
-}
-
-/** "Reading foo.ts": a running call's verb and short target. */
-function runningPhrase(step: ToolStep, args: unknown): string {
-  const label = getToolRenderer(step.toolName).label({
-    toolCallId: step.toolCallId,
-    toolName: step.toolName,
-    args,
-    argsText: step.argsText,
-    status: step.streaming ? "streaming" : "running",
-    isError: false,
-    expanded: false,
-  });
-  return [label.verb, shortTarget(label.target)].filter(Boolean).join(" ");
-}
 
 function ChildCurator({ toolCallId }: { toolCallId: string }) {
   const url = useConversation((s) => s.live.curator[toolCallId]);
@@ -71,7 +49,7 @@ export function ExplorationGroupRow({
       label={
         running ? (
           <span data-slot="row-verb" className="shimmer min-w-0 truncate font-medium">
-            Exploring · {runningPhrase(running, runningArgs)}
+            Exploring · {runningPhrase({ ...running, args: runningArgs })}
           </span>
         ) : (
           <>

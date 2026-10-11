@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cwdRelative } from "./paths";
+import { cwdRelative, splitPath } from "./paths";
 
 describe("cwdRelative", () => {
   it.each([
@@ -13,5 +13,16 @@ describe("cwdRelative", () => {
     ["/a.ts", "", "/a.ts"],
   ])("%s in %s → %s", (path, cwd, expected) => {
     expect(cwdRelative(path, cwd)).toBe(expected);
+  });
+});
+
+describe("splitPath", () => {
+  it("splits basename and directory", () => {
+    expect(splitPath("src/a/b.ts")).toEqual({ base: "b.ts", dir: "src/a" });
+    expect(splitPath("b.ts")).toEqual({ base: "b.ts", dir: "" });
+    expect(splitPath("/b.ts")).toEqual({ base: "b.ts", dir: "/" });
+    expect(splitPath("src/")).toEqual({ base: "src", dir: "" });
+    expect(splitPath("/")).toEqual({ base: "/", dir: "" });
+    expect(splitPath(".")).toEqual({ base: ".", dir: "" });
   });
 });

@@ -1,3 +1,4 @@
+import type { SessionEntry } from "@pi-code/protocol";
 import { ListChecksIcon, TagIcon } from "lucide-react";
 import { createContext, memo, type ReactNode, useContext, useMemo } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
@@ -13,6 +14,7 @@ import { failedToolCalls, foldSteps, groupSteps, type Item } from "./grouping";
 import { useLiveSteps } from "./live-section";
 import { Thinking } from "./thinking";
 import { ToolCallSlot } from "./tool-call-slot";
+import { TurnFooter } from "./turn-footer";
 import { UserMessageView } from "./user-message";
 
 const StepView = memo(function StepView({ step }: { step: Step }) {
@@ -154,9 +156,12 @@ function TurnBody({
   );
 }
 
+const isAssistantEntry = (entry: SessionEntry) =>
+  entry.type === "message" && entry.message.role === "assistant";
+
 /**
- * One turn: its user message, then its steps. The last turn also shows what's in flight
- * (`useLiveSteps`); the others render from committed entries only.
+ * One turn: its user message, then its steps, and a footer once it's finished. The last turn also
+ * shows what's in flight (`useLiveSteps`); the others render from committed entries only.
  */
 export const TurnView = memo(function TurnView({
   turn,
@@ -197,6 +202,7 @@ export const TurnView = memo(function TurnView({
   }, [steps, labels]);
 
   if (!turn.user && steps.length === 0) return null;
+  const finished = !live.active && !pending && turn.entries.some(isAssistantEntry);
   const userLabel = turn.user && !pending ? labels.get(turn.id) : undefined;
 
   return (
@@ -204,7 +210,7 @@ export const TurnView = memo(function TurnView({
       data-testid={live.active ? "live-turn" : "turn"}
       data-turn-id={turn.id}
       className={cn(
-        "min-w-0",
+        "group/turn min-w-0",
         !live.active && "[contain-intrinsic-size:auto_400px] [content-visibility:auto]",
       )}
     >
@@ -217,6 +223,7 @@ export const TurnView = memo(function TurnView({
       <StepLabels.Provider value={stepLabels}>
         <TurnBody turn={turn} steps={steps} live={live.active} failed={failed} />
       </StepLabels.Provider>
+      {finished && <TurnFooter turn={turn} />}
     </section>
   );
 });

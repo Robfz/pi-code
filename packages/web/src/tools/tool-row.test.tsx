@@ -4,7 +4,7 @@ import { FileTextIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolLabel, ToolStatus } from "./registry";
 import { rowParts } from "./testing";
-import { splitPath, ToolRow } from "./tool-row";
+import { ToolRow } from "./tool-row";
 
 const label: ToolLabel = {
   icon: FileTextIcon,
@@ -98,14 +98,5 @@ describe("ToolRow", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /Reading/ }));
     expect(screen.queryByRole("link", { name: /Review in curator/ })).toBeNull();
     expect(screen.getByText("body")).toBeInTheDocument();
-  });
-
-  it("splitPath", () => {
-    expect(splitPath("src/a/b.ts")).toEqual({ base: "b.ts", dir: "src/a" });
-    expect(splitPath("b.ts")).toEqual({ base: "b.ts", dir: "" });
-    expect(splitPath("/b.ts")).toEqual({ base: "b.ts", dir: "/" });
-    expect(splitPath("src/")).toEqual({ base: "src", dir: "" });
-    expect(splitPath("/")).toEqual({ base: "/", dir: "" });
-    expect(splitPath(".")).toEqual({ base: ".", dir: "" });
   });
 });
