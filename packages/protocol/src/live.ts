@@ -9,6 +9,9 @@
  * Updates are immutable and structural: an event returns a new state object, but slices it
  * doesn't touch keep their identity, and events that change nothing return the input state
  * unchanged. That keeps selector-based React subscriptions from re-rendering needlessly.
+ *
+ * Timing fields (`startedAt`, `endedAt`, `durationMs`, `thinkingMs`) come from the events'
+ * `receivedAt` (the server's clock), so snapshots carry them; without `receivedAt` they're absent.
  */
 
 import type {
@@ -36,14 +39,30 @@ export interface LiveRun {
     startedAt: number;
   };
   lastError?: string;
+  /** `receivedAt` of `agent_start`. */
+  startedAt?: number;
+}
+
+/** `startedAt` when the block is created (its `*_start` or first delta), `endedAt` at its `*_end`. */
+interface BlockTiming {
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export type StreamingBlock =
-  | { type: "text"; text: string; done: boolean }
-  | { type: "thinking"; text: string; done: boolean }
-  | { type: "toolCall"; id: string; name: string; argsText: string; call?: ToolCall };
+  | ({ type: "text"; text: string; done: boolean } & BlockTiming)
+  | ({ type: "thinking"; text: string; done: boolean } & BlockTiming)
+  | ({
+      type: "toolCall";
+      id: string;
+      name: string;
+      argsText: string;
+      call?: ToolCall;
+    } & BlockTiming);
 
 export interface StreamingMessage {
+  /** The assistant message's `timestamp` from `message_start`; keys `thinkingMs`. */
+  timestamp?: number;
   /** Keyed by `contentIndex`. */
   blocks: Record<number, StreamingBlock>;
 }
@@ -55,6 +74,10 @@ export interface ToolRun {
   partialResult?: unknown;
   /** `{ content, details? }` from `tool_execution_end`. */
   result?: unknown;
+  /** `receivedAt` of `tool_execution_start`. */
+  startedAt?: number;
+  /** `tool_execution_end`'s `durationMs`, else its `receivedAt` minus `startedAt`. */
+  durationMs?: number;
 }
 
 export const DIALOG_METHODS = ["select", "confirm", "input", "editor"] as const;
@@ -115,6 +138,11 @@ export interface LiveState {
   notices: Notice[];
   /** RPC `bash` runs, by command id. */
   bash: Record<string, BashRun>;
+  /**
+   * Thinking durations by `${assistantMessage.timestamp}:${contentIndex}`. They outlive runs, so
+   * a committed thinking block can look its duration up.
+   */
+  thinkingMs: Record<string, number>;
 }
 
 export const MAX_NOTICES = 20;
@@ -130,6 +158,7 @@ export function initialLiveState(): LiveState {
     widgets: {},
     notices: [],
     bash: {},
+    thinkingMs: {},
   };
 }
 
@@ -217,8 +246,8 @@ function reducePi(
 ): LiveState {
   switch (event.type) {
     case "agent_start": {
-      const { lastError: _, ...run } = state.run;
-      return { ...state, run: { ...run, active: true } };
+      const { lastError: _, startedAt: __, ...run } = state.run;
+      return { ...state, run: { ...run, active: true, ...timing("startedAt", receivedAt) } };
     }
     case "agent_settled":
       return settle(state);
@@ -233,7 +262,9 @@ function reducePi(
         return { ...state, pendingUser: message };
       }
       if (message.role !== "assistant") return state; // system, toolResult, custom, …
-      if (event.type === "message_start") return { ...state, streaming: { blocks: {} } };
+      if (event.type === "message_start") {
+        return { ...state, streaming: { timestamp: message.timestamp, blocks: {} } };
+      }
       const { streaming: _, ...rest } = state;
       const failed =
         message.stopReason === "error" && effectiveStopReason(message) === "error"
@@ -242,13 +273,14 @@ function reducePi(
       return failed === undefined ? rest : { ...rest, run: { ...rest.run, lastError: failed } };
     }
     case "message_update":
-      return reduceMessageUpdate(state, event.assistantMessageEvent);
+      return reduceMessageUpdate(state, event.assistantMessageEvent, receivedAt);
 
     case "tool_execution_start":
       return setTool(state, event.toolCallId, {
         toolName: event.toolName,
         args: event.args,
         status: "running",
+        ...timing("startedAt", receivedAt),
       });
     case "tool_execution_update": {
       const prev = state.tools[event.toolCallId];
@@ -257,15 +289,21 @@ function reducePi(
         args: prev?.args ?? event.args,
         status: "running",
         partialResult: event.partialResult,
+        ...timing("startedAt", prev?.startedAt),
       });
     }
     case "tool_execution_end": {
       const prev = state.tools[event.toolCallId];
+      const startedAt = prev?.startedAt;
+      const measured =
+        receivedAt !== undefined && startedAt !== undefined ? receivedAt - startedAt : undefined;
       return setTool(state, event.toolCallId, {
         toolName: event.toolName,
         args: prev?.args ?? null,
         status: event.isError ? "error" : "done",
         result: event.result,
+        ...timing("startedAt", startedAt),
+        ...timing("durationMs", event.durationMs ?? measured),
       });
     }
 
@@ -326,25 +364,65 @@ type AssistantEvent = Extract<
   { type: "message_update" }
 >["assistantMessageEvent"];
 
-function reduceMessageUpdate(state: LiveState, event: AssistantEvent): LiveState {
+function reduceMessageUpdate(
+  state: LiveState,
+  event: AssistantEvent,
+  receivedAt: number | undefined,
+): LiveState {
   switch (event.type) {
     case "text_start":
     case "thinking_start": {
       const type = event.type === "text_start" ? "text" : "thinking";
-      return setBlock(state, event.contentIndex, { type, text: "", done: false });
+      return setBlock(state, event.contentIndex, {
+        type,
+        text: "",
+        done: false,
+        ...timing("startedAt", receivedAt),
+      });
     }
     case "text_delta":
     case "thinking_delta": {
       const type = event.type === "text_delta" ? "text" : "thinking";
       const prev = state.streaming?.blocks[event.contentIndex];
-      const text = prev?.type === type ? prev.text : "";
-      if (prev?.type === type && event.delta === "") return state;
-      return setBlock(state, event.contentIndex, { type, text: text + event.delta, done: false });
+      if (prev?.type === type) {
+        if (event.delta === "") return state;
+        return setBlock(state, event.contentIndex, {
+          type,
+          text: prev.text + event.delta,
+          done: false,
+          ...timing("startedAt", prev.startedAt),
+        });
+      }
+      return setBlock(state, event.contentIndex, {
+        type,
+        text: event.delta,
+        done: false,
+        ...timing("startedAt", receivedAt),
+      });
     }
     case "text_end":
     case "thinking_end": {
       const type = event.type === "text_end" ? "text" : "thinking";
-      return setBlock(state, event.contentIndex, { type, text: event.content, done: true });
+      const prev = state.streaming?.blocks[event.contentIndex];
+      const startedAt = prev?.type === type ? prev.startedAt : undefined;
+      const next = setBlock(state, event.contentIndex, {
+        type,
+        text: event.content,
+        done: true,
+        ...timing("startedAt", startedAt),
+        ...timing("endedAt", receivedAt),
+      });
+      const timestamp = state.streaming?.timestamp;
+      if (
+        type !== "thinking" ||
+        timestamp === undefined ||
+        startedAt === undefined ||
+        receivedAt === undefined
+      ) {
+        return next;
+      }
+      const key = `${timestamp}:${event.contentIndex}`;
+      return { ...next, thinkingMs: { ...next.thinkingMs, [key]: receivedAt - startedAt } };
     }
     case "toolcall_start":
       return setBlock(state, event.contentIndex, {
@@ -352,6 +430,7 @@ function reduceMessageUpdate(state: LiveState, event: AssistantEvent): LiveState
         id: event.id,
         name: event.toolName,
         argsText: "",
+        ...timing("startedAt", receivedAt),
       });
     case "toolcall_delta": {
       const prev = state.streaming?.blocks[event.contentIndex];
@@ -367,19 +446,23 @@ function reduceMessageUpdate(state: LiveState, event: AssistantEvent): LiveState
         id: "",
         name: "",
         argsText: event.delta,
+        ...timing("startedAt", receivedAt),
       });
     }
     case "toolcall_end": {
       const prev = state.streaming?.blocks[event.contentIndex];
+      const started = prev?.type === "toolCall" ? prev : undefined;
       return setBlock(state, event.contentIndex, {
         type: "toolCall",
         id: event.toolCall.id,
         name: event.toolCall.name,
         argsText:
-          prev?.type === "toolCall" && prev.argsText !== ""
-            ? prev.argsText
+          started !== undefined && started.argsText !== ""
+            ? started.argsText
             : JSON.stringify(event.toolCall.arguments),
         call: event.toolCall,
+        ...timing("startedAt", started?.startedAt),
+        ...timing("endedAt", receivedAt),
       });
     }
     default:
@@ -390,7 +473,12 @@ function reduceMessageUpdate(state: LiveState, event: AssistantEvent): LiveState
 
 function setBlock(state: LiveState, index: number, block: StreamingBlock): LiveState {
   const blocks = state.streaming?.blocks ?? {};
-  return { ...state, streaming: { blocks: { ...blocks, [index]: block } } };
+  return { ...state, streaming: { ...state.streaming, blocks: { ...blocks, [index]: block } } };
+}
+
+/** `{ [key]: value }`, or `{}` for an unknown value: timing fields are left out, not undefined. */
+function timing<K extends string>(key: K, value: number | undefined): { [P in K]?: number } {
+  return value === undefined ? {} : ({ [key]: value } as { [P in K]: number });
 }
 
 function setTool(state: LiveState, toolCallId: string, run: ToolRun): LiveState {

@@ -100,9 +100,11 @@ describe.each(names)("fixture %s", (name) => {
       }
       state = deepFreeze(reduceLive(state, event));
       if (event.type === "pi" && event.event.type === "message_start") {
-        const role = event.event.message.role;
-        if (role === "assistant") expect(state.streaming).toEqual({ blocks: {} });
-        if (role === "user") expect(state.pendingUser).toEqual(event.event.message);
+        const message = event.event.message;
+        if (message.role === "assistant") {
+          expect(state.streaming).toEqual({ timestamp: message.timestamp, blocks: {} });
+        }
+        if (message.role === "user") expect(state.pendingUser).toEqual(message);
       }
       if (event.type === "pi" && event.event.type === "message_end") {
         if (event.event.message.role === "assistant") expect(state.streaming).toBeUndefined();
@@ -178,10 +180,17 @@ describe("fixture scenarios", () => {
       if (blocks?.[1]?.type === "text" && blocks[1].text.length > 0) sawText = true;
     }
     expect(sawText).toBe(true);
+    // The thinking duration outlives the run, keyed for the committed message's first block.
+    const answer = applyAll(events).transcript.entries.find(
+      (e) => e.type === "message" && e.message.role === "assistant",
+    );
+    const timestamp = answer?.type === "message" ? answer.message.timestamp : undefined;
     expect(state).toEqual({
       ...initialLiveState(),
       statuses: { mcp: "\u001b[38;2;138;190;183m🔌 MCP: 2 servers enabled\u001b[39m" },
+      thinkingMs: { [`${timestamp}:0`]: expect.any(Number) },
     });
+    expect(Object.values(state.thinkingMs)[0]).toBeGreaterThan(0);
   });
 
   it("plain-answer: the thinking block is done before the text starts", () => {
@@ -193,7 +202,12 @@ describe("fixture scenarios", () => {
         const e = event.event.assistantMessageEvent;
         if (e.type === "text_start") {
           expect(state.streaming?.blocks[0]).toMatchObject({ type: "thinking", done: true });
-          expect(state.streaming?.blocks[1]).toEqual({ type: "text", text: "", done: false });
+          expect(state.streaming?.blocks[1]).toEqual({
+            type: "text",
+            text: "",
+            done: false,
+            startedAt: event.receivedAt,
+          });
         }
       }
     }

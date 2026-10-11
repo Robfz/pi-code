@@ -28,8 +28,8 @@ const pi = (event: unknown, receivedAt?: number): ServerEvent =>
     ? { type: "pi", event: event as JsonAgentSessionEvent }
     : { type: "pi", event: event as JsonAgentSessionEvent, receivedAt };
 
-const update = (assistantMessageEvent: unknown): ServerEvent =>
-  pi({ type: "message_update", usage: {}, assistantMessageEvent });
+const update = (assistantMessageEvent: unknown, receivedAt?: number): ServerEvent =>
+  pi({ type: "message_update", usage: {}, assistantMessageEvent }, receivedAt);
 
 const ui = (request: Record<string, unknown>, receivedAt = 1000): ServerEvent => ({
   type: "ui_request",
@@ -98,6 +98,7 @@ describe("initialLiveState", () => {
       widgets: {},
       notices: [],
       bash: {},
+      thinkingMs: {},
     });
     expect(initialLiveState()).not.toBe(a);
   });
@@ -298,7 +299,7 @@ describe("streaming assistant message", () => {
   const start = pi({ type: "message_start", message: assistant() });
 
   it("message_start opens an empty streaming message", () => {
-    expect(reduceLive(initialLiveState(), start).streaming).toEqual({ blocks: {} });
+    expect(reduceLive(initialLiveState(), start).streaming).toEqual({ timestamp: 1, blocks: {} });
   });
 
   it("text and thinking: start, deltas, end", () => {
@@ -408,6 +409,7 @@ describe("streaming assistant message", () => {
       "widgets",
       "notices",
       "bash",
+      "thinkingMs",
     ] as const) {
       expect(next[key]).toBe(s[key]);
     }
@@ -551,6 +553,160 @@ describe("tools", () => {
     );
     expect(Object.keys(s.tools)).toEqual(["t2"]);
     expect(s.curator).toEqual({});
+  });
+});
+
+describe("timing", () => {
+  const start = pi({ type: "message_start", message: assistant({ timestamp: 7000 }) }, 1000);
+  const toolStart = pi(
+    { type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: {} },
+    2000,
+  );
+  const toolUpdate = pi(
+    {
+      type: "tool_execution_update",
+      toolCallId: "t1",
+      toolName: "bash",
+      args: {},
+      partialResult: { content: [] },
+    },
+    2500,
+  );
+  const toolEnd = (receivedAt?: number, durationMs?: number) =>
+    pi(
+      {
+        type: "tool_execution_end",
+        toolCallId: "t1",
+        toolName: "bash",
+        result: { content: [] },
+        isError: false,
+        ...(durationMs === undefined ? {} : { durationMs }),
+      },
+      receivedAt,
+    );
+
+  it("thinking and text blocks get startedAt at their start, kept through deltas, and endedAt", () => {
+    const s = reduceAll([
+      start,
+      update({ type: "thinking_start", contentIndex: 0 }, 1100),
+      update({ type: "thinking_delta", contentIndex: 0, delta: "hm" }, 1200),
+      update({ type: "thinking_end", contentIndex: 0, content: "hm" }, 13_100),
+      update({ type: "text_start", contentIndex: 1 }, 13_200),
+      update({ type: "text_delta", contentIndex: 1, delta: "Hi" }, 13_300),
+    ]);
+    expect(s.streaming?.blocks).toEqual({
+      0: { type: "thinking", text: "hm", done: true, startedAt: 1100, endedAt: 13_100 },
+      1: { type: "text", text: "Hi", done: false, startedAt: 13_200 },
+    });
+    const ended = reduceLive(
+      s,
+      update({ type: "text_end", contentIndex: 1, content: "Hi" }, 14_000),
+    );
+    expect(ended.streaming?.blocks[1]).toEqual({
+      type: "text",
+      text: "Hi",
+      done: true,
+      startedAt: 13_200,
+      endedAt: 14_000,
+    });
+  });
+
+  it("a block created by a delta gets startedAt from it", () => {
+    const s = reduceAll([
+      start,
+      update({ type: "thinking_delta", contentIndex: 0, delta: "a" }, 1500),
+      update({ type: "thinking_delta", contentIndex: 0, delta: "b" }, 1600),
+      update({ type: "toolcall_delta", contentIndex: 1, delta: "{" }, 1700),
+    ]);
+    expect(s.streaming?.blocks[0]).toEqual({
+      type: "thinking",
+      text: "ab",
+      done: false,
+      startedAt: 1500,
+    });
+    expect(s.streaming?.blocks[1]).toMatchObject({ type: "toolCall", startedAt: 1700 });
+  });
+
+  it("tool call blocks get startedAt at toolcall_start and endedAt at toolcall_end", () => {
+    const s = reduceAll([
+      start,
+      update({ type: "toolcall_start", contentIndex: 0, id: "t1", toolName: "read" }, 1100),
+      update({ type: "toolcall_delta", contentIndex: 0, delta: "{}" }, 1200),
+      update({ type: "toolcall_end", contentIndex: 0, toolCall }, 1300),
+    ]);
+    expect(s.streaming?.blocks[0]).toMatchObject({ startedAt: 1100, endedAt: 1300 });
+  });
+
+  it("events without receivedAt leave the timing fields absent", () => {
+    const s = reduceAll([
+      pi({ type: "agent_start" }),
+      pi({ type: "message_start", message: assistant({ timestamp: 7000 }) }),
+      update({ type: "thinking_start", contentIndex: 0 }),
+      update({ type: "thinking_end", contentIndex: 0, content: "hm" }),
+      update({ type: "text_delta", contentIndex: 1, delta: "x" }),
+      update({ type: "toolcall_start", contentIndex: 2, id: "t1", toolName: "bash" }),
+      update({ type: "toolcall_end", contentIndex: 2, toolCall }),
+      pi({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: {} }),
+      toolEnd(),
+    ]);
+    expect(s.run).not.toHaveProperty("startedAt");
+    for (const block of Object.values(s.streaming?.blocks ?? {})) {
+      expect(block).not.toHaveProperty("startedAt");
+      expect(block).not.toHaveProperty("endedAt");
+    }
+    expect(s.tools.t1).not.toHaveProperty("startedAt");
+    expect(s.tools.t1).not.toHaveProperty("durationMs");
+    expect(s.thinkingMs).toEqual({});
+  });
+
+  it("a tool keeps its startedAt through updates and the end", () => {
+    const running = reduceAll([toolStart, toolUpdate]);
+    expect(running.tools.t1).toMatchObject({ status: "running", startedAt: 2000 });
+    expect(running.tools.t1).not.toHaveProperty("durationMs");
+    const done = reduceLive(running, toolEnd(5000, 2900));
+    expect(done.tools.t1).toMatchObject({ status: "done", startedAt: 2000 });
+  });
+
+  it("durationMs comes from the event, else from receivedAt", () => {
+    const running = reduceAll([toolStart, toolUpdate]);
+    expect(reduceLive(running, toolEnd(5000, 2900)).tools.t1?.durationMs).toBe(2900);
+    expect(reduceLive(running, toolEnd(5000)).tools.t1?.durationMs).toBe(3000);
+    expect(reduceLive(running, toolEnd(undefined, 2900)).tools.t1?.durationMs).toBe(2900);
+    expect(reduceLive(running, toolEnd())).not.toHaveProperty("tools.t1.durationMs");
+  });
+
+  it("agent_start sets run.startedAt and agent_settled drops it", () => {
+    const running = reduceAll([pi({ type: "agent_start" }, 900)]);
+    expect(running.run).toEqual({ active: true, startedAt: 900 });
+    expect(reduceLive(running, pi({ type: "agent_settled" }, 9000)).run).toEqual({
+      active: false,
+    });
+    expect(reduceLive(running, pi({ type: "agent_start" })).run).toEqual({ active: true });
+  });
+
+  it("thinking_end writes thinkingMs under the message timestamp and content index", () => {
+    const s = reduceAll([
+      pi({ type: "agent_start" }, 900),
+      start,
+      update({ type: "text_start", contentIndex: 0 }, 1050),
+      update({ type: "text_end", contentIndex: 0, content: "" }, 1080),
+      update({ type: "thinking_start", contentIndex: 1 }, 1100),
+      update({ type: "thinking_end", contentIndex: 1, content: "hm" }, 13_100),
+    ]);
+    expect(s.thinkingMs).toEqual({ "7000:1": 12_000 });
+
+    const next = reduceAll(
+      [
+        pi({ type: "message_end", message: assistant({ timestamp: 7000 }) }, 13_500),
+        pi({ type: "message_start", message: assistant({ timestamp: 8000 }) }, 14_000),
+        update({ type: "thinking_start", contentIndex: 0 }, 14_000),
+        update({ type: "thinking_end", contentIndex: 0, content: "ok" }, 15_500),
+        pi({ type: "agent_settled" }, 16_000),
+      ],
+      s,
+    );
+    expect(next.streaming).toBeUndefined();
+    expect(next.thinkingMs).toEqual({ "7000:1": 12_000, "8000:0": 1500 });
   });
 });
 
