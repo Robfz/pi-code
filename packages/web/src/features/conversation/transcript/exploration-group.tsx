@@ -2,11 +2,11 @@ import { TelescopeIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { useConversation } from "@/store/context";
+import { isActive, toolStatus } from "@/store/tool-status";
 import { useRowOpen } from "@/store/ui-prefs";
-import { CuratorButton, isActive } from "@/tools/common";
+import { CuratorButton } from "@/tools/common";
 import { runningPhrase } from "@/tools/registry";
 import { type ExplorationGroup, groupCountLabel } from "./grouping";
-import { toolStatus } from "./tool-call-slot";
 
 type ToolStep = Extract<ExplorationGroup["steps"][number], { kind: "tool" }>;
 

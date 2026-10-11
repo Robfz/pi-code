@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { SubagentResult } from "@/lib/subagent-details";
-import { agentStatus, formatUsage } from "./subagent";
+import { formatUsage, subagentStatus } from "./subagent";
 import { fixtureToolCall, propsAt, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
 
@@ -274,9 +274,9 @@ describe("subagent modes", () => {
   });
 
   it("status and usage helpers", () => {
-    expect(agentStatus(result({ exitCode: -1 }), false)).toBe("failed");
-    expect(agentStatus(result({ stopReason: "aborted", durationMs: 1 }), false)).toBe("failed");
-    expect(agentStatus(result({}), false)).toBe("done");
+    expect(subagentStatus(result({ exitCode: -1 }), false)).toBe("failed");
+    expect(subagentStatus(result({ stopReason: "aborted", durationMs: 1 }), false)).toBe("failed");
+    expect(subagentStatus(result({}), false)).toBe("done");
     expect(formatUsage({ turns: 1, input: 12_345, output: 1_500_000, cost: 0.5 })).toBe(
       "1 turn ↑12k ↓1.5M $0.5000",
     );

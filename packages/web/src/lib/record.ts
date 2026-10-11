@@ -17,3 +17,8 @@ export function num(value: unknown, key: string): number | undefined {
   const v = asRecord(value)?.[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
+
+/** Tool arguments' file path (`path`, or `file_path` as some models send). */
+export function argPath(args: unknown): string | undefined {
+  return str(args, "path") ?? str(args, "file_path");
+}

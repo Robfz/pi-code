@@ -7,11 +7,13 @@ import {
   type AssistantMessage,
   effectiveStopReason,
   type SessionEntry,
+  thinkingKey,
   type UserMessage,
 } from "@pi-code/protocol";
 import { countPatchLines } from "@/components/diff/parse-patch";
+import { entryView } from "@/features/conversation/transcript/entry-view";
 import { lineCount } from "@/lib/content";
-import { asRecord, str } from "@/lib/record";
+import { argPath, asRecord, str } from "@/lib/record";
 import { SPAWN_TOOL_NAME, subagentCost } from "@/lib/subagent-details";
 import type { ConversationState } from "./conversation-store";
 import { memoByIdentity, selectActiveBranch } from "./selectors";
@@ -29,7 +31,7 @@ export type Step =
       live?: boolean;
       startedAt?: number;
       endedAt?: number;
-      /** `${message timestamp}:${content index}`: its `thinkingMs` key once committed. */
+      /** Its `thinkingMs` key (`thinkingKey`) once committed. */
       durationKey?: string;
     }
   | {
@@ -45,7 +47,7 @@ export type Step =
     }
   /** An assistant message's error, aborted or truncated notice. */
   | { kind: "stop"; key: string; entryId: string; message: AssistantMessage }
-  /** Any other entry the transcript shows (`!cmd`, custom messages, dividers, markers). */
+  /** Any other entry the transcript shows (`entryView`: `!cmd`, custom messages, dividers, markers). */
   | { kind: "entry"; key: string; entryId: string; entry: SessionEntry };
 
 export interface Turn {
@@ -57,35 +59,12 @@ export interface Turn {
   steps: Step[];
 }
 
-/** Whether the transcript shows an entry other than a user or assistant message. */
-function isShownEntry(entry: SessionEntry): boolean {
-  switch (entry.type) {
-    case "message":
-      switch (entry.message.role) {
-        case "bashExecution":
-        case "compactionSummary":
-        case "branchSummary":
-          return true;
-        case "custom":
-          return entry.message.display;
-        default:
-          return false;
-      }
-    case "custom_message":
-      return entry.display;
-    case "compaction":
-    case "branch_summary":
-    case "model_change":
-    case "thinking_level_change":
-      return true;
-    default:
-      return false;
-  }
-}
-
-/** Key of a text or thinking block, shared by its streaming and committed forms. */
+/**
+ * Key of a text or thinking block, shared by its streaming and committed forms: its `thinkingKey`
+ * (a streaming message without a timestamp has `live:` keys).
+ */
 export function blockKey(timestamp: number | undefined, index: number): string {
-  return `${timestamp ?? "live"}:${index}`;
+  return timestamp === undefined ? `live:${index}` : thinkingKey(timestamp, index);
 }
 
 function assistantSteps(entryId: string, message: AssistantMessage): Step[] {
@@ -128,26 +107,38 @@ const entrySteps = memoByIdentity((entry: SessionEntry): Step[] => {
   if (entry.type === "message" && entry.message.role === "assistant") {
     return assistantSteps(entry.id, entry.message);
   }
-  return isShownEntry(entry) ? [{ kind: "entry", key: entry.id, entryId: entry.id, entry }] : [];
+  return entryView(entry) ? [{ kind: "entry", key: entry.id, entryId: entry.id, entry }] : [];
 });
 
+/** The latest turn built from each turn's first entry, reused while its entries are the same. */
+const builtTurns = new WeakMap<SessionEntry, Turn>();
+
+function sameEntries(a: readonly SessionEntry[], b: readonly SessionEntry[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+}
+
+/**
+ * Split at each user message. A turn whose entries are unchanged keeps its identity, so a commit
+ * re-renders only the turn it lands in.
+ */
 function buildTurns(branch: SessionEntry[]): Turn[] {
-  const turns: Turn[] = [];
-  let current: Turn | undefined;
+  const groups: { head: SessionEntry; id: string; user?: UserMessage; entries: SessionEntry[] }[] =
+    [];
   for (const entry of branch) {
     if (entry.type === "message" && entry.message.role === "user") {
-      current = { id: entry.id, user: entry.message, entries: [], steps: [] };
-      turns.push(current);
+      groups.push({ head: entry, id: entry.id, user: entry.message, entries: [] });
       continue;
     }
-    if (!current) {
-      current = { id: "start", entries: [], steps: [] };
-      turns.push(current);
-    }
-    current.entries.push(entry);
-    current.steps.push(...entrySteps(entry));
+    if (groups.length === 0) groups.push({ head: entry, id: "start", entries: [] });
+    groups.at(-1)?.entries.push(entry);
   }
-  return turns;
+  return groups.map(({ head, id, user, entries }) => {
+    const previous = builtTurns.get(head);
+    if (previous && sameEntries(previous.entries, entries)) return previous;
+    const turn: Turn = { id, user, entries, steps: entries.flatMap(entrySteps) };
+    builtTurns.set(head, turn);
+    return turn;
+  });
 }
 
 const turnsOf = memoByIdentity(buildTurns);
@@ -166,13 +157,16 @@ export interface TurnStats {
   finalText?: string;
 }
 
+/** Index of the last thinking or tool step (-1 without one): the final text comes after it. */
+export function lastWorkIndex(steps: readonly Step[]): number {
+  return steps.findLastIndex((step) => step.kind === "thinking" || step.kind === "tool");
+}
+
 /** Final text of a list of steps (see `TurnStats.finalText`). */
-export function finalText(steps: Step[]): string | undefined {
-  let start = 0;
-  steps.forEach((step, index) => {
-    if (step.kind === "thinking" || step.kind === "tool") start = index + 1;
-  });
-  const texts = steps.slice(start).flatMap((step) => (step.kind === "text" ? [step.text] : []));
+export function finalText(steps: readonly Step[]): string | undefined {
+  const texts = steps
+    .slice(lastWorkIndex(steps) + 1)
+    .flatMap((step) => (step.kind === "text" ? [step.text] : []));
   return texts.length > 0 ? texts.join("\n\n") : undefined;
 }
 
@@ -199,7 +193,7 @@ export function turnStats(turn: Turn): TurnStats {
         continue;
       }
       const args = calls.get(message.toolCallId);
-      const path = str(args, "path") ?? str(args, "file_path");
+      const path = argPath(args);
       if (!path) continue;
       paths.add(path);
       if (message.toolName === "write") {

@@ -306,6 +306,7 @@ function ContentBody({ props, urls }: { props: ToolRendererProps; urls: string[]
   const d = details(props);
   const links = urls.length > 1 || props.result === undefined ? urls : [];
   if (props.result === undefined) {
+    if (links.length === 0 && !isActive(props.status)) return null;
     return (
       <div className="flex flex-col gap-2">
         <UrlList urls={links} />

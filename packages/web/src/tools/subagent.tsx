@@ -40,13 +40,13 @@ import {
 } from "./registry";
 import { errorLine, ToolRow } from "./tool-row";
 
-export type AgentStatus = "running" | "done" | "failed";
+export type SubagentStatus = "running" | "done" | "failed";
 
 /**
  * A card's status. Parallel placeholders have `exitCode: -1`; a single / chain step that is
  * still running has no `durationMs` yet (set when its process exits).
  */
-export function agentStatus(result: SubagentResult, callActive: boolean): AgentStatus {
+export function subagentStatus(result: SubagentResult, callActive: boolean): SubagentStatus {
   if (result.exitCode === -1) return callActive ? "running" : "failed";
   if (callActive && result.durationMs === undefined) return "running";
   if (result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted") {
@@ -150,7 +150,7 @@ function NestedToolRow({ call, agentRunning }: { call: NestedToolCall; agentRunn
   );
 }
 
-function StatusIcon({ status }: { status: AgentStatus }) {
+function StatusIcon({ status }: { status: SubagentStatus }) {
   if (status === "running") {
     return (
       <LoaderIcon aria-label="Running" className="size-3.5 animate-spin text-muted-foreground" />
@@ -167,7 +167,7 @@ function AgentCard({
   mode,
 }: {
   result: SubagentResult;
-  status: AgentStatus;
+  status: SubagentStatus;
   mode: SubagentDetails["mode"];
 }) {
   const tools = nestedToolCalls(result.messages);
@@ -285,7 +285,7 @@ function argTasks(args: unknown): { mode: SubagentDetails["mode"]; tasks: ArgTas
 }
 
 function progressLabel(details: SubagentDetails, active: boolean): string {
-  const statuses = details.results.map((r) => agentStatus(r, active));
+  const statuses = details.results.map((r) => subagentStatus(r, active));
   const done = statuses.filter((s) => s !== "running").length;
   const failed = statuses.filter((s) => s === "failed").length;
   const running = statuses.length - done;
@@ -356,7 +356,7 @@ function SubagentBody(props: ToolRendererProps) {
           // biome-ignore lint/suspicious/noArrayIndexKey: results keep their task position
           key={i}
           result={result}
-          status={agentStatus(result, active)}
+          status={subagentStatus(result, active)}
           mode={details.mode}
         />
       ))}

@@ -139,13 +139,20 @@ export interface LiveState {
   /** RPC `bash` runs, by command id. */
   bash: Record<string, BashRun>;
   /**
-   * Thinking durations by `${assistantMessage.timestamp}:${contentIndex}`. They outlive runs, so
-   * a committed thinking block can look its duration up.
+   * Thinking durations by `thinkingKey(assistantMessage.timestamp, contentIndex)`, the latest
+   * `MAX_THINKING_DURATIONS`. They outlive runs, so a committed thinking block can look its
+   * duration up.
    */
   thinkingMs: Record<string, number>;
 }
 
 export const MAX_NOTICES = 20;
+export const MAX_THINKING_DURATIONS = 500;
+
+/** A thinking block's `thinkingMs` key: its assistant message's `timestamp` and content index. */
+export function thinkingKey(timestamp: number, contentIndex: number): string {
+  return `${timestamp}:${contentIndex}`;
+}
 
 export function initialLiveState(): LiveState {
   return {
@@ -234,6 +241,12 @@ export function reduceLive(state: LiveState, event: ServerEvent): LiveState {
       // state, stats, git_status, and unknown types don't touch live state.
       return state;
   }
+}
+
+/** The last `max` entries of a record, by insertion order (its keys aren't integers). */
+function latest<T>(record: Record<string, T>, max: number): Record<string, T> {
+  const entries = Object.entries(record);
+  return entries.length > max ? Object.fromEntries(entries.slice(-max)) : record;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +434,9 @@ function reduceMessageUpdate(
       ) {
         return next;
       }
-      const key = `${timestamp}:${event.contentIndex}`;
-      return { ...next, thinkingMs: { ...next.thinkingMs, [key]: receivedAt - startedAt } };
+      const key = thinkingKey(timestamp, event.contentIndex);
+      const thinkingMs = { ...next.thinkingMs, [key]: receivedAt - startedAt };
+      return { ...next, thinkingMs: latest(thinkingMs, MAX_THINKING_DURATIONS) };
     }
     case "toolcall_start":
       return setBlock(state, event.contentIndex, {

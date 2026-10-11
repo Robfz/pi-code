@@ -1,12 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import { GitCompareIcon } from "lucide-react";
-import { Fragment, type ReactNode, useMemo } from "react";
+import { Fragment, type ReactNode } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { useReviewStore } from "@/features/review/review-state";
 import { formatCost, formatSeconds } from "@/lib/time";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { useConversation } from "@/store/context";
-import { type Turn, type TurnStats, turnStats } from "@/store/turns";
+import type { TurnStats } from "@/store/turns";
 import { useUiPrefs } from "@/store/ui-prefs";
 
 /** "4 files +120 −30": opens the review's Changes tab (the pane on desktop, the page on phone). */
@@ -44,8 +44,7 @@ function FilesChip({ files }: { files: NonNullable<TurnStats["files"]> }) {
  * in Compact, whose "Worked" row has it), cost and the files chip, then Copy for the final text.
  * Copy shows on the turn's hover where the pointer can hover, always on touch.
  */
-export function TurnFooter({ turn }: { turn: Turn }) {
-  const stats = useMemo(() => turnStats(turn), [turn]);
+export function TurnFooter({ stats }: { stats: TurnStats }) {
   const compact = useUiPrefs((s) => s.density === "compact");
   const parts: { key: string; node: ReactNode }[] = [];
   if (!compact && stats.durationMs !== undefined) {

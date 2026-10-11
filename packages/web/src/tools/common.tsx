@@ -6,12 +6,14 @@ import type { ReactNode } from "react";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { contentImages, imageSrc, toolResultText } from "@/lib/content";
-import { asRecord, str } from "@/lib/record";
+import { asRecord } from "@/lib/record";
 import { cn } from "@/lib/utils";
+import { isActive } from "@/store/tool-status";
 import { OutputBlock } from "./generic";
 import type { ToolRendererProps, ToolStatus } from "./registry";
 
-export { asRecord, num, type Rec, str } from "@/lib/record";
+export { argPath, asRecord, num, type Rec, str } from "@/lib/record";
+export { isActive } from "@/store/tool-status";
 
 export function strList(value: unknown, key: string): string[] {
   const v = asRecord(value)?.[key];
@@ -19,11 +21,6 @@ export function strList(value: unknown, key: string): string[] {
 }
 
 export { truncate } from "@/lib/content";
-
-/** Tool arguments' file path (`path`, or `file_path` as some models send). */
-export function argPath(args: unknown): string | undefined {
-  return str(args, "path") ?? str(args, "file_path");
-}
 
 const LANGS: Record<string, string> = {
   ts: "typescript",
@@ -144,11 +141,6 @@ export function Images({ images }: { images: ImageContent[] }) {
 /** "Running…" placeholder while there's nothing else to show. */
 export function Pending({ label = "Running…" }: { label?: string }) {
   return <p className="text-xs text-muted-foreground">{label}</p>;
-}
-
-/** Whether the call is still going (arguments streaming or executing). */
-export function isActive(status: ToolStatus): boolean {
-  return status === "running" || status === "streaming";
 }
 
 /** A row's verb for the call's status. */

@@ -9,7 +9,8 @@ export type ToolCallViewProps = Omit<ToolRendererProps, "expanded">;
 
 /**
  * A tool call as a `ToolRow`: the renderer's label, and its body when expanded. Open by default
- * in Detailed, and while running for renderers that `expandWhileRunning`.
+ * in Detailed, and while running for renderers that `expandWhileRunning`. A finished call without
+ * a result (never executed) has no body.
  */
 export const ToolCallView = memo(function ToolCallView(props: ToolCallViewProps) {
   const renderer = getToolRenderer(props.toolName);
@@ -19,6 +20,8 @@ export const ToolCallView = memo(function ToolCallView(props: ToolCallViewProps)
   );
   const rendererProps: ToolRendererProps = { ...props, expanded };
   const { Body } = renderer;
+  const hasBody =
+    isActive(props.status) || props.result !== undefined || props.partialResult !== undefined;
 
   return (
     <ToolRow
@@ -34,7 +37,7 @@ export const ToolCallView = memo(function ToolCallView(props: ToolCallViewProps)
       open={expanded}
       onOpenChange={setExpanded}
     >
-      <Body {...rendererProps} />
+      {hasBody ? <Body {...rendererProps} /> : undefined}
     </ToolRow>
   );
 });

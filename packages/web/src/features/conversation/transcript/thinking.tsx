@@ -27,7 +27,7 @@ export function Thinking({
   redacted?: boolean;
   startedAt?: number;
   endedAt?: number;
-  /** `${message timestamp}:${content index}` of a committed block. */
+  /** A committed block's `thinkingMs` key (`thinkingKey`). */
   durationKey?: string;
 }) {
   const recorded = useConversation((s) =>

@@ -1,31 +1,14 @@
 import { useMemo } from "react";
 import { useConversation } from "@/store/context";
-import type { ConversationState } from "@/store/conversation-store";
 import { selectToolResults } from "@/store/selectors";
-import type { ToolResultPayload, ToolStatus } from "@/tools/registry";
+import { toolStatus } from "@/store/tool-status";
+import type { ToolResultPayload } from "@/tools/registry";
 import { ToolCallView } from "@/tools/tool-call-view";
 
 function asPayload(result: unknown): ToolResultPayload | undefined {
   if (typeof result !== "object" || result === null) return undefined;
   const { content, details } = result as { content?: unknown; details?: unknown };
   return { content: Array.isArray(content) ? content : [], details };
-}
-
-/**
- * A call's status: its committed result's, else its live run's; a call with neither runs while
- * the run is active.
- */
-export function toolStatus(
-  s: ConversationState,
-  toolCallId: string,
-  streaming = false,
-): ToolStatus {
-  const committed = selectToolResults(s).get(toolCallId);
-  if (committed) return committed.isError ? "error" : "done";
-  const live = s.live.tools[toolCallId];
-  if (live) return live.status;
-  if (streaming) return "streaming";
-  return s.live.run.active ? "running" : "done";
 }
 
 /**

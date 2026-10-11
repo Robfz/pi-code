@@ -1,6 +1,8 @@
 import type { SessionEntry } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
-import type { Step } from "@/store/turns";
+import { type Step, selectTurns } from "@/store/turns";
+import { fixtureNames, fixtureTranscript } from "@/test/fixtures";
+import { hydratedStore } from "@/test/render";
 import { failedToolCalls, foldSteps, groupCountLabel, groupSteps, type Item } from "./grouping";
 
 const tool = (id: string, toolName: string): Step => ({
@@ -30,6 +32,17 @@ const shape = (items: Item[]) =>
   items.map((item) => (item.kind === "group" ? item.steps.map((s) => s.key) : item.key));
 
 describe("groupSteps", () => {
+  it.each(fixtureNames())("keeps every step of %s exactly once, in order (Balanced)", (name) => {
+    const turns = selectTurns(hydratedStore({ transcript: fixtureTranscript(name) }).getState());
+    for (const turn of turns) {
+      const items = groupSteps(turn.steps, failedToolCalls(turn.entries));
+      const keys = items.flatMap((item) =>
+        item.kind === "group" ? item.steps.map((step) => step.key) : [item.key],
+      );
+      expect(keys).toEqual(turn.steps.map((step) => step.key));
+    }
+  });
+
   it("groups consecutive exploration calls, keyed by the first", () => {
     const items = groupSteps([tool("r1", "read"), tool("g1", "grep"), tool("f1", "find")]);
     expect(shape(items)).toEqual([["r1", "g1", "f1"]]);

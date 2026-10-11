@@ -40,7 +40,8 @@ export function formatSeconds(ms: number): string {
 
 /** A tool call's duration: "12ms", "1.2s", then "1m 4s". */
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
-  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`;
-  return formatSeconds(ms);
+  const rounded = Math.max(0, Math.round(ms));
+  if (rounded < 1000) return `${rounded}ms`;
+  if (rounded < 59_950) return `${(rounded / 1000).toFixed(1)}s`;
+  return formatSeconds(rounded);
 }

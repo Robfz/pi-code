@@ -1,10 +1,11 @@
 import { activeBranch, initialLiveState, type SessionEntry } from "@pi-code/protocol";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useUiPrefs } from "@/store/ui-prefs";
-import { fixtureNames, fixtureTranscript, makeAgent } from "@/test/fixtures";
+import { fixtureEvents, fixtureNames, fixtureTranscript, makeAgent } from "@/test/fixtures";
 import { hydratedStore, renderWithStore } from "@/test/render";
+import { LiveSection } from "./live-section";
 import { Transcript } from "./transcript";
 
 function count(branch: SessionEntry[], predicate: (entry: SessionEntry) => boolean): number {
@@ -145,11 +146,12 @@ describe("transcript rendering details", () => {
     expect(screen.getAllByTestId("tool-call")[0]).toHaveAttribute("data-status", "error");
   });
 
-  it("marks !! bash executions as excluded from context and shows exit codes", async () => {
+  it("marks !! bash executions as excluded from context and shows non-zero exit codes", async () => {
     await renderTranscript("bash-command");
     const runs = screen.getAllByTestId("bash-execution");
     expect(runs.some((el) => el.dataset.excluded === "true")).toBe(true);
     expect(screen.getByText("exit 3")).toBeInTheDocument();
+    expect(screen.queryByText("exit 0")).toBeNull();
   });
 
   it("renders user text from array content and image thumbnails", async () => {
@@ -210,6 +212,19 @@ describe("transcript rendering details", () => {
       "false",
     );
     expect(screen.getByText("answer").tagName).toMatch(/STRONG|SPAN/);
+  });
+});
+
+describe("thinking durations end to end", () => {
+  it("a committed block reads the duration the reducer recorded while it streamed", async () => {
+    const store = hydratedStore({ agent: makeAgent() });
+    fixtureEvents("plain-answer").forEach((event, index) => {
+      store.getState().apply(event, index + 1);
+    });
+    expect(store.getState().live.streaming).toBeUndefined();
+    expect(Object.keys(store.getState().live.thinkingMs)).toHaveLength(1);
+    await renderWithStore(<Transcript />, store);
+    expect(screen.getByTestId("thinking")).toHaveTextContent(/^Thoughtfor \d+s$/);
   });
 });
 
@@ -276,5 +291,71 @@ describe("the live turn", () => {
     await renderWithStore(<Transcript />, store);
     const live = screen.getByTestId("live-turn");
     expect(within(live).getByTestId("tool-call")).toHaveAttribute("data-status", "running");
+  });
+
+  it("leaves calls unanswered in an earlier turn done during a later run", async () => {
+    const entry = (id: string, parentId: string | null, message: unknown) =>
+      ({
+        type: "message",
+        id,
+        parentId,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message,
+      }) as unknown as SessionEntry;
+    const read = (id: string, path: string) => ({
+      type: "toolCall",
+      id,
+      name: "read",
+      arguments: { path },
+    });
+    const transcript = {
+      entries: [
+        entry("u1", null, { role: "user", content: "look", timestamp: 0 }),
+        entry("a1", "u1", {
+          role: "assistant",
+          content: [read("old", "src/old.ts"), read("older", "src/older.ts")],
+          stopReason: "aborted",
+          timestamp: 1,
+        }),
+        entry("u2", "a1", { role: "user", content: "again", timestamp: 2 }),
+      ],
+      leafId: "u2",
+    };
+    const live = {
+      ...initialLiveState(),
+      run: { active: true },
+      streaming: {
+        timestamp: 3,
+        blocks: { 0: { type: "text" as const, text: "Hi", done: false } },
+      },
+    };
+    const store = hydratedStore({ agent: makeAgent(), transcript, live });
+    const ui = (
+      <>
+        <Transcript />
+        <LiveSection />
+      </>
+    );
+
+    useUiPrefs.setState({ density: "compact" });
+    await renderWithStore(ui, store);
+    expect(screen.getByTestId("live-status")).toHaveTextContent("Working");
+
+    cleanup();
+    useUiPrefs.setState({ density: "balanced" });
+    await renderWithStore(ui, store);
+    expect(screen.getByTestId("live-status")).toHaveTextContent("Working");
+    const group = screen.getByTestId("exploration-group");
+    expect(group).toHaveAttribute("data-status", "done");
+    expect(group).toHaveTextContent("Explored");
+
+    cleanup();
+    useUiPrefs.setState({ density: "detailed" });
+    await renderWithStore(ui, store);
+    const rows = screen.getAllByTestId("tool-call");
+    expect(rows.map((row) => row.dataset.status)).toEqual(["done", "done"]);
+    for (const row of rows) {
+      expect(row.querySelector('[data-slot="row-verb"]')).not.toHaveClass("shimmer");
+    }
   });
 });

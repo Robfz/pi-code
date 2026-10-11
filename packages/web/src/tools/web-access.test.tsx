@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { fixtureToolCall, propsAt, rowBody, rowParts } from "./testing";
 import { ToolCallView } from "./tool-call-view";
-import { sourcesFromText } from "./web-access";
+import { fetchContentRenderer, getSearchContentRenderer, sourcesFromText } from "./web-access";
 
 const row = () => screen.getByTestId("tool-call");
 const header = () => row().firstElementChild as HTMLElement;
@@ -344,5 +344,23 @@ describe("fetch_content / get_search_content", () => {
     await expand();
     expect(screen.getByRole("link", { name: "https://example.com/doc" })).toBeInTheDocument();
     expect(await screen.findByText("Stored page body")).toBeInTheDocument();
+  });
+
+  it("renders no body without a result, URLs or progress", () => {
+    for (const { Body } of [fetchContentRenderer, getSearchContentRenderer]) {
+      const { container, unmount } = render(
+        <Body
+          toolCallId="f3"
+          toolName="fetch_content"
+          args={{}}
+          status="done"
+          isError={false}
+          partialResult={{ content: [] }}
+          expanded
+        />,
+      );
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
   });
 });

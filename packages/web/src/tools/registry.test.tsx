@@ -91,6 +91,18 @@ describe("tool renderers", () => {
     expect(within(rowBody(row)).getByText("Command aborted")).toHaveClass("text-destructive");
   });
 
+  it("a finished call without a result has no body", () => {
+    for (const toolName of ["read", "grep", "edit", "bash", "fetch_content", "mystery"]) {
+      const { unmount } = render(
+        <ToolCallView {...base} toolName={toolName} status="done" isError={false} />,
+      );
+      const row = screen.getByTestId("tool-call");
+      expect(within(row).queryByRole("button")).toBeNull();
+      expect(row.querySelector(".lucide-chevron-right")).toBeNull();
+      unmount();
+    }
+  });
+
   it("Detailed density expands every tool", () => {
     useUiPrefs.setState({ density: "detailed" });
     render(

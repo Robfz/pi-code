@@ -17,7 +17,9 @@ import {
   isDialogRequest,
   type LiveState,
   MAX_NOTICES,
+  MAX_THINKING_DURATIONS,
   reduceLive,
+  thinkingKey,
 } from "./live.ts";
 
 // ---------------------------------------------------------------------------
@@ -707,6 +709,25 @@ describe("timing", () => {
     );
     expect(next.streaming).toBeUndefined();
     expect(next.thinkingMs).toEqual({ "7000:1": 12_000, "8000:0": 1500 });
+  });
+
+  it(`thinkingMs keeps the latest ${MAX_THINKING_DURATIONS} durations`, () => {
+    const thinkingMs = Object.fromEntries(
+      Array.from({ length: MAX_THINKING_DURATIONS }, (_, i) => [thinkingKey(i, 0), i]),
+    );
+    const s = reduceAll(
+      [
+        pi({ type: "message_start", message: assistant({ timestamp: 9000 }) }, 1000),
+        update({ type: "thinking_start", contentIndex: 0 }, 1000),
+        update({ type: "thinking_end", contentIndex: 0, content: "hm" }, 1500),
+      ],
+      { ...initialLiveState(), thinkingMs },
+    );
+    const keys = Object.keys(s.thinkingMs);
+    expect(keys).toHaveLength(MAX_THINKING_DURATIONS);
+    expect(keys[0]).toBe(thinkingKey(1, 0));
+    expect(keys.at(-1)).toBe(thinkingKey(9000, 0));
+    expect(s.thinkingMs[thinkingKey(9000, 0)]).toBe(500);
   });
 });
 

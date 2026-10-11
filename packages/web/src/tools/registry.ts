@@ -9,14 +9,9 @@
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { splitPath } from "@/lib/paths";
+import type { ActiveCall, ToolStatus } from "@/store/tool-status";
 
-export type ToolStatus =
-  /** Assistant is still streaming the call's arguments. */
-  | "streaming"
-  /** Arguments complete, waiting for / running execution. */
-  | "running"
-  | "done"
-  | "error";
+export type { ToolStatus } from "@/store/tool-status";
 
 /** `{ content, details }` of a tool result (committed `toolResult` or `tool_execution_end`). */
 export interface ToolResultPayload {
@@ -88,18 +83,8 @@ export function getToolRenderer(toolName: string): ToolRenderer {
   return fallback;
 }
 
-/** A call as `runningPhrase` reads it. */
-export interface PhraseCall {
-  toolCallId: string;
-  toolName: string;
-  args: unknown;
-  argsText?: string;
-  /** The assistant is still streaming its arguments. */
-  streaming?: boolean;
-}
-
 /** "Reading foo.ts": a running call's verb and short target (a path's basename, else the text). */
-export function runningPhrase(call: PhraseCall): string {
+export function runningPhrase(call: ActiveCall): string {
   const { verb, target } = getToolRenderer(call.toolName).label({
     toolCallId: call.toolCallId,
     toolName: call.toolName,

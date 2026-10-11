@@ -136,13 +136,15 @@ type Step =
   | { kind: "thinking"; key: string; text: string; redacted: boolean; startedAt?: number; endedAt?: number }
   | { kind: "tool"; key: string; toolCallId: string; toolName: string; args: unknown }
   | { kind: "stop"; key: string; message: AssistantMessage } // error, aborted or truncated notice
-  | { kind: "entry"; key: string; entry: SessionEntry };    // anything else renderEntry shows
+  | { kind: "entry"; key: string; entry: SessionEntry };    // anything else entryView describes
 ```
 
 - Tool results produce no step; `ToolCallSlot` pairs each call with its result by `toolCallId`.
-- **The live turn** is the last turn while `live.run.active`. Its steps continue with the streaming message's blocks (thinking blocks carrying `startedAt` / `endedAt`, tool calls with their raw `argsText`) and the orphan tool runs. A `pendingUser` starts a new live turn with that message at 70% opacity. Committed turns render as memoized `TurnView`s; only the live turn subscribes to live state, so token deltas re-render only it.
+- `entryView(entry)` (`transcript/entry-view.ts`) says which other entries show and as what (`!cmd` runs, displayed custom messages, compaction and branch summaries, model and thinking level changes); `selectTurns` makes their steps and `renderEntry` renders them from it.
+- A rebuilt turn whose entries are the same objects as before keeps its identity, so a commit re-renders only the turn it lands in.
+- **The live turn** is the last turn while `live.run.active`. Its steps (`useLiveSteps`, `transcript/live-steps.ts`) continue with the streaming message's blocks (thinking blocks carrying `startedAt` / `endedAt`, tool calls with their raw `argsText`) and the orphan tool runs. A `pendingUser` starts a new live turn with that message at 70% opacity. Committed turns render as memoized `TurnView`s; only the live turn subscribes to live state, so token deltas re-render only it.
 - **The final text** is the run of text steps after the turn's last thinking or tool step. A turn ending in a tool call has none.
-- `!cmd` runs in flight render after the turns.
+- `!cmd` runs in flight render after the turns. A `!cmd` row shows its command, then its exit code when non-zero (`status-error`).
 
 ### User message
 
@@ -166,11 +168,12 @@ A full-column-width box: `--user-message` surface, 1px hairline, 10px radius, 11
 ```
 
 - **Icon:** 14px lucide, `faint-foreground`.
+- **Status:** `toolStatus` (`store/tool-status.ts`): the committed result's, else the live run's, else streaming while the assistant streams the arguments. A call with none of these is running while the run is active if it's in the live turn (the branch's last turn, or the streaming message once a pending user message starts a new one); one left unanswered in an earlier turn (an aborted message) is done. Exploration groups and the live-status row use the same function.
 - **Verb:** weight 500, `foreground`. Running or streaming: present tense with `shimmer`. Done: past tense, quiet. Failed: the icon becomes `CircleAlert` and the verb turns `status-error` ("Edit failed").
 - **Target:** a path is its basename in `foreground` followed by its directory in `faint-foreground` (directory hidden below 1024px; relative to the conversation's folder when inside it); a command or pattern is mono 12.5px `subtle-foreground`; other text is `foreground`. Truncated with an ellipsis.
 - **Meta:** `muted-foreground`, tabular numbers; `+n −m` in diff colours. A failed call appends the first line of its error.
 - **Duration:** `faint-foreground` 12px in the tail: committed calls use `toolResult.durationMs`, live ones `ToolRun.durationMs`, running ones the elapsed time since `ToolRun.startedAt`; none when unknown.
-- **Body:** the renderer's `Body` in a bordered `--card` surface, 8px radius, without nested boxes. `read` code and `edit` / `write` diffs fill it edge to edge (no inner frame or header; the copy button shows on hover); `bash` is one terminal surface: the command after a faint `$`, the output in `subtle-foreground`, then `exit N` (faint, `status-error` when non-zero). A call with a curator URL shows its Review button under the row while collapsed.
+- **Body:** the renderer's `Body` in a bordered `--card` surface, 8px radius, without nested boxes. `read` code and `edit` / `write` diffs fill it edge to edge (no inner frame or header; the copy button shows on hover); `bash` is one terminal surface: the command after a faint `$`, the output in `subtle-foreground`, then `exit N` (faint, `status-error` when non-zero). A finished call with neither a result nor a partial result (never executed) has no body. A call with a curator URL shows its Review button under the row while collapsed.
 
 Each renderer describes its row through `label()`:
 
@@ -247,9 +250,9 @@ One persisted preference, `density: "compact" | "balanced" | "detailed"` (`store
 The last line of the live turn: a `shimmer` phrase and a faint elapsed timer, "Running pnpm test · 42s". It shows while the run is active or a compaction or retry is pending, and:
 
 - in Compact, always;
-- in Balanced and Detailed, only when no row above shimmers: no tool call running or streaming, and no live thinking block.
+- in Balanced and Detailed, only when no row above shimmers: no tool call running or streaming (by `toolStatus`), and no live thinking block.
 
-The phrase is the first match of: "Compacting context"; "Retrying 2/3 · {errorMessage}"; "Thinking" (a live thinking block); the running tool's present verb and short target ("Reading foo.ts"); "Working". The timer counts from `live.run.startedAt`, every second, and is absent without it. A run error keeps its red alert box under the turn.
+The phrase is the first match of: "Compacting context"; "Retrying 2/3 · {errorMessage}"; "Thinking" (a live thinking block); the running tool's present verb and short target ("Reading foo.ts"); "Working". `selectLiveActivity` (`store/tool-status.ts`) picks the case, with the running call for the tool case; `LiveStatusRow` words it through the tool renderers. The timer counts from `live.run.startedAt`, every second, and is absent without it. A run error keeps its red alert box under the turn.
 
 ### Turn footer
 
@@ -313,7 +316,7 @@ interface LiveRun {
 
 interface LiveState {
   // …
-  /** Thinking durations by `${assistantMessage.timestamp}:${contentIndex}`; outlives runs. */
+  /** Thinking durations by thinkingKey(assistantMessage.timestamp, contentIndex), the latest 500; outlives runs. */
   thinkingMs: Record<string, number>;
 }
 ```
@@ -321,18 +324,19 @@ interface LiveState {
 - **Blocks:** `startedAt` when the block is created (its `*_start`, or the delta that creates it), kept through deltas; `endedAt` at its `*_end`.
 - **Tool runs:** `startedAt` at `tool_execution_start`, kept through updates and the end; `durationMs` at `tool_execution_end`, from the event's `durationMs`, else `receivedAt − startedAt`.
 - **Run:** `startedAt` at `agent_start`; settling drops it with the rest of the run.
-- **Thinking durations:** at `thinking_end`, `endedAt − startedAt` is stored in `thinkingMs` under the streaming message's `timestamp` and the block's `contentIndex`. Settling keeps it, so a committed block looks up its duration by its message's `timestamp` and its index in `content`. It lives as long as the agent's live state on the server: reloads keep it, and only a restart of the pi process or the server loses it.
+- **Thinking durations:** at `thinking_end`, `endedAt − startedAt` is stored in `thinkingMs` under `thinkingKey(timestamp, contentIndex)` (exported by `@pi-code/protocol`: `"${timestamp}:${contentIndex}"`) of the streaming message and the block. Settling keeps it, so a committed block looks up its duration by the same key from its message's `timestamp` and its index in `content` (the web's step keys are built with it too). It keeps the latest `MAX_THINKING_DURATIONS` (500) entries, dropping the oldest by insertion order, and lives as long as the agent's live state on the server: reloads keep it, and only a restart of the pi process or the server loses it.
+- The web store fills fields a snapshot lacks from `initialLiveState()` on hydrate, so a client newer than the server it talks to still gets every field.
 - Committed calls use `ToolResultMessage.durationMs` and turns use `AssistantMessage.durationMs` (both absent on legacy messages). `packages/protocol` is typed against pi `1.1.0`, which has these fields and `tool_execution_end.durationMs`.
 - Every field derives from the event alone, so a snapshot at any `seq` plus the following events still equals the full reduction.
 - Elapsed times compare `receivedAt` with the device's clock, clamped at 0.
 
 ## Tests
 
-Reducer tests for the timing fields and the reconnect invariant over every fixture; unit tests for the status vocabulary, turns, grouping and the density migration; component tests for every row, the turn views per density, the live-status row, the footer, the header dropdown, Settings, the composer and the picker. Coverage per task in [`../plan/09-ui-overhaul.md`](../plan/09-ui-overhaul.md).
+Reducer tests for the timing fields, the `thinkingMs` cap and the reconnect invariant over every fixture; unit tests for the status vocabulary, the duration formats, turns (and their identity across commits), grouping (no step lost or repeated over every fixture) and the density migration; an end-to-end test from a fixture's events through the store to "Thought for Ns"; component tests for every row, the turn views per density, the live-status row, the footer, the header dropdown, Settings, the composer and the picker. Coverage per task in [`../plan/09-ui-overhaul.md`](../plan/09-ui-overhaul.md).
 
 ## Limitations
 
-- Thinking durations aren't persisted (pi records none): they're kept in the agent's live state on the server, so a block reads "Thought", without a duration, after the pi process or the server restarts, and in sessions opened from history.
+- Thinking durations aren't persisted (pi records none): they're kept in the agent's live state on the server, so a block reads "Thought", without a duration, after the pi process or the server restarts, in sessions opened from history, and once 500 newer blocks have finished.
 - The files chip opens the working tree's review, not a diff of that turn; its counts are the turn's.
 - Messages from pi before 1.1.0 have no `durationMs`: their tool rows show no duration, and a turn's duration ends where its last assistant message started.
 - Elapsed timers assume the device's clock agrees with the server's.

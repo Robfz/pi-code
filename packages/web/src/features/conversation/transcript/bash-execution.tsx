@@ -24,20 +24,14 @@ export function bashFromResult(command: string, output: string, result?: BashRes
 function Status({ bash, running }: { bash: BashView; running: boolean }) {
   if (running) return <span className="shimmer shrink-0">running…</span>;
   if (bash.cancelled) return <span className="shrink-0 text-muted-foreground">cancelled</span>;
-  if (bash.exitCode === undefined) return null;
-  return (
-    <span
-      className={cn(
-        "shrink-0 tabular-nums",
-        bash.exitCode === 0 ? "text-muted-foreground" : "text-status-error",
-      )}
-    >
-      exit {bash.exitCode}
-    </span>
-  );
+  if (bash.exitCode === undefined || bash.exitCode === 0) return null;
+  return <span className="shrink-0 text-status-error tabular-nums">exit {bash.exitCode}</span>;
 }
 
-/** `!` / `!!` command: command and exit code over its output (open unless long); muted when `!!`. */
+/**
+ * `!` / `!!` command: command and a non-zero exit code over its output (open unless long); muted
+ * when `!!`.
+ */
 export function BashExecutionView({
   bash,
   running = false,

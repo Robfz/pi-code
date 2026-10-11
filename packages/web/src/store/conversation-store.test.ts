@@ -1,4 +1,4 @@
-import { initialLiveState } from "@pi-code/protocol";
+import { initialLiveState, type LiveState } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
 import {
   applyAll,
@@ -125,5 +125,14 @@ describe("conversation store", () => {
     store.getState().hydrate(makeSnapshot({ seq: 42, agent: makeAgent({ cwd: "/x" }) }));
     expect(store.getState()).toMatchObject({ hydrated: true, seq: 42, agent: { cwd: "/x" } });
     expect(store.getState().live).toEqual(initialLiveState());
+  });
+
+  it("hydrate fills live fields an older server's snapshot lacks", () => {
+    const store = createConversationStore("a1");
+    const { thinkingMs: _, ...old } = initialLiveState();
+    store.getState().hydrate(makeSnapshot({ live: old as LiveState }));
+    expect(store.getState().live.thinkingMs).toEqual({});
+    store.getState().apply({ type: "pi", event: { type: "agent_start" } }, 1);
+    expect(store.getState().live.run.active).toBe(true);
   });
 });

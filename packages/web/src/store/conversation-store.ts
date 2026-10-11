@@ -82,7 +82,8 @@ export function createConversationStore(
         transcript: snapshot.transcript,
         stats: snapshot.stats,
         gitStatus: snapshot.gitStatus,
-        live: snapshot.live,
+        // Defaults for fields a server older than this bundle doesn't send.
+        live: { ...initialLiveState(), ...snapshot.live },
         seq: snapshot.seq,
         hydrated: true,
       });

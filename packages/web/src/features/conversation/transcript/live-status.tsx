@@ -3,9 +3,29 @@ import { useShallow } from "zustand/react/shallow";
 import { formatSeconds } from "@/lib/time";
 import { useElapsed } from "@/lib/use-elapsed";
 import { useConversation } from "@/store/context";
-import { selectActiveBranch, selectLiveActivity, selectRun } from "@/store/selectors";
+import { selectActiveBranch, selectRun } from "@/store/selectors";
+import { type LiveActivity, selectLiveActivity } from "@/store/tool-status";
 import { useUiPrefs } from "@/store/ui-prefs";
 import "@/tools";
+import { runningPhrase } from "@/tools/registry";
+
+/** "Compacting context", "Retrying 2/3 · reason", "Thinking", "Reading foo.ts" or "Working". */
+function phrase(activity: LiveActivity): string {
+  switch (activity.kind) {
+    case "compacting":
+      return "Compacting context";
+    case "retrying": {
+      const { attempt, maxAttempts, errorMessage } = activity.retry;
+      return `Retrying ${attempt}/${maxAttempts} · ${errorMessage}`;
+    }
+    case "thinking":
+      return "Thinking";
+    case "tool":
+      return runningPhrase(activity.call);
+    case "working":
+      return "Working";
+  }
+}
 
 function RunTimer({ startedAt }: { startedAt: number }) {
   const elapsed = useElapsed(startedAt) ?? 0;
@@ -47,7 +67,12 @@ function RunError() {
  * row above shimmers, so it never repeats a running row. Then the run's error, if any.
  */
 export function LiveStatusRow() {
-  const activity = useConversation(useShallow(selectLiveActivity));
+  const activity = useConversation(
+    useShallow((s) => {
+      const activity = selectLiveActivity(s);
+      return activity && { phrase: phrase(activity), rowShimmers: activity.rowShimmers };
+    }),
+  );
   const startedAt = useConversation((s) => s.live.run.startedAt);
   const compact = useUiPrefs((s) => s.density === "compact");
   const shown = activity !== undefined && (compact || !activity.rowShimmers);

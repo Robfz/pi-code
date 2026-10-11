@@ -12,7 +12,6 @@ import {
   type Transcript,
 } from "@pi-code/protocol";
 import { SPAWN_TOOL_NAME, subagentCost } from "@/lib/subagent-details";
-import { type PhraseCall, runningPhrase } from "@/tools/registry";
 import type { ConversationState } from "./conversation-store";
 
 export function memoByIdentity<K extends object, V>(compute: (key: K) => V): (key: K) => V {
@@ -94,82 +93,6 @@ const toolCallIdsOf = memoByIdentity((branch: SessionEntry[]) => {
 /** Ids of tool calls in committed assistant messages on the active branch. */
 export const selectBranchToolCallIds = (s: ConversationState): Set<string> =>
   toolCallIdsOf(selectActiveBranch(s));
-
-const unansweredCallsOf = memoByIdentity((branch: SessionEntry[]) => {
-  const calls = new Map<string, PhraseCall>();
-  for (const entry of branch) {
-    if (entry.type !== "message") continue;
-    const message = entry.message;
-    if (message.role === "toolResult") calls.delete(message.toolCallId);
-    if (message.role !== "assistant") continue;
-    for (const block of message.content) {
-      if (block.type === "toolCall") {
-        calls.set(block.id, { toolCallId: block.id, toolName: block.name, args: block.arguments });
-      }
-    }
-  }
-  return [...calls.values()];
-});
-
-/** The calls whose rows shimmer (see `toolStatus`): running, or streaming their arguments. */
-function activeCalls(s: ConversationState): PhraseCall[] {
-  const { run, streaming, tools } = s.live;
-  const calls: PhraseCall[] = Object.entries(tools)
-    .filter(([, tool]) => tool.status === "running")
-    .map(([id, tool]) => ({ toolCallId: id, toolName: tool.toolName, args: tool.args }));
-  // A call with neither a result nor a live run runs while the run is active.
-  if (run.active) {
-    for (const call of unansweredCallsOf(selectActiveBranch(s))) {
-      if (!(call.toolCallId in tools)) calls.push(call);
-    }
-  }
-  for (const block of Object.values(streaming?.blocks ?? {})) {
-    if (block.type !== "toolCall" || block.id in tools) continue;
-    if (block.call === undefined) {
-      calls.push({
-        toolCallId: block.id,
-        toolName: block.name,
-        args: undefined,
-        argsText: block.argsText,
-        streaming: true,
-      });
-    } else if (run.active) {
-      calls.push({ toolCallId: block.id, toolName: block.name, args: block.call.arguments });
-    }
-  }
-  return calls;
-}
-
-export interface LiveActivity {
-  /** "Compacting context", "Retrying 2/3 · reason", "Thinking", "Reading foo.ts" or "Working". */
-  phrase: string;
-  /** A row in the transcript shimmers already: a call running or streaming, or live thinking. */
-  rowShimmers: boolean;
-}
-
-/**
- * What the live-status row says (`docs/design/09-ui-overhaul.md`, "Live-status row"); undefined
- * unless a run is active or a compaction or retry is pending.
- */
-export const selectLiveActivity = (s: ConversationState): LiveActivity | undefined => {
-  const { run, streaming } = s.live;
-  if (!run.active && !run.compaction && !run.retry) return undefined;
-  const thinking = Object.values(streaming?.blocks ?? {}).some(
-    (block) => block.type === "thinking" && !block.done,
-  );
-  const calls = activeCalls(s);
-  const first = calls[0];
-  const phrase = run.compaction
-    ? "Compacting context"
-    : run.retry
-      ? `Retrying ${run.retry.attempt}/${run.retry.maxAttempts} · ${run.retry.errorMessage}`
-      : thinking
-        ? "Thinking"
-        : first
-          ? runningPhrase(first)
-          : "Working";
-  return { phrase, rowShimmers: thinking || first !== undefined };
-};
 
 const committedSubagentSpendOf = memoByIdentity((entries: SessionEntry[]) => {
   let cost = 0;

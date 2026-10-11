@@ -4,7 +4,7 @@
  */
 
 import type { SessionEntry } from "@pi-code/protocol";
-import type { Step } from "@/store/turns";
+import { lastWorkIndex, type Step } from "@/store/turns";
 
 type ToolStep = Extract<Step, { kind: "tool" }>;
 type ThinkingStep = Extract<Step, { kind: "thinking" }>;
@@ -45,7 +45,7 @@ export function isExplorationTool(toolName: string): toolName is keyof typeof CO
   return Object.hasOwn(COUNTS, toolName);
 }
 
-const NO_FAILURES: ReadonlySet<string> = new Set();
+export const NO_FAILURES: ReadonlySet<string> = new Set();
 
 /**
  * Fold runs of two or more exploration calls (with the thinking between them) into groups. A
@@ -105,10 +105,7 @@ export function groupCountLabel(steps: readonly Step[]): string {
  * the "Worked" row) and the final text with every other step (`rest`), each in order.
  */
 export function foldSteps(steps: readonly Step[]): { folded: Step[]; rest: Step[] } {
-  let lastWork = -1;
-  steps.forEach((step, index) => {
-    if (step.kind === "thinking" || step.kind === "tool") lastWork = index;
-  });
+  const lastWork = lastWorkIndex(steps);
   const folded: Step[] = [];
   const rest: Step[] = [];
   steps.forEach((step, index) => {

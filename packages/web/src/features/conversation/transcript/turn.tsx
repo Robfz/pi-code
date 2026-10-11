@@ -11,7 +11,7 @@ import { AssistantText, StopReasonNotice } from "./assistant-message";
 import { renderEntry } from "./entry";
 import { ExplorationGroupRow } from "./exploration-group";
 import { failedToolCalls, foldSteps, groupSteps, type Item } from "./grouping";
-import { useLiveSteps } from "./live-section";
+import { useLiveSteps } from "./live-steps";
 import { Thinking } from "./thinking";
 import { ToolCallSlot } from "./tool-call-slot";
 import { TurnFooter } from "./turn-footer";
@@ -99,9 +99,8 @@ function Items({ items }: { items: readonly Item[] }) {
 }
 
 /** Compact's fold of a finished turn's work: "Worked for 2m 14s", the steps grouped in its body. */
-function WorkedRow({ turn, children }: { turn: Turn; children: ReactNode }) {
+function WorkedRow({ durationMs, children }: { durationMs?: number; children: ReactNode }) {
   const [open, setOpen] = useRowOpen(() => false);
-  const durationMs = useMemo(() => turnStats(turn).durationMs, [turn]);
   return (
     <CollapsibleRow
       data-testid="worked"
@@ -125,12 +124,13 @@ function WorkedRow({ turn, children }: { turn: Turn; children: ReactNode }) {
  * alone (live).
  */
 function TurnBody({
-  turn,
+  durationMs,
   steps,
   live,
   failed,
 }: {
-  turn: Turn;
+  /** The turn's, for the "Worked" row. */
+  durationMs?: number;
   steps: Step[];
   live: boolean;
   failed: ReadonlySet<string>;
@@ -147,7 +147,7 @@ function TurnBody({
   return (
     <>
       {view.worked && (
-        <WorkedRow turn={turn}>
+        <WorkedRow durationMs={durationMs}>
           <Items items={view.worked} />
         </WorkedRow>
       )}
@@ -183,6 +183,7 @@ export const TurnView = memo(function TurnView({
     const committed = new Set(turn.steps.map((step) => step.key));
     return [...turn.steps, ...live.steps.filter((step) => !committed.has(step.key))];
   }, [turn.steps, live.steps]);
+  const stats = useMemo(() => turnStats(turn), [turn]);
   const committedFailures = useMemo(() => failedToolCalls(turn.entries), [turn.entries]);
   const failed = useMemo(
     () =>
@@ -221,9 +222,9 @@ export const TurnView = memo(function TurnView({
         </div>
       )}
       <StepLabels.Provider value={stepLabels}>
-        <TurnBody turn={turn} steps={steps} live={live.active} failed={failed} />
+        <TurnBody durationMs={stats.durationMs} steps={steps} live={live.active} failed={failed} />
       </StepLabels.Provider>
-      {finished && <TurnFooter turn={turn} />}
+      {finished && <TurnFooter stats={stats} />}
     </section>
   );
 });

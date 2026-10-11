@@ -108,6 +108,31 @@ describe("selectTurns", () => {
     const store = hydratedStore({ transcript: fixtureTranscript("tool-calls") });
     expect(selectTurns(store.getState())).toBe(selectTurns(store.getState()));
   });
+
+  it("keeps the identity of every turn a new entry doesn't land in", () => {
+    const { entries, leafId } = chain([
+      user("one"),
+      assistant([text("first")]),
+      user("two"),
+      assistant([text("second")]),
+    ]);
+    const store = hydratedStore({ transcript: { entries, leafId } });
+    const before = selectTurns(store.getState());
+    const added = {
+      type: "message",
+      id: "e4",
+      parentId: leafId,
+      timestamp: new Date(0).toISOString(),
+      message: assistant([text("more")]),
+    } as SessionEntry;
+    store.setState({ transcript: { entries: [...entries, added], leafId: "e4" } });
+    const after = selectTurns(store.getState());
+    expect(after).not.toBe(before);
+    expect(after[0]).toBe(before[0]);
+    expect(after[0]?.steps).toBe(before[0]?.steps);
+    expect(after[1]).not.toBe(before[1]);
+    expect(kinds(after[1]?.steps ?? [])).toEqual(["text", "text"]);
+  });
 });
 
 describe("turnStats", () => {
