@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * Generates the PWA icons in `public/` with Node built-ins only (zlib for PNG compression):
- * a monospace-style "π" glyph and a prompt cursor on a dark square.
+ * a "π" whose right leg hooks into a prompt underscore that fades out, on a dark square.
  *
  *   node scripts/generate-icons.mjs
  *
- * - `icons/icon-{192,512}.png`: rounded square, transparent corners (purpose "any").
+ * - `icons/icon-{192,512}.png`: rounded square with a hairline edge, transparent corners
+ *   (purpose "any").
  * - `icons/maskable-{192,512}.png`: full-bleed background, glyph inside the safe zone.
  * - `icons/apple-touch-icon.png` (180): full bleed; iOS rounds it.
  * - `favicon.svg`: the same drawing as vector.
@@ -18,22 +19,44 @@ import { deflateSync } from "node:zlib";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 
-const BG = [0x18, 0x18, 0x1b]; // zinc-900, reads as "dark" next to the #0d0d0d theme
-const FG = [0xfa, 0xfa, 0xfa];
-const ACCENT = [0x34, 0xd3, 0x99]; // emerald-400
+// Dark-theme tokens from docs/design/09-ui-overhaul.md: --card, --foreground, --faint-foreground.
+const BG = [0x13, 0x13, 0x13];
+const FG = [0xe8, 0xe8, 0xe8];
+const FADE = [0x63, 0x63, 0x63];
+// The --border hairline (white at 12%) composited over BG; keeps the tile visible on dark surfaces.
+const EDGE = [0x2f, 0x2f, 0x2f];
+
+const RADIUS = 22; // background corner radius
+const EDGE_WIDTH = 1;
 
 /**
- * Glyph in a 100×100 design space, as rectangles (x, y, w, h, color). The "π": a top bar and
- * two legs; the right leg ends in a small foot like a monospace π, followed by a cursor.
+ * Glyph in a 100×100 design space: strokes 9 wide with butt caps. A bar, a straight left leg,
+ * and a right leg that turns through a quarter circle (radius 8, centre 60,61.5) into a foot
+ * running on as the prompt underscore.
  */
-const GLYPH = [
-  { x: 14, y: 28, w: 52, h: 9, color: FG }, // bar
-  { x: 24, y: 37, w: 9, h: 38, color: FG }, // left leg
-  { x: 46, y: 37, w: 9, h: 33, color: FG }, // right leg
-  { x: 46, y: 66, w: 15, h: 9, color: FG }, // right foot
-  { x: 14, y: 28, w: 6, h: 14, color: FG }, // left serif (drop from the bar)
-  { x: 70, y: 68, w: 16, h: 7, color: ACCENT }, // prompt cursor
+const STROKE = 9;
+const HOOK = { cx: 60, cy: 61.5, r: 8 };
+const RECTS = [
+  { x: 18, y: 28.5, w: 48, h: STROKE }, // bar
+  { x: 25.5, y: 33, w: STROKE, h: 41 }, // left leg
+  { x: 47.5, y: 33, w: STROKE, h: HOOK.cy - 33 }, // right leg
+  { x: HOOK.cx, y: 65, w: 24, h: STROKE }, // foot / underscore
 ];
+// The underscore fades from FG to FADE over this x range; the rest of the glyph sits left of it.
+const FADE_FROM = 66.4;
+const FADE_TO = 84;
+
+function inGlyph(x, y) {
+  for (const r of RECTS) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
+  if (x > HOOK.cx || y < HOOK.cy) return false;
+  const d = Math.hypot(x - HOOK.cx, y - HOOK.cy);
+  return d >= HOOK.r - STROKE / 2 && d <= HOOK.r + STROKE / 2;
+}
+
+function glyphColor(x) {
+  const t = Math.min(Math.max((x - FADE_FROM) / (FADE_TO - FADE_FROM), 0), 1);
+  return FG.map((c, i) => c + (FADE[i] - c) * t);
+}
 
 // ---------------------------------------------------------------------------
 // Rasterizer: 4×4 supersampling over shape tests.
@@ -48,20 +71,14 @@ function inRoundedRect(px, py, x, y, w, h, r) {
 
 /**
  * @param size   output pixels
- * @param opts.radius  background corner radius in design units (0 = full bleed square)
- * @param opts.scale   glyph scale around the center (maskable icons shrink into the safe zone)
+ * @param opts.rounded  rounded tile with a hairline edge (false = full-bleed square)
+ * @param opts.scale    glyph scale around the center (maskable icons shrink into the safe zone)
  */
-function render(size, { radius, scale }) {
+function render(size, { rounded, scale }) {
   const SS = 4;
   const rgba = new Uint8Array(size * size * 4);
   const unit = 100 / size;
-  const glyph = GLYPH.map((r) => ({
-    ...r,
-    x: 50 + (r.x - 50) * scale,
-    y: 50 + (r.y - 50) * scale,
-    w: r.w * scale,
-    h: r.h * scale,
-  }));
+  const inner = 100 - 2 * EDGE_WIDTH;
 
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
@@ -73,13 +90,17 @@ function render(size, { radius, scale }) {
         for (let sx = 0; sx < SS; sx++) {
           const x = (px + (sx + 0.5) / SS) * unit;
           const y = (py + (sy + 0.5) / SS) * unit;
-          if (radius > 0 && !inRoundedRect(x, y, 0, 0, 100, 100, radius)) continue;
+          if (rounded && !inRoundedRect(x, y, 0, 0, 100, 100, RADIUS)) continue;
+          // Sample the glyph in its unscaled design space.
+          const gx = 50 + (x - 50) / scale;
+          const gy = 50 + (y - 50) / scale;
           let color = BG;
-          for (const rect of glyph) {
-            if (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h) {
-              color = rect.color;
-            }
-          }
+          if (inGlyph(gx, gy)) color = glyphColor(gx);
+          else if (
+            rounded &&
+            !inRoundedRect(x, y, EDGE_WIDTH, EDGE_WIDTH, inner, inner, RADIUS - EDGE_WIDTH)
+          )
+            color = EDGE;
           a++;
           r += color[0];
           g += color[1];
@@ -144,26 +165,36 @@ function encodePng(size, rgba) {
 // ---------------------------------------------------------------------------
 
 function svg() {
-  const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-  const rects = GLYPH.map(
-    (r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${hex(r.color)}"/>`,
-  ).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><title>pi-code</title><rect width="100" height="100" rx="22" fill="${hex(BG)}"/>${rects}</svg>\n`;
+  const hex = (c) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  const half = EDGE_WIDTH / 2;
+  const [bar, left, right, foot] = RECTS;
+  const mid = (r) => r.y + r.h / 2;
+  const glyph =
+    `<path d="M${bar.x} ${mid(bar)}H${bar.x + bar.w}M${left.x + STROKE / 2} ${left.y}V${left.y + left.h}"/>` +
+    `<path d="M${right.x + STROKE / 2} ${right.y}V${HOOK.cy}A${HOOK.r} ${HOOK.r} 0 0 0 ${HOOK.cx} ${mid(foot)}H${foot.x + foot.w}" stroke="url(#fade)"/>`;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><title>pi-code</title>` +
+    `<defs><linearGradient id="fade" gradientUnits="userSpaceOnUse" x1="${FADE_FROM}" y1="0" x2="${FADE_TO}" y2="0">` +
+    `<stop offset="0" stop-color="${hex(FG)}"/><stop offset="1" stop-color="${hex(FADE)}"/></linearGradient></defs>` +
+    `<rect x="${half}" y="${half}" width="${100 - EDGE_WIDTH}" height="${100 - EDGE_WIDTH}" rx="${RADIUS - half}" fill="${hex(BG)}" stroke="${hex(EDGE)}" stroke-width="${EDGE_WIDTH}"/>` +
+    `<g fill="none" stroke="${hex(FG)}" stroke-width="${STROKE}">${glyph}</g></svg>\n`
+  );
 }
 
 const outputs = [
-  { file: "icons/icon-192.png", size: 192, radius: 22, scale: 1 },
-  { file: "icons/icon-512.png", size: 512, radius: 22, scale: 1 },
-  // Maskable safe zone: a centered circle of 80% diameter; the glyph spans ~56% → 0.8 fits.
-  { file: "icons/maskable-192.png", size: 192, radius: 0, scale: 0.8 },
-  { file: "icons/maskable-512.png", size: 512, radius: 0, scale: 0.8 },
-  { file: "icons/apple-touch-icon.png", size: 180, radius: 0, scale: 0.9 },
+  { file: "icons/icon-192.png", size: 192, rounded: true, scale: 1 },
+  { file: "icons/icon-512.png", size: 512, rounded: true, scale: 1 },
+  // Maskable safe zone: a centered circle of 80% diameter. The glyph's farthest corner is ~42
+  // units from the center, so 0.8 keeps it inside.
+  { file: "icons/maskable-192.png", size: 192, rounded: false, scale: 0.8 },
+  { file: "icons/maskable-512.png", size: 512, rounded: false, scale: 0.8 },
+  { file: "icons/apple-touch-icon.png", size: 180, rounded: false, scale: 0.9 },
 ];
 
-for (const { file, size, radius, scale } of outputs) {
+for (const { file, size, rounded, scale } of outputs) {
   const path = join(root, file);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, encodePng(size, render(size, { radius, scale })));
+  writeFileSync(path, encodePng(size, render(size, { rounded, scale })));
   console.log(`wrote ${file}`);
 }
 writeFileSync(join(root, "favicon.svg"), svg());
