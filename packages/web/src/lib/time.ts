@@ -1,7 +1,5 @@
-/** Short relative time ("just now", "5m ago", "3h ago", "2d ago", then a date). */
-export function formatRelative(iso: string, now: number = Date.now()): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
+/** Short relative time of an epoch-ms instant ("just now", "5m ago", "3h ago", "2d ago", then a date). */
+export function formatRelative(then: number, now: number = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - then) / 1000));
   if (seconds < 45) return "just now";
   const minutes = Math.round(seconds / 60);

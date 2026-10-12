@@ -114,7 +114,7 @@ One word and one colour per state, everywhere. `agentStatus(agent, pending)` (`l
 
 `components/agent-status.tsx` renders it:
 
-- **`StatusMark`** (sidebar, dense): the spinner or a 7px dot, labelled with the word (`aria-label` and `title`); it is the row's only status or attention mark.
+- **`StatusMark`** (sidebar, dense): the spinner or a 7px dot, labelled with the word (`aria-label` and `title`); it is the row's only status or attention mark. A collapsed sidebar group's header shows its hidden rows' marks ([`05-desktop.md`](05-desktop.md), "Sidebar").
 - **`StatusBadge`** (Home, roomy): icon plus the word. Home's agent rows show one badge; recent-session rows on Home and `/sessions` held by an agent show that agent's badge.
 - **Status bar**: "Working" with a spinner while the run is active, compacting or retrying; nothing otherwise.
 
@@ -152,7 +152,7 @@ A full-column-width box: `--user-message` surface, 1px hairline, 10px radius, 11
 
 ### Collapsible
 
-`CollapsibleRow` (`components/collapsible-row.tsx`), on Radix Collapsible (`components/ui/collapsible.tsx`), is the only disclosure in the app; `<details>` doesn't occur.
+`CollapsibleRow` (`components/collapsible-row.tsx`), on Radix Collapsible (`components/ui/collapsible.tsx`), is the transcript's only disclosure; the sidebar's group headers use the same Radix Collapsible and motion ([`05-desktop.md`](05-desktop.md), "Sidebar"); `<details>` doesn't occur.
 
 - **Trigger:** a borderless 28px row, the full column width with an 8px hover bleed (`-mx-2 px-2`, `hover:bg-accent`, 7px radius): a 14px icon slot, the label, then a tail (duration and chevron) shown on hover, on focus, and while open.
 - **Content:** animated as in Motion; bodies are indented 22px (icon plus gap) so they align under the verb, and not indented below 1024px.

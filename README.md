@@ -33,7 +33,7 @@ tailscale serve --bg --https=443  http://127.0.0.1:4180   # the app and API
 tailscale serve --bg --https=8443 http://127.0.0.1:4181   # the web-search curator proxy
 ```
 
-Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of live and recent conversations (grouped by folder or repo, with search), and one tab follows all of them at once. The header's changes button opens a review pane beside the conversation with the project's git changes (uncommitted, or the branch against a base) and a file search; selecting lines adds an `@path:N` reference to the message, and references in messages open those lines. On the phone the same panel is a page, under Diff in the conversation menu.
+Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of every conversation (grouped by folder or repo, ordered by your last prompt, with search, collapsible groups and pinned repos shared across devices), and one tab follows all of them at once. The header's changes button opens a review pane beside the conversation with the project's git changes (uncommitted, or the branch against a base) and a file search; selecting lines adds an `@path:N` reference to the message, and references in messages open those lines. On the phone the same panel is a page, under Diff in the conversation menu.
 
 Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
 
@@ -45,7 +45,7 @@ Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes ev
 | `PI_CODE_PORT` | `4180` | Main listener (`127.0.0.1` only) |
 | `PI_CODE_CURATOR_PORT` | `4181` | Curator proxy listener (`127.0.0.1` only) |
 | `PI_CODE_PI_BIN` | `pi` | pi executable |
-| `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys (`vapid.json`) and push subscriptions (`push-subscriptions.json`) |
+| `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys (`vapid.json`), push subscriptions (`push-subscriptions.json`) and the sidebar's pins and collapsed groups (`sidebar.json`) |
 | `PI_AGENT_DIR` | `~/.pi/agent` | pi's agent dir: sessions, `trust.json`. Read-only, except that deleting a conversation or removing a worktree deletes session files |
 
 ## Installing the PWA on Android

@@ -1,4 +1,9 @@
-import type { AgentInfo, DirSuggestion, ProjectSummary } from "@pi-code/protocol";
+import {
+  type AgentInfo,
+  type DirSuggestion,
+  type ProjectSummary,
+  recencyOf,
+} from "@pi-code/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
@@ -32,7 +37,7 @@ import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
-import { epochMs, groupListing } from "./listing-groups";
+import { groupListing } from "./listing-groups";
 import { useOpenAgent } from "./use-open-agent";
 
 /** Delay before the path field queries `/api/fs/dirs`. */
@@ -169,7 +174,7 @@ export function ProjectPicker({
       groupListing(projects.data ?? [], {
         cwd: (project) => project.cwd,
         layout: (project) => project.layout,
-        activity: (project) => epochMs(project.updatedAt),
+        recency: (project) => recencyOf(project),
       }),
     [projects.data],
   );
@@ -198,7 +203,7 @@ export function ProjectPicker({
         <span className="shrink-0 text-xs text-muted-foreground">
           {missing && <MissingMark />}
           {missing && " · "}
-          {project.sessionCount} · {formatRelative(project.updatedAt)}
+          {project.sessionCount} · {formatRelative(recencyOf(project).at)}
         </span>
       </button>
     </li>

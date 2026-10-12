@@ -36,6 +36,7 @@ describe("session summaries (fixture files)", () => {
   it("summarizes every session file and skips files without a header", async () => {
     const catalog = new SessionCatalog({ agentDir: TEST_DATA });
     const sessions = await catalog.sessions();
+    // The fixtures' cwds are not on disk.
     expect(sessions).toEqual([
       {
         file: proj("2026-01-02T09-00-00-000Z_forked.jsonl"),
@@ -44,6 +45,8 @@ describe("session summaries (fixture files)", () => {
         firstMessage: "Only a question, never answered",
         createdAt: "2026-01-02T09:00:00.000Z",
         updatedAt: "2026-01-02T09:00:01.000Z",
+        missing: true,
+        lastPromptAt: "2026-01-02T09:00:01.000Z",
         parentSession: "/sessions/--home-user-proj--/2026-01-01T10-00-00-000Z_v3-full.jsonl",
       },
       {
@@ -54,13 +57,9 @@ describe("session summaries (fixture files)", () => {
         firstMessage: "Fix the failing test please",
         createdAt: "2026-01-01T10:00:00.000Z",
         updatedAt: "2026-01-01T10:30:00.000Z",
-      },
-      {
-        file: other("2025-09-03T12-00-00-000Z_header-only.jsonl"),
-        id: "header-only",
-        cwd: "/home/user/other",
-        createdAt: "2025-09-03T12:00:00.000Z",
-        updatedAt: "2025-09-03T12:00:00.000Z",
+        missing: true,
+        // The second of its two prompts; later entries are the agent's and session info.
+        lastPromptAt: "2026-01-01T10:00:07.000Z",
       },
       {
         // v2 (hookMessage role), a malformed line, a name that was cleared, a truncated last line.
@@ -70,6 +69,8 @@ describe("session summaries (fixture files)", () => {
         firstMessage: "v2 question",
         createdAt: "2025-09-01T12:00:00.000Z",
         updatedAt: "2025-09-01T12:00:04.000Z",
+        missing: true,
+        lastPromptAt: "2025-09-01T12:00:02.000Z",
       },
       {
         // v1: no version, entries without id / parentId.
@@ -79,6 +80,17 @@ describe("session summaries (fixture files)", () => {
         firstMessage: "hello from v1",
         createdAt: "2025-06-01T08:00:00.000Z",
         updatedAt: "2025-06-01T08:05:00.000Z",
+        missing: true,
+        lastPromptAt: "2025-06-01T08:00:01.000Z",
+      },
+      {
+        // Never prompted: after every prompted session, however recent.
+        file: other("2025-09-03T12-00-00-000Z_header-only.jsonl"),
+        id: "header-only",
+        cwd: "/home/user/other",
+        createdAt: "2025-09-03T12:00:00.000Z",
+        updatedAt: "2025-09-03T12:00:00.000Z",
+        missing: true,
       },
     ]);
   });
@@ -99,31 +111,59 @@ describe("session summaries (fixture files)", () => {
     const catalog = new SessionCatalog({ agentDir: TEST_DATA });
     const ids = async (filter: { cwd?: string; q?: string }) =>
       (await catalog.sessions(filter)).map((s) => s.id);
-    expect(await ids({ q: "USER/OTHER" })).toEqual(["header-only", "v2-hook"]);
+    expect(await ids({ q: "USER/OTHER" })).toEqual(["v2-hook", "header-only"]);
     expect(await ids({ q: "renamed SESSION" })).toEqual(["v3-full"]);
     expect(await ids({ q: "renamed", cwd: "/home/user/other" })).toEqual([]);
-    expect(await ids({ q: "user", cwd: "/home/user/other" })).toEqual(["header-only", "v2-hook"]);
+    expect(await ids({ q: "user", cwd: "/home/user/other" })).toEqual(["v2-hook", "header-only"]);
     // Not matched: the first message, the file name.
     expect(await ids({ q: "failing test" })).toEqual([]);
     expect(await ids({ q: "legacy" })).toEqual([]);
   });
 
-  it("lists projects by recent activity with counts", async () => {
+  it("lists projects by their last prompt with counts", async () => {
     const catalog = new SessionCatalog({ agentDir: TEST_DATA });
     expect(await catalog.projects()).toEqual([
       {
         cwd: "/home/user/proj",
         sessionCount: 3,
-        updatedAt: "2026-01-02T09:00:01.000Z",
+        lastPromptAt: "2026-01-02T09:00:01.000Z",
+        createdAt: "2026-01-02T09:00:00.000Z",
         isGitRepo: false,
       },
       {
         cwd: "/home/user/other",
         sessionCount: 2,
-        updatedAt: "2025-09-03T12:00:00.000Z",
+        lastPromptAt: "2025-09-01T12:00:02.000Z",
+        createdAt: "2025-09-03T12:00:00.000Z",
         isGitRepo: false,
       },
     ]);
+  });
+
+  it("orders unprompted projects after prompted ones, newest created first", async () => {
+    const dir = join(tmp, "agent", "sessions", "--x--");
+    mkdirSync(dir, { recursive: true });
+    const write = (id: string, cwd: string, created: string, promptAt?: string) => {
+      const lines = [{ type: "session", id, timestamp: created, cwd }];
+      if (promptAt) {
+        lines.push({
+          type: "message",
+          timestamp: promptAt,
+          message: { role: "user", content: "x" },
+        } as never);
+      }
+      writeFileSync(
+        join(dir, `${id}.jsonl`),
+        `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+      );
+    };
+    write("a", "/a", "2026-01-05T00:00:00.000Z");
+    write("b", "/b", "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
+    write("c", "/c", "2026-01-06T00:00:00.000Z");
+    write("d", "/d", "2026-01-01T00:00:00.000Z", "2026-01-03T00:00:00.000Z");
+    const catalog = new SessionCatalog({ agentDir: join(tmp, "agent") });
+    expect((await catalog.projects()).map((p) => p.cwd)).toEqual(["/d", "/b", "/c", "/a"]);
+    expect((await catalog.sessions()).map((s) => s.id)).toEqual(["d", "b", "c", "a"]);
   });
 
   it("returns nothing for a missing sessions dir", async () => {
@@ -156,6 +196,24 @@ describe("parseSessionFile", () => {
     expect(Array.from(s?.firstMessage ?? "")).toHaveLength(FIRST_MESSAGE_MAX);
     expect(s?.firstMessage?.endsWith("…")).toBe(true);
     expect(s?.firstMessage?.includes("\uFFFD")).toBe(false);
+  });
+
+  it("takes the last user message's time as lastPromptAt, not agent output after it", () => {
+    const assistant = JSON.stringify({
+      type: "message",
+      timestamp: "2026-01-01T00:00:09.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "user" }] },
+    });
+    const s = parseSessionFile(
+      "/f.jsonl",
+      `${header}\n${user("one")}\n${user([{ type: "image", data: "x" }], "2026-01-01T00:00:05.000Z")}\n${assistant}\n`,
+      "x",
+    );
+    expect(s).toMatchObject({
+      lastPromptAt: "2026-01-01T00:00:05.000Z",
+      updatedAt: "2026-01-01T00:00:09.000Z",
+    });
+    expect(parseSessionFile("/f.jsonl", `${header}\n`, "x")).not.toHaveProperty("lastPromptAt");
   });
 
   it("skips user messages without text and falls back for missing fields", () => {
@@ -232,7 +290,7 @@ describe("SessionCatalog cache", () => {
     mkdirSync(dir);
     writeFileSync(
       join(dir, "x.jsonl"),
-      `${JSON.stringify({ type: "session", id: "new", timestamp: "2027-01-01T00:00:00.000Z", cwd: "/home/user/new" })}\n`,
+      `${JSON.stringify({ type: "session", id: "new", timestamp: "2027-01-01T00:00:00.000Z", cwd: "/home/user/new" })}\n${JSON.stringify({ type: "message", timestamp: "2027-01-01T00:00:01.000Z", message: { role: "user", content: "hi" } })}\n`,
     );
     catalog.invalidate();
     const ids = (await catalog.sessions()).map((s) => s.id);
@@ -309,5 +367,32 @@ describe("SessionCatalog layout", () => {
       role: "worktree",
       missing: true,
     });
+  });
+});
+
+describe("SessionCatalog missing folders", () => {
+  it("marks the sessions whose cwd is gone, recomputed per scan", async () => {
+    const kept = join(tmp, "kept");
+    const gone = join(tmp, "gone");
+    mkdirSync(kept);
+    mkdirSync(gone);
+    const dir = join(tmp, "agent", "sessions", "--x--");
+    mkdirSync(dir, { recursive: true });
+    for (const [id, cwd] of [
+      ["kept", kept],
+      ["gone", gone],
+    ] as const) {
+      const header = { type: "session", id, timestamp: "2026-01-01T00:00:00.000Z", cwd };
+      writeFileSync(join(dir, `${id}.jsonl`), `${JSON.stringify(header)}\n`);
+    }
+    const catalog = new SessionCatalog({ agentDir: join(tmp, "agent") });
+    const missing = async () =>
+      Object.fromEntries((await catalog.sessions()).map((s) => [s.id, s.missing]));
+    expect(await missing()).toEqual({ kept: undefined, gone: undefined });
+
+    rmSync(gone, { recursive: true });
+    catalog.invalidate();
+    expect(await missing()).toEqual({ kept: undefined, gone: true });
+    expect((await catalog.sessions()).find((s) => s.id === "kept")).not.toHaveProperty("missing");
   });
 });

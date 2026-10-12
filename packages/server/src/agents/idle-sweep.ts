@@ -1,9 +1,12 @@
 /** Closes agents idle for a week (design/05-desktop.md, "Idle sweep"). */
 import type { SessionCatalog } from "../catalog/sessions.ts";
-import { CATALOG_WINDOW_MS, type StreamHub } from "../live/stream-hub.ts";
+import type { StreamHub } from "../live/stream-hub.ts";
 import type { AgentManager } from "./agent-manager.ts";
 
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Agents idle this long are closed. */
+export const IDLE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface IdleSweepDeps {
   manager: AgentManager;
@@ -12,9 +15,9 @@ interface IdleSweepDeps {
 }
 
 /**
- * One sweep: recomputes the catalog window (sessions past it drop out), then closes every agent
- * that isn't streaming and whose activity — the later of its `startedAt` and its session's
- * `updatedAt` — is at least `CATALOG_WINDOW_MS` old, exited agents included. Close errors
+ * One sweep: refreshes the catalog (a fallback for when the session watcher is off), then closes
+ * every agent that isn't streaming and whose activity — the later of its `startedAt` and its
+ * session's `updatedAt` — is at least `IDLE_AFTER_MS` old, exited agents included. Close errors
  * (e.g. a concurrent `DELETE`) are ignored.
  */
 export async function sweepIdle({ manager, catalog, hub }: IdleSweepDeps): Promise<void> {
@@ -30,7 +33,7 @@ export async function sweepIdle({ manager, catalog, hub }: IdleSweepDeps): Promi
       Date.parse(agent.startedAt),
       session === undefined ? Number.NEGATIVE_INFINITY : Date.parse(session),
     );
-    return now - activity >= CATALOG_WINDOW_MS;
+    return now - activity >= IDLE_AFTER_MS;
   });
   await Promise.all(idle.map((agent) => manager.close(agent.id).catch(() => {})));
 }

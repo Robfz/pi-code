@@ -16,12 +16,24 @@
  * - Snapshots don't clear attention: the conversation on screen (`show`) is acked on show, on
  *   `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its
  *   attention while the page is visible and focused.
+ * - The sidebar state (pins, collapsed groups) lives on the server: `setSidebar` applies a change
+ *   at once and sends it; `sidebar` frames, this tab's own changes included, replace it.
  */
 
-import type { AgentId, AgentInfo, SessionSummary, Snapshot, StreamFrame } from "@pi-code/protocol";
+import {
+  type AgentId,
+  type AgentInfo,
+  applySidebarPatch,
+  SIDEBAR_KEYS,
+  type SidebarPatch,
+  type SidebarState,
+  type Snapshot,
+  type StreamedSession,
+  type StreamFrame,
+} from "@pi-code/protocol";
 import type { QueryClient } from "@tanstack/react-query";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { ackAgent, getSnapshot, isApiRequestError, streamUrl } from "@/lib/api";
+import { ackAgent, getSnapshot, isApiRequestError, patchSidebar, streamUrl } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import {
   type ConnectionState,
@@ -46,21 +58,23 @@ const EVENT_SOURCE_CLOSED = 2;
 /** A stream silent for this long (≥ 2 missed pings) is treated as dead when the page shows. */
 export const STALE_AFTER_MS = 35_000;
 
-/** Read by Home, the badge and the share screen. */
+/** Read by the sidebar, Home, the badge and the share screen. */
 export interface LiveOverview {
   /** False until the first baseline: `agents` is empty because nothing is known yet. */
   loaded: boolean;
   agents: Record<AgentId, AgentInfo>;
-  /** Sessions updated within the last 7 days, most recent first. */
-  sessions: SessionSummary[];
+  /** Every session, most recently prompted first. */
+  sessions: StreamedSession[];
   /** cwd → branch, for folders with a live agent. */
   branches: Record<string, string>;
+  sidebar: SidebarState;
   connection: ConnectionState;
 }
 
 export interface RegistryDeps {
   fetchSnapshot(agentId: AgentId): Promise<Snapshot>;
   ack(agentId: AgentId): Promise<void>;
+  patchSidebar(patch: SidebarPatch): Promise<SidebarState>;
   document: Pick<
     Document,
     "visibilityState" | "hasFocus" | "addEventListener" | "removeEventListener"
@@ -77,6 +91,7 @@ function defaultRegistryDeps(): RegistryDeps {
   return {
     fetchSnapshot: getSnapshot,
     ack: ackAgent,
+    patchSidebar,
     document,
     window,
   };
@@ -98,6 +113,7 @@ export class LiveRegistry {
     agents: {},
     sessions: [],
     branches: {},
+    sidebar: { pinned: [], collapsed: [] },
     connection: "connecting",
   }));
   private readonly queryClient: Pick<QueryClient, "invalidateQueries">;
@@ -181,6 +197,33 @@ export class LiveRegistry {
     };
   }
 
+  /**
+   * Sets pinned / collapsed flags per path, on screen at once, then as the server answers (it
+   * skips a folder that is gone). A refusal puts the flags back and rejects.
+   */
+  async setSidebar(patch: SidebarPatch): Promise<void> {
+    const adopt = (state: SidebarState) =>
+      this.live.setState((s) => ({ sidebar: applySidebarPatch(s.sidebar, flagsIn(state, patch)) }));
+    const before = this.live.getState().sidebar;
+    this.live.setState((s) => ({ sidebar: applySidebarPatch(s.sidebar, patch) }));
+    try {
+      adopt(await this.deps.patchSidebar(patch));
+    } catch (error) {
+      adopt(before);
+      throw error;
+    }
+  }
+
+  /** Uncollapses the groups holding `paths`; asks the server only when one is collapsed. */
+  expand(paths: readonly string[]): void {
+    const { collapsed } = this.live.getState().sidebar;
+    const shut = paths.filter((path) => collapsed.includes(path));
+    if (shut.length === 0) return;
+    this.setSidebar({
+      collapsed: Object.fromEntries(shut.map((path) => [path, false])),
+    }).catch(() => {});
+  }
+
   private refetch(entry: Opened): void {
     const generation = ++entry.generation;
     entry.refetching = true;
@@ -260,6 +303,7 @@ export class LiveRegistry {
           agents,
           sessions: frame.sessions,
           branches: frame.branches,
+          sidebar: frame.sidebar,
         });
         // A hydrated store's snapshot predates this stream (every hydrate reconnects), so its
         // absence means the agent is gone. A refetching store may be newer than the stream; its
@@ -311,24 +355,21 @@ export class LiveRegistry {
       case "agent_closed":
         this.closeAgent(frame.agentId);
         return;
-      case "catalog": {
-        // Every session write sends one. The session and project lists are refetched when what
-        // they show changes (a session added, gone, renamed, titled or opened) or their order
-        // does (a session moving to the top), not when only `updatedAt` moves.
-        const previous = this.live.getState().sessions;
+      case "catalog":
+        // Sent only when the list changes in something the session and project lists show.
         this.live.setState({ sessions: frame.sessions });
-        if (!sameListing(previous, frame.sessions)) {
-          void this.queryClient.invalidateQueries({ queryKey: ["sessions"] });
-          void this.queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-        }
+        void this.queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        void this.queryClient.invalidateQueries({ queryKey: queryKeys.projects });
         return;
-      }
       case "branch": {
         const { [frame.cwd]: _, ...branches } = this.live.getState().branches;
         if (frame.branch !== null) branches[frame.cwd] = frame.branch;
         this.live.setState({ branches });
         return;
       }
+      case "sidebar":
+        this.live.setState({ sidebar: frame.sidebar });
+        return;
     }
   }
 
@@ -422,16 +463,14 @@ export class LiveRegistry {
   };
 }
 
-/** What the session lists show of a session, bar its recency. */
-function listing(session: SessionSummary): string {
-  const { updatedAt: _, ...shown } = session;
-  return JSON.stringify(shown);
-}
-
-/** Same sessions, showing the same, in the same order (most recent first). */
-function sameListing(a: readonly SessionSummary[], b: readonly SessionSummary[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every((session, i) => listing(session) === listing(b[i] as SessionSummary))
-  );
+/** `patch`'s paths, flagged as they are in `state`. */
+function flagsIn(state: SidebarState, patch: SidebarPatch): SidebarPatch {
+  const flags: SidebarPatch = {};
+  for (const key of SIDEBAR_KEYS) {
+    const paths = Object.keys(patch[key] ?? {});
+    if (paths.length > 0) {
+      flags[key] = Object.fromEntries(paths.map((path) => [path, state[key].includes(path)]));
+    }
+  }
+  return flags;
 }

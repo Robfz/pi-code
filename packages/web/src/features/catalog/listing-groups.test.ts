@@ -5,16 +5,24 @@ import { groupListing, type ListingGroup } from "./listing-groups";
 interface Item {
   id: string;
   cwd: string;
+  /** The last prompt's time; with `unprompted`, the creation's. */
   at: number;
+  unprompted?: true;
   layout?: RepoLayout;
+  missing?: true;
 }
 
-const group = (items: Item[]) =>
-  groupListing(items, {
-    cwd: (item) => item.cwd,
-    layout: (item) => item.layout,
-    activity: (item) => item.at,
-  });
+const group = (items: Item[], repos?: string[]) =>
+  groupListing(
+    items,
+    {
+      cwd: (item) => item.cwd,
+      layout: (item) => item.layout,
+      recency: (item) => ({ prompted: item.unprompted !== true, at: item.at }),
+      missing: (item) => item.missing === true,
+    },
+    repos ? { repos } : {},
+  );
 
 const ids = (items: Item[]) => items.map((item) => item.id);
 
@@ -84,6 +92,38 @@ describe("groupListing", () => {
     expect(groups.map((g) => g.label)).toEqual(["Dev/pi-code", "forks/pi-code", "other"]);
   });
 
+  it("puts unprompted items after prompted ones, newest created first, and groups likewise", () => {
+    const groups = group([
+      { id: "new-empty", cwd: "/home/me/alpha", at: 9, unprompted: true },
+      { id: "old-prompt", cwd: "/home/me/alpha", at: 1 },
+      { id: "empty-only", cwd: "/home/me/beta", at: 10, unprompted: true },
+      { id: "older-empty", cwd: "/home/me/alpha", at: 5, unprompted: true },
+      { id: "fresh-wt", cwd: `${R}/fresh`, at: 8, unprompted: true, layout: linked },
+      { id: "m1", cwd: `${R}/main`, at: 3, unprompted: true, layout: main },
+      { id: "empty-gamma", cwd: "/home/me/gamma", at: 2, unprompted: true },
+    ]);
+    expect(groups.map((g) => [g.label, ids(g.items)])).toEqual([
+      ["alpha", ["old-prompt", "new-empty", "older-empty"]],
+      ["beta", ["empty-only"]],
+      ["pi-code", []],
+      ["gamma", ["empty-gamma"]],
+    ]);
+    expect(repoGroup(groups, R).worktrees.map((w) => w.label)).toEqual(["main", "fresh"]);
+  });
+
+  it("adds empty repo groups for `repos` without items, labelled with the rest", () => {
+    const groups = group([{ id: "f1", cwd: "/home/me/forks/pi-code", at: 2 }], [R, "/x/empty"]);
+    expect(groups.map((g) => [g.kind, g.label, g.items.length])).toEqual([
+      ["folder", "forks/pi-code", 1],
+      ["repo", "Dev/pi-code", 0],
+      ["repo", "empty", 0],
+    ]);
+    // A repo that has items keeps its place.
+    const withItems = group([{ id: "m1", cwd: `${R}/main`, at: 1, layout: main }], [R]);
+    expect(withItems).toHaveLength(1);
+    expect(repoGroup(withItems, R).worktrees).toHaveLength(1);
+  });
+
   it("marks a worktree missing when any of its items says so", () => {
     const groups = group([
       { id: "w1", cwd: `${R}/spike`, at: 2, layout: linked },
@@ -94,6 +134,18 @@ describe("groupListing", () => {
     expect(repo.worktrees.map((w) => [w.label, w.missing])).toEqual([
       ["fine", false],
       ["spike", true],
+    ]);
+  });
+
+  it("marks a folder missing when any of its items says so", () => {
+    const groups = group([
+      { id: "1", cwd: "/home/me/gone", at: 2 },
+      { id: "2", cwd: "/home/me/gone", at: 1, missing: true },
+      { id: "3", cwd: "/home/me/here", at: 3 },
+    ]);
+    expect(groups.map((g) => g.kind === "folder" && [g.label, g.missing])).toEqual([
+      ["here", false],
+      ["gone", true],
     ]);
   });
 
@@ -109,6 +161,7 @@ describe("groupListing", () => {
         kind: "folder",
         cwd: "/home/me/Kepi/phoenix",
         label: "Kepi/phoenix",
+        missing: false,
         items: [
           { id: "4", cwd: "/home/me/Kepi/phoenix", at: 5 },
           { id: "1", cwd: "/home/me/Kepi/phoenix", at: 3 },
@@ -118,12 +171,14 @@ describe("groupListing", () => {
         kind: "folder",
         cwd: "/home/me/phoenix/phoenix",
         label: "phoenix/phoenix",
+        missing: false,
         items: [{ id: "2", cwd: "/home/me/phoenix/phoenix", at: 4 }],
       },
       {
         kind: "folder",
         cwd: "/home/me/pi-code/",
         label: "pi-code",
+        missing: false,
         items: [{ id: "3", cwd: "/home/me/pi-code/", at: 1 }],
       },
     ]);

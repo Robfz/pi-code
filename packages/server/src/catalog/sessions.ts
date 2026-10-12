@@ -7,13 +7,14 @@ import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   type AgentId,
+  compareRecency,
   type ProjectSummary,
-  type RepoLayout,
+  recencyOf,
   type SessionSummary,
   splitFileBlocks,
 } from "@pi-code/protocol";
 import { findGitDir } from "../git/branches.ts";
-import { layoutOf } from "./layout.ts";
+import { isDirectory, layoutOf } from "./layout.ts";
 
 /** Longest `firstMessage`, in characters. */
 export const FIRST_MESSAGE_MAX = 200;
@@ -22,10 +23,10 @@ export const FIRST_MESSAGE_MAX = 200;
 const LIST_TTL_MS = 1_000;
 const PARSE_CONCURRENCY = 16;
 
-/** What the file itself says (everything but `ownedBy` and `layout`). */
-type ParsedSession = Omit<SessionSummary, "ownedBy" | "layout">;
+/** What the file itself says (everything but `ownedBy`, `layout` and `missing`). */
+type ParsedSession = Omit<SessionSummary, "ownedBy" | "layout" | "missing">;
 
-/** A parsed session with its cwd's layout as of the scan that listed it. */
+/** A parsed session with its cwd's layout and presence as of the scan that listed it. */
 type ScannedSession = Omit<SessionSummary, "ownedBy">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -132,12 +133,28 @@ export function parseSessionFile(
     createdAt,
     updatedAt: lastTimestamp ?? createdAt,
   };
+  const lastPromptAt = lastUserMessageTime(lines, headerLine);
+  if (lastPromptAt !== undefined) summary.lastPromptAt = lastPromptAt;
   if (name !== undefined) summary.name = name;
   if (firstMessage !== undefined) summary.firstMessage = firstMessage;
   if (typeof header.parentSession === "string" && header.parentSession !== "") {
     summary.parentSession = header.parentSession;
   }
   return summary;
+}
+
+/** The timestamp of the last user message entry after `headerLine`, scanning from the end. */
+function lastUserMessageTime(lines: string[], headerLine: number): string | undefined {
+  for (let i = lines.length - 1; i > headerLine; i--) {
+    const line = lines[i] as string;
+    if (!line.includes('"user"')) continue;
+    const record = parseLine(line);
+    if (record?.type === "message" && isRecord(record.message) && record.message.role === "user") {
+      const at = validDate(record.timestamp);
+      if (at !== undefined) return at;
+    }
+  }
+  return undefined;
 }
 
 /** `<timestamp>_<id>.jsonl` → `<id>`. */
@@ -212,7 +229,7 @@ export class SessionCatalog {
   }
 
   /**
-   * All sessions, most recent first. `cwd` keeps those whose header `cwd` equals it; `q` those
+   * All sessions, most recently prompted first (`compareRecency`). `cwd` keeps those whose header `cwd` equals it; `q` those
    * whose `cwd` or `name` contains it, case-insensitively.
    */
   async sessions(filter: { cwd?: string; q?: string } = {}): Promise<SessionSummary[]> {
@@ -234,34 +251,36 @@ export class SessionCatalog {
       });
   }
 
-  /** Distinct header cwds with session counts, most recent activity first. */
+  /** Distinct header cwds with session counts, most recently prompted first (`compareRecency`). */
   async projects(): Promise<ProjectSummary[]> {
-    const byCwd = new Map<
-      string,
-      { count: number; updatedAt: string; layout: RepoLayout | undefined }
-    >();
+    const byCwd = new Map<string, ProjectSummary>();
     for (const s of await this.scan()) {
       if (s.cwd === "") continue;
       const p = byCwd.get(s.cwd);
       if (p === undefined) {
-        byCwd.set(s.cwd, { count: 1, updatedAt: s.updatedAt, layout: s.layout });
+        const project: ProjectSummary = {
+          cwd: s.cwd,
+          sessionCount: 1,
+          createdAt: s.createdAt,
+          isGitRepo: false,
+        };
+        if (s.lastPromptAt !== undefined) project.lastPromptAt = s.lastPromptAt;
+        if (s.layout !== undefined) project.layout = s.layout;
+        byCwd.set(s.cwd, project);
       } else {
-        p.count += 1;
-        if (Date.parse(s.updatedAt) > Date.parse(p.updatedAt)) p.updatedAt = s.updatedAt;
+        p.sessionCount += 1;
+        if (Date.parse(s.createdAt) > Date.parse(p.createdAt)) p.createdAt = s.createdAt;
+        if (
+          s.lastPromptAt !== undefined &&
+          (p.lastPromptAt === undefined || Date.parse(s.lastPromptAt) > Date.parse(p.lastPromptAt))
+        ) {
+          p.lastPromptAt = s.lastPromptAt;
+        }
       }
     }
-    return [...byCwd.entries()]
-      .map(([cwd, p]) => {
-        const project: ProjectSummary = {
-          cwd,
-          sessionCount: p.count,
-          updatedAt: p.updatedAt,
-          isGitRepo: findGitDir(cwd) !== undefined,
-        };
-        if (p.layout !== undefined) project.layout = p.layout;
-        return project;
-      })
-      .sort(byRecency);
+    return [...byCwd.values()]
+      .map((project) => ({ ...project, isGitRepo: findGitDir(project.cwd) !== undefined }))
+      .sort((a, b) => compareRecency(recencyOf(a), recencyOf(b)) || a.cwd.localeCompare(b.cwd));
   }
 
   /** Header cwds that have at least one session. */
@@ -287,8 +306,9 @@ export class SessionCatalog {
   }
 
   /**
-   * Lists and parses the session files, attaching each cwd's layout. Layouts are recomputed on
-   * every scan: a folder's layout changes (e.g. a worktree deleted) without its files changing.
+   * Lists and parses the session files, attaching each cwd's layout and whether it is gone.
+   * Both are recomputed on every scan: a folder changes (e.g. gets deleted) without its session
+   * files changing.
    */
   private async scanNow(): Promise<ScannedSession[]> {
     this.sessionsDir ??= realpath(join(this.deps.agentDir, "sessions")).catch(() =>
@@ -324,15 +344,19 @@ export class SessionCatalog {
       const summary = await this.summarize(file);
       if (summary !== undefined) summaries.push(summary);
     });
-    const layouts = new Map<string, RepoLayout | undefined>();
-    for (const { cwd } of summaries) if (!layouts.has(cwd)) layouts.set(cwd, layoutOf(cwd));
+    const folders = new Map<string, Pick<ScannedSession, "layout" | "missing">>();
+    for (const { cwd } of summaries) {
+      if (folders.has(cwd)) continue;
+      const layout = layoutOf(cwd);
+      folders.set(cwd, {
+        ...(layout === undefined ? {} : { layout }),
+        ...(isDirectory(cwd) ? {} : { missing: true }),
+      });
+    }
     // Ties by file, so equal scans list sessions in the same order.
     return summaries
-      .sort((a, b) => byRecency(a, b) || a.file.localeCompare(b.file))
-      .map((s) => {
-        const layout = layouts.get(s.cwd);
-        return layout === undefined ? s : { ...s, layout };
-      });
+      .sort((a, b) => compareRecency(recencyOf(a), recencyOf(b)) || a.file.localeCompare(b.file))
+      .map((s) => ({ ...s, ...folders.get(s.cwd) }));
   }
 
   private async summarize(file: string): Promise<ParsedSession | undefined> {
@@ -354,8 +378,4 @@ export class SessionCatalog {
     this.cache.set(file, { mtimeMs: s.mtimeMs, size: s.size, summary });
     return summary;
   }
-}
-
-function byRecency(a: { updatedAt: string }, b: { updatedAt: string }): number {
-  return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
 }

@@ -8,6 +8,7 @@ import { SessionCatalog } from "./catalog/sessions.ts";
 import type { ErrorEnvelope } from "./errors.ts";
 import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
+import { SidebarStateStore } from "./store/sidebar-state.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const PORT = 4180;
@@ -29,13 +30,15 @@ beforeAll(() => {
     command: () => ({ bin: "/nonexistent", args: [] }),
   });
   const catalog = new SessionCatalog({ agentDir: join(dist, "agent") });
+  const sidebar = new SidebarStateStore(join(dist, "data"));
   app = createApp({
     hostname: HOSTNAME,
     port: PORT,
     staticDir: dist,
     manager,
     catalog,
-    hub: new StreamHub({ manager, catalog }),
+    hub: new StreamHub({ manager, catalog, sidebar }),
+    sidebar,
     piVersion: async () => "9.9.9",
   });
 });

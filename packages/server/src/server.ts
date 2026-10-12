@@ -15,6 +15,7 @@ import { piVersionProbe } from "./pi-version.ts";
 import { type PushSender, PushService } from "./push/push-service.ts";
 import { SubscriptionStore } from "./push/subscriptions.ts";
 import { loadVapidDetails } from "./push/vapid.ts";
+import { SidebarStateStore } from "./store/sidebar-state.ts";
 
 export const LISTEN_HOST = "127.0.0.1";
 
@@ -78,7 +79,8 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     ownerOf: (file) => manager.ownerOf(file),
   });
 
-  const hub = new StreamHub({ manager, catalog });
+  const sidebar = new SidebarStateStore(config.dataDir);
+  const hub = new StreamHub({ manager, catalog, sidebar });
   // Started before the hub's first scan reads the dir (asynchronously), so later changes are
   // picked up once the watch is running.
   const sessionsWatcher = watchSessions(
@@ -92,6 +94,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     manager,
     catalog,
     hub,
+    sidebar,
     push,
     piVersion: piVersionProbe(config.piBin),
   });

@@ -9,7 +9,7 @@ import { findGitDir } from "../git/branches.ts";
 
 const MAIN_NAMES = ["main", "master"] as const;
 
-function isDirectory(path: string): boolean {
+export function isDirectory(path: string): boolean {
   try {
     return statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
   } catch {

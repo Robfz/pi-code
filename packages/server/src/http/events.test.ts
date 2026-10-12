@@ -277,6 +277,7 @@ group("live stream", () => {
       agents: [h.manager.require(agent.id).info()],
       sessions: [],
       branches: {},
+      sidebar: { pinned: [], collapsed: [] },
     });
     expect(client.retry).toBe(2000);
     expect(client.frames[0]?.id).toBe("");
@@ -465,7 +466,6 @@ group("live stream feeds", () => {
         id: "s1",
         cwd: h.project,
         createdAt: header.timestamp,
-        updatedAt: header.timestamp,
       },
     ];
     try {

@@ -50,7 +50,7 @@ The conversation header's `⋮` offers Stop and Delete (destructive, no dialog: 
 - **Stop**: `DELETE /api/agents/:id`, then the registry's `drop`.
 - **Delete** of a session row: `deleteSession(file)`.
 - **Delete** of an agent's conversation: `deleteSession(agent.sessionFile)`, the server stopping the agent; without a `sessionFile` yet (F8), only Stop. Then `drop`, as Stop does.
-- After a delete, the `sessions` and `projects` queries are invalidated: Home and `/sessions` don't follow the `catalog` frame, which covers only the 7-day window.
+- After a delete, the `sessions` and `projects` queries are invalidated, so Home and `/sessions` refresh without waiting for the `catalog` frame.
 - Stopping or deleting the conversation on screen (the route's agent), from any surface, navigates to Home (`/`).
 - No success feedback: the row disappears. Every failure, `session_not_listed` included, shows `toast.error` with the server's message.
 

@@ -10,11 +10,13 @@ import { requestGuards } from "./http/guards.ts";
 import { pushRoutes } from "./http/push-routes.ts";
 import { reviewRoutes } from "./http/review-routes.ts";
 import { sessionsRoutes } from "./http/sessions-routes.ts";
+import { sidebarRoutes } from "./http/sidebar-routes.ts";
 import { spaHandler } from "./http/static.ts";
 import { type SseOptions, streamRoutes } from "./http/stream.ts";
 import { worktreesRoutes } from "./http/worktrees-routes.ts";
 import type { StreamHub } from "./live/stream-hub.ts";
 import type { PushService } from "./push/push-service.ts";
+import type { SidebarStateStore } from "./store/sidebar-state.ts";
 
 interface AppDeps {
   /** Tailnet hostname (Host allowlist, origin checks). */
@@ -28,6 +30,8 @@ interface AppDeps {
   catalog: SessionCatalog;
   /** Shared inputs of `GET /api/stream`. */
   hub: StreamHub;
+  /** Pins and collapsed groups (`PATCH /api/sidebar`); the hub broadcasts its changes. */
+  sidebar: SidebarStateStore;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
   /** Web Push (routes answer `not_found` without it). */
@@ -54,6 +58,7 @@ function apiRoutes(deps: AppDeps) {
     .route("/agents", agentsRoutes(deps.manager))
     .route("/agents", reviewRoutes(deps.manager))
     .route("/worktrees", worktreesRoutes(writeDeps))
+    .route("/sidebar", sidebarRoutes(deps.sidebar))
     .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))
     .route("/push", pushRoutes(deps.push));
 }

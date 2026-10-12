@@ -24,8 +24,8 @@ const ROW =
   "group/row -mx-2 flex h-7 w-[calc(100%+1rem)] min-w-0 items-center gap-2 rounded-[7px] px-2 text-left text-sm select-none";
 
 /**
- * The app's one disclosure (`docs/design/09-ui-overhaul.md`, "Collapsible"): a borderless 28px
- * row (icon, label, tail and chevron) over a body that opens with a 150ms height animation.
+ * The transcript's one disclosure (`docs/design/09-ui-overhaul.md`, "Collapsible"): a borderless
+ * 28px row (icon, label, tail and chevron) over a body that opens with a 150ms height animation.
  */
 export function CollapsibleRow({
   icon,

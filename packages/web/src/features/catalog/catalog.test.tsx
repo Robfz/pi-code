@@ -31,7 +31,8 @@ function session(patch: Partial<SessionSummary> & { file: string }): SessionSumm
     id: patch.file,
     cwd: "/home/me/alpha",
     createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    updatedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    lastPromptAt: new Date(Date.now() - 5 * 60_000).toISOString(),
     ...patch,
   };
 }
@@ -94,7 +95,7 @@ describe("ProjectPicker", () => {
               {
                 cwd: "/home/me/alpha",
                 sessionCount: 3,
-                updatedAt: "2026-01-01T00:00:00.000Z",
+                createdAt: "2026-01-01T00:00:00.000Z",
                 isGitRepo: true,
               },
             ],
@@ -254,6 +255,32 @@ describe("Sessions", () => {
     expect(free?.querySelector("[data-slot=badge]")).toBeNull();
   });
 
+  it("orders Home's open conversations by their last prompt, not by when they started", async () => {
+    stubFetch((call) => (call.url === "/api/sessions" ? [200, { sessions: [] }] : undefined));
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    await renderRoutes(<HomeScreen />, "/", {
+      loaded: true,
+      agents: {
+        // Just restarted, last prompted two hours ago.
+        a1: makeAgent({ id: "a1", cwd: "/home/me/alpha", startedAt: ago(0), sessionFile: "/s/a" }),
+        b1: makeAgent({ id: "b1", cwd: "/home/me/beta", startedAt: ago(600), sessionFile: "/s/b" }),
+        // Fresh: no session file, so no prompt yet.
+        c1: makeAgent({ id: "c1", cwd: "/home/me/gamma", startedAt: ago(0) }),
+      },
+      sessions: [
+        session({ file: "/s/b", cwd: "/home/me/beta", lastPromptAt: ago(1) }),
+        session({ file: "/s/a", cwd: "/home/me/alpha", lastPromptAt: ago(120) }),
+      ],
+      connection: "live",
+    });
+    const open = screen.getByRole("list", { name: "Open conversations" });
+    expect(
+      within(open)
+        .getAllByRole("group")
+        .map((g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent),
+    ).toEqual(["beta", "alpha", "gamma"]);
+  });
+
   it("/sessions filters by project and opens a session through POST /api/agents", async () => {
     const { calls } = stubFetch((call) => {
       if (call.url === "/api/projects") {
@@ -261,8 +288,8 @@ describe("Sessions", () => {
           200,
           {
             projects: [
-              { cwd: "/home/me/alpha", sessionCount: 2, updatedAt: "", isGitRepo: true },
-              { cwd: "/home/me/beta", sessionCount: 1, updatedAt: "", isGitRepo: false },
+              { cwd: "/home/me/alpha", sessionCount: 2, createdAt: "", isGitRepo: true },
+              { cwd: "/home/me/beta", sessionCount: 1, createdAt: "", isGitRepo: false },
             ],
           },
         ];
@@ -514,24 +541,29 @@ describe("Layout repos on Home, /sessions and the picker", () => {
       file: "/s/m.jsonl",
       cwd: `${R}/main`,
       name: "On main",
-      updatedAt: ago(1),
+      lastPromptAt: ago(1),
       layout: layout("main"),
     }),
     session({
       file: "/s/w.jsonl",
       cwd: `${R}/worktree-support`,
       name: "Design worktrees",
-      updatedAt: ago(2),
+      lastPromptAt: ago(2),
       layout: layout("worktree"),
     }),
     session({
       file: "/s/g.jsonl",
       cwd: `${R}/old-spike`,
       name: "Try the thing",
-      updatedAt: ago(30),
+      lastPromptAt: ago(30),
       layout: layout("worktree", true),
     }),
-    session({ file: "/s/a.jsonl", cwd: "/home/me/alpha", name: "Alpha work", updatedAt: ago(60) }),
+    session({
+      file: "/s/a.jsonl",
+      cwd: "/home/me/alpha",
+      name: "Alpha work",
+      lastPromptAt: ago(60),
+    }),
   ];
 
   const groupName = (group: HTMLElement) =>
@@ -635,7 +667,7 @@ describe("Layout repos on Home, /sessions and the picker", () => {
           file: "/s/h.jsonl",
           cwd: `${R}/old-spike`,
           name: "Still held",
-          updatedAt: ago(20),
+          lastPromptAt: ago(20),
           ownedBy: "a9",
           layout: layout("worktree", true),
         });
@@ -697,32 +729,42 @@ describe("Layout repos on Home, /sessions and the picker", () => {
       {
         cwd: R,
         sessionCount: 1,
-        updatedAt: ago(50),
+        lastPromptAt: ago(50),
+        createdAt: ago(50),
         isGitRepo: false,
         layout: layout("container"),
       },
       {
         cwd: `${R}/main`,
         sessionCount: 4,
-        updatedAt: ago(5),
+        lastPromptAt: ago(5),
+        createdAt: ago(5),
         isGitRepo: true,
         layout: layout("main"),
       },
       {
         cwd: `${R}/wt`,
         sessionCount: 2,
-        updatedAt: ago(1),
+        lastPromptAt: ago(1),
+        createdAt: ago(1),
         isGitRepo: true,
         layout: layout("worktree"),
       },
       {
         cwd: `${R}/gone`,
         sessionCount: 1,
-        updatedAt: ago(90),
+        lastPromptAt: ago(90),
+        createdAt: ago(90),
         isGitRepo: false,
         layout: layout("worktree", true),
       },
-      { cwd: "/home/me/alpha", sessionCount: 3, updatedAt: ago(10), isGitRepo: true },
+      {
+        cwd: "/home/me/alpha",
+        sessionCount: 3,
+        lastPromptAt: ago(10),
+        createdAt: ago(10),
+        isGitRepo: true,
+      },
     ];
 
     function stubPicker() {

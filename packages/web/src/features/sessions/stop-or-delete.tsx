@@ -77,7 +77,7 @@ export function StopOrDeleteProvider({ children }: { children: ReactNode }) {
       toast.error(errorMessage(error));
     } finally {
       track(key, false);
-      // The catalog frame only covers the 7-day window and leaves out `ownedBy`.
+      // The catalog frame leaves out `ownedBy`.
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     }

@@ -29,6 +29,9 @@ import type {
   RpcCommandResult,
   SessionSummary,
   SessionsResponse,
+  SidebarPatch,
+  SidebarResponse,
+  SidebarState,
   Snapshot,
   UiResponseBody,
   VapidKeyResponse,
@@ -202,13 +205,13 @@ export async function listProjects(): Promise<ProjectSummary[]> {
   return (await request<ProjectsResponse>("GET", "/api/projects")).projects;
 }
 
-/** Sessions, most recent first; all projects when `cwd` is absent. */
+/** Sessions, most recently prompted first; all projects when `cwd` is absent. */
 export async function listSessions(cwd?: string): Promise<SessionSummary[]> {
   const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
   return (await request<SessionsResponse>("GET", `/api/sessions${query}`)).sessions;
 }
 
-/** Sessions of any age whose cwd path or name contains `q` (case-insensitive), most recent first. */
+/** Sessions whose cwd path or name contains `q` (case-insensitive), most recently prompted first. */
 export async function searchSessions(q: string): Promise<SessionSummary[]> {
   return (await request<SessionsResponse>("GET", `/api/sessions?q=${encodeURIComponent(q)}`))
     .sessions;
@@ -228,6 +231,14 @@ export async function listDirs(prefix: string): Promise<DirSuggestion[]> {
 
 export function navigateTree(id: AgentId, body: NavigateBody): Promise<NavigateResponse> {
   return request<NavigateResponse>("POST", agentPath(id, "/tree/navigate"), body);
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+
+/** Sets pinned / collapsed flags per path; every client gets the result as a `sidebar` frame. */
+export async function patchSidebar(patch: SidebarPatch): Promise<SidebarState> {
+  return (await request<SidebarResponse>("PATCH", "/api/sidebar", patch)).sidebar;
 }
 
 // ---------------------------------------------------------------------------

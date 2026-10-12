@@ -1,16 +1,23 @@
 /**
  * Sidebar rows and groups (`docs/design/05-desktop.md`, "Sidebar"; `06-worktrees.md`): every agent
- * in the registry plus the sessions no agent holds, grouped by `groupListing`, most recent first.
+ * in the registry plus the sessions no agent holds, grouped by `groupListing`, pinned repos first.
  */
 
-import type { AgentInfo, RepoLayout, SessionSummary } from "@pi-code/protocol";
+import {
+  type AgentInfo,
+  type Recency,
+  type RepoLayout,
+  recencyOf,
+  type StreamedSession,
+} from "@pi-code/protocol";
 import {
   agentLayout,
-  epochMs,
+  agentRecency,
   groupListing,
   type ListingGroup,
 } from "@/features/catalog/listing-groups";
-import { isLive } from "@/lib/agents";
+import { type AgentStatusKind, agentStatus } from "@/lib/agent-status";
+import { isLive, isWorking } from "@/lib/agents";
 
 export interface SidebarRow {
   /** Agent id, or the session file for session rows. */
@@ -18,8 +25,10 @@ export interface SidebarRow {
   title: string;
   cwd: string;
   layout?: RepoLayout;
-  /** Epoch ms: the session's `updatedAt`; for agents, the later of that and `startedAt`. */
-  activity: number;
+  /** The latest scan found the folder gone. */
+  missing?: true;
+  /** The session's last prompt, else its creation (an agent's start before its file exists). */
+  recency: Recency;
   /** Set on agent rows (exited agents included). */
   agent?: AgentInfo;
   /** The session file to resume from this row. */
@@ -45,20 +54,50 @@ export function liveBranch(
     : undefined;
 }
 
+/** Attention statuses, most urgent first. */
+const URGENCY: readonly AgentStatusKind[] = ["input", "failed", "finished"];
+
+/**
+ * What a collapsed header shows of the rows it hides, as status marks: Working while one of them
+ * is streaming or starting, then the most urgent status among Needs input, Failed and Finished
+ * (each row's as `agentStatus` reads it).
+ */
+export function hiddenMarks(rows: readonly SidebarRow[]): AgentStatusKind[] {
+  const agents = rows.flatMap((row) => (row.agent ? [row.agent] : []));
+  const statuses = new Set(agents.map((agent) => agentStatus(agent)));
+  const urgent = URGENCY.find((status) => statuses.has(status));
+  return [...(agents.some(isWorking) ? (["working"] as const) : []), ...(urgent ? [urgent] : [])];
+}
+
+/** Every row of a group, its checkouts' included. */
+export function allRows(group: SidebarGroup): SidebarRow[] {
+  return group.kind === "folder"
+    ? group.items
+    : [...group.items, ...group.worktrees.flatMap((worktree) => worktree.items)];
+}
+
+const byLabel = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 export function buildSidebarGroups({
   agents,
   sessions,
   known = sessions,
   query = "",
+  pinned = [],
 }: {
   /** Every agent in the registry. */
   agents: AgentInfo[];
-  /** Session rows' source (the 7-day window, or search results). */
-  sessions: SessionSummary[];
-  /** Sessions to take agent titles, activity and layout from. */
-  known?: SessionSummary[];
+  /** Session rows' source (every session, or search results). */
+  sessions: StreamedSession[];
+  /** Sessions to take agent titles, recency, layout and `missing` from. */
+  known?: StreamedSession[];
   /** When set, only agent rows that `agentMatches` it are shown. */
   query?: string;
+  /**
+   * Pinned repos (container paths): listed first, by label. Without a query, a pinned repo with
+   * no rows still gets its group.
+   */
+  pinned?: readonly string[];
 }): SidebarGroup[] {
   const byFile = new Map(known.map((session) => [session.file, session]));
   // Built from every agent, shown or not: a held session never gets its own row.
@@ -72,7 +111,8 @@ export function buildSidebarGroups({
       title: agent.sessionName ?? session?.name ?? session?.firstMessage ?? "New conversation",
       cwd: agent.cwd,
       ...(layout ? { layout } : {}),
-      activity: Math.max(epochMs(agent.startedAt), epochMs(session?.updatedAt)),
+      ...(session?.missing ? { missing: true } : {}),
+      recency: agentRecency(agent, session),
       agent,
       ...(agent.sessionFile ? { sessionFile: agent.sessionFile } : {}),
     };
@@ -85,14 +125,25 @@ export function buildSidebarGroups({
       title: session.name ?? session.firstMessage ?? "New conversation",
       cwd: session.cwd,
       ...(session.layout ? { layout: session.layout } : {}),
-      activity: epochMs(session.updatedAt),
+      ...(session.missing ? { missing: true } : {}),
+      recency: recencyOf(session),
       sessionFile: session.file,
     });
   }
 
-  return groupListing(rows, {
-    cwd: (row) => row.cwd,
-    layout: (row) => row.layout,
-    activity: (row) => row.activity,
-  });
+  const groups = groupListing(
+    rows,
+    {
+      cwd: (row) => row.cwd,
+      layout: (row) => row.layout,
+      recency: (row) => row.recency,
+      missing: (row) => row.missing === true,
+    },
+    query === "" ? { repos: pinned } : {},
+  );
+  const isPinned = new Set(pinned);
+  const top = groups
+    .filter((group) => group.kind === "repo" && isPinned.has(group.repo))
+    .sort((a, b) => byLabel.compare(a.label, b.label));
+  return [...top, ...groups.filter((group) => !top.includes(group))];
 }

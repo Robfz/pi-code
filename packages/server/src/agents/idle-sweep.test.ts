@@ -101,7 +101,13 @@ describe("idle sweep", () => {
     });
     await crash(h, restarted.id);
     await h.hub.refreshCatalog();
-    expect(h.hub.baseline().sessions.map((s) => s.id)).toEqual(["recent", "idle", "busy", "again"]);
+    const written = new Set(["recent", "idle", "busy", "again", "today"]);
+    const listed = () =>
+      h.hub
+        .baseline()
+        .sessions.map((s) => s.id)
+        .filter((id) => written.has(id));
+    expect(listed()).toEqual(["recent", "idle", "busy", "again"]);
 
     vi.useFakeTimers({ toFake: ["Date"], now: NOW });
     const today = await openReady(h, { sessionFile: writeSession(h, "today", NOW - 8 * DAY) });
@@ -119,8 +125,8 @@ describe("idle sweep", () => {
         .map((a) => a.id)
         .sort(),
     ).toEqual([recent.id, streaming.id, restarted.id, today.id].sort());
-    // Sessions last written 8 days ago left the window; `idle`, at exactly 7 days, is still in.
-    expect(h.hub.baseline().sessions.map((s) => s.id)).toEqual(["recent", "idle"]);
+    // Closing keeps the session files: every session is still listed.
+    expect(listed().sort()).toEqual([...written].sort());
   });
 
   it("matches agents to catalog sessions through symlinks", async () => {

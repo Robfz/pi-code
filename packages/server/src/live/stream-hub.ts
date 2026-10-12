@@ -2,15 +2,13 @@ import type {
   AgentId,
   AgentInfo,
   AgentStatus,
-  SessionSummary,
+  StreamedSession,
   StreamFrame,
 } from "@pi-code/protocol";
 import type { AgentManager } from "../agents/agent-manager.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { FolderBranches } from "../git/branches.ts";
-
-/** Sessions updated within this long are in the catalog window; idle agents close after it. */
-export const CATALOG_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+import type { SidebarStateStore } from "../store/sidebar-state.ts";
 
 /** Statuses of an agent whose pi process is running. */
 const LIVE: ReadonlySet<AgentStatus> = new Set(["starting", "awaiting_trust", "ready"]);
@@ -18,39 +16,40 @@ const LIVE: ReadonlySet<AgentStatus> = new Set(["starting", "awaiting_trust", "r
 type BaselineFrame = Extract<StreamFrame, { type: "baseline" }>;
 
 /** Frames every connection receives, whatever it opened. */
-type HubFrame = Extract<StreamFrame, { type: "agent" | "agent_closed" | "catalog" | "branch" }>;
+type HubFrame = Extract<
+  StreamFrame,
+  { type: "agent" | "agent_closed" | "catalog" | "branch" | "sidebar" }
+>;
 
 interface StreamHubDeps {
   manager: AgentManager;
   catalog: SessionCatalog;
+  sidebar: SidebarStateStore;
+}
+
+/** Every session, in the catalog's order, as `StreamedSession`s. */
+async function catalogListing(catalog: SessionCatalog): Promise<StreamedSession[]> {
+  return (await catalog.sessions()).map(
+    ({ ownedBy: _owner, updatedAt: _updated, ...session }) => session,
+  );
 }
 
 /**
- * Sessions updated within the last `CATALOG_WINDOW_MS`, most recent first, without `ownedBy`
- * (it would go stale; clients match agents by `sessionFile`).
- */
-async function catalogWindow(catalog: SessionCatalog): Promise<SessionSummary[]> {
-  const sessions = await catalog.sessions();
-  const now = Date.now();
-  return sessions
-    .filter((s) => now - Date.parse(s.updatedAt) <= CATALOG_WINDOW_MS)
-    .map(({ ownedBy: _, ...session }) => session);
-}
-
-/**
- * The live stream's shared inputs: turns manager events, catalog rescans and folder branches
- * into frames for every connection, and keeps the catalog window and the branch map in memory,
- * so baselines are built without I/O.
+ * The live stream's shared inputs: turns manager events, catalog rescans, folder branches and
+ * sidebar state changes into frames for every connection, and keeps the session list, the branch
+ * map and the sidebar state in memory, so baselines are built without I/O.
  */
 export class StreamHub {
-  /** Resolves once the first catalog window is computed. */
+  /** Resolves once the first session list is computed and the sidebar state loaded. */
   readonly ready: Promise<void>;
   private readonly manager: AgentManager;
   private readonly catalog: SessionCatalog;
-  private sessions: SessionSummary[] = [];
+  private readonly sidebar: SidebarStateStore;
+  private readonly unsubscribeSidebar: () => void;
+  private sessions: StreamedSession[] = [];
   private readonly branches: FolderBranches;
   private readonly listeners = new Set<(frame: HubFrame) => void>();
-  /** Rescans started, and the latest one whose window was applied. */
+  /** Rescans started, and the latest one whose list was applied. */
   private scansStarted = 0;
   private scanApplied = 0;
   private readonly onAgent = (agent: AgentInfo) => {
@@ -65,10 +64,14 @@ export class StreamHub {
   constructor(deps: StreamHubDeps) {
     this.manager = deps.manager;
     this.catalog = deps.catalog;
+    this.sidebar = deps.sidebar;
     this.branches = new FolderBranches((cwd, branch) =>
       this.broadcast({ type: "branch", cwd, branch }),
     );
-    this.ready = this.refreshCatalog();
+    this.unsubscribeSidebar = deps.sidebar.subscribe((sidebar) =>
+      this.broadcast({ type: "sidebar", sidebar }),
+    );
+    this.ready = Promise.all([this.refreshCatalog(), deps.sidebar.ready]).then(() => {});
     deps.manager.on("agent", this.onAgent);
     deps.manager.on("closed", this.onClosed);
   }
@@ -79,19 +82,24 @@ export class StreamHub {
       agents: this.manager.list(),
       sessions: this.sessions,
       branches: this.branches.current(),
+      sidebar: this.sidebar.current(),
     };
   }
 
   /**
-   * Rescans the sessions dir and recomputes the window, broadcasting `catalog` when it differs
-   * from the current one. Never rejects; a rescan finishing after a later one is dropped.
+   * Rescans the sessions dir, broadcasting `catalog` when the list differs from the current one,
+   * and prunes the sidebar state of folders that are gone. Never rejects; a rescan finishing
+   * after a later one is dropped.
    */
   async refreshCatalog(): Promise<void> {
     const scan = ++this.scansStarted;
-    let sessions: SessionSummary[];
+    void this.sidebar.prune().catch((e: unknown) => {
+      console.warn(`[sidebar] prune failed: ${(e as Error).message}`);
+    });
+    let sessions: StreamedSession[];
     try {
       this.catalog.invalidate();
-      sessions = await catalogWindow(this.catalog);
+      sessions = await catalogListing(this.catalog);
     } catch (e) {
       console.warn(`[stream] catalog scan failed: ${(e as Error).message}`);
       return;
@@ -111,10 +119,11 @@ export class StreamHub {
     };
   }
 
-  /** Stops following the manager and closes the branch watches (shutdown). */
+  /** Stops following the manager and the sidebar state, and closes the branch watches (shutdown). */
   close(): void {
     this.manager.off("agent", this.onAgent);
     this.manager.off("closed", this.onClosed);
+    this.unsubscribeSidebar();
     this.branches.close();
   }
 
