@@ -10,6 +10,7 @@ import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { toolResultText } from "@/lib/content";
 import {
+  isUltraspawnCall,
   SPAWN_TOOL_NAME,
   type SubagentDetails,
   type SubagentResult,
@@ -314,6 +315,7 @@ function subagentLabel(props: ToolRendererProps): ToolLabel {
     verb: statusVerb(props.status, "Running", "Ran", "Agents failed"),
     target: count > 0 ? { kind: "text", text: plural(count, "agent", "agents") } : undefined,
     meta: progress && `· ${progress}`,
+    tone: isUltraspawnCall(props.args, props.argsText) ? "ultraspawn" : undefined,
   };
 }
 

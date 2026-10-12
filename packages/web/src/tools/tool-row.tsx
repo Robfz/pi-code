@@ -76,10 +76,12 @@ export function ToolRow({
   open,
   onOpenChange,
   children,
+  className,
   ...rest
 }: ToolRowProps) {
   const active = isActive(status);
   const failed = status === "error";
+  const ultraspawn = label.tone === "ultraspawn";
   const elapsed = useElapsed(active && durationMs === undefined ? startedAt : undefined);
   const duration =
     durationMs !== undefined
@@ -93,9 +95,15 @@ export function ToolRow({
   return (
     <CollapsibleRow
       {...rest}
+      data-tone={label.tone}
+      className={cn(
+        // -mx-2/px-2 puts the outline where the row's hover background bleeds, keeping alignment.
+        ultraspawn && "-mx-2 my-1 rounded-[7px] px-2 outline outline-ultraspawn/70",
+        className,
+      )}
       open={open}
       onOpenChange={onOpenChange}
-      icon={<Icon className={cn(failed && "text-status-error")} />}
+      icon={<Icon className={cn(failed ? "text-status-error" : ultraspawn && "text-ultraspawn")} />}
       label={
         <>
           <span

@@ -30,6 +30,7 @@
   --color-status-error: var(--status-error);
   --color-status-done: var(--status-done);
   --color-status-idle: var(--status-idle);
+  --color-ultraspawn: var(--ultraspawn);
   --color-diff-add: var(--diff-add);
   --color-diff-del: var(--diff-del);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -113,6 +114,7 @@
   --status-input: oklch(0.72 0.16 65);
   --status-error: var(--destructive);
   --status-done: oklch(0.62 0.14 160);
+  --ultraspawn: oklch(0.56 0.2 300);
   /* The references below resolve on <html>, where next-themes puts `.dark`. */
   --status-working: var(--foreground);
   --status-idle: var(--faint-foreground);
@@ -154,6 +156,7 @@
   --link: oklch(0.7 0.1125 250);
   --status-input: oklch(0.8 0.15 75);
   --status-done: oklch(0.76 0.15 160);
+  --ultraspawn: oklch(0.72 0.16 300);
 }
 
 @layer base {

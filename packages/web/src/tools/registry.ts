@@ -47,6 +47,8 @@ export interface ToolLabel {
   verb: string;
   target?: { kind: "path" | "code" | "text"; text: string };
   meta?: ReactNode;
+  /** Accent colour for the whole row: `ultraspawn` outlines it and tints the icon purple. */
+  tone?: "ultraspawn";
 }
 
 export interface ToolRenderer {

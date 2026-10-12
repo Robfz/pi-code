@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { subagentCost } from "./subagent-details";
+import { isUltraspawnCall, subagentCost } from "./subagent-details";
+
+describe("isUltraspawnCall", () => {
+  it("detects the ultraspawn mode from parsed args", () => {
+    expect(isUltraspawnCall({ ultraspawn: "review" })).toBe(true);
+    expect(isUltraspawnCall({ script: "return 1", args: {} })).toBe(true);
+    expect(isUltraspawnCall({ agent: "scout", task: 'echo "script": 1' })).toBe(false);
+    expect(isUltraspawnCall({ tasks: [] })).toBe(false);
+  });
+
+  it("falls back to the raw JSON while the mode key hasn't parsed", () => {
+    expect(isUltraspawnCall(undefined, '{"script": "const r = await ag')).toBe(true);
+    expect(isUltraspawnCall({}, '{"ultraspawn":')).toBe(true);
+    expect(isUltraspawnCall(undefined, '{"agent": "sc')).toBe(false);
+    expect(isUltraspawnCall(undefined)).toBe(false);
+  });
+});
 
 describe("subagentCost", () => {
   it("sums usage.cost over the call's agents", () => {
