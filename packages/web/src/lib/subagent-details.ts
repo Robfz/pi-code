@@ -39,6 +39,17 @@ export interface SubagentDetails {
   results: SubagentResult[];
 }
 
+/**
+ * Whether a `spawn` call runs an ultraspawn script (`script` or `ultraspawn` argument). While
+ * the call streams, parsed args may not hold the mode key yet, so the raw JSON is checked too.
+ */
+export function isUltraspawnCall(args: unknown, argsText?: string): boolean {
+  const rec = asRecord(args);
+  if (rec && ("script" in rec || "ultraspawn" in rec)) return true;
+  if (rec && ("agent" in rec || "tasks" in rec || "chain" in rec)) return false;
+  return /"(?:script|ultraspawn)"\s*:/.test(argsText ?? "");
+}
+
 export function subagentDetails(value: unknown): SubagentDetails | undefined {
   const details = asRecord(asRecord(value)?.details);
   if (!details) return undefined;

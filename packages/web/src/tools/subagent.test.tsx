@@ -273,6 +273,31 @@ describe("subagent modes", () => {
     expect(screen.getByText("Invalid parameters. Provide exactly one mode.")).toBeInTheDocument();
   });
 
+  it("ultraspawn: the whole row gets the ultraspawn tone and a tinted icon", () => {
+    const { rerender } = render(
+      <ToolCallView
+        toolCallId="x"
+        toolName="spawn"
+        args={{ ultraspawn: "review" }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(row()).toHaveAttribute("data-tone", "ultraspawn");
+    expect(header().querySelector('[data-slot="row-icon"] svg')).toHaveClass("text-ultraspawn");
+
+    rerender(
+      <ToolCallView
+        toolCallId="x"
+        toolName="spawn"
+        args={{ agent: "scout", task: "t" }}
+        status="running"
+        isError={false}
+      />,
+    );
+    expect(row()).not.toHaveAttribute("data-tone");
+  });
+
   it("status and usage helpers", () => {
     expect(subagentStatus(result({ exitCode: -1 }), false)).toBe("failed");
     expect(subagentStatus(result({ stopReason: "aborted", durationMs: 1 }), false)).toBe("failed");
