@@ -19,10 +19,10 @@ The **main rule** for a folder `M`: `M/.git` is a directory, `basename(M)` is `m
 
 | The cwd | Check | `layout` |
 |---|---|---|
-| has a `.git` directory | the cwd passes the main rule | `{ repo: dirname(cwd), role: "main" }` |
-| has a `.git` file | `gitdir: <g>` (relative to the cwd) → `<g>/commondir` (relative to `<g>`) → common dir `<M>/.git`; `M` passes the main rule | `{ repo: dirname(M), role: "worktree" }` |
-| exists, no `.git` | `<cwd>/main` or `<cwd>/master` passes the main rule | `{ repo: cwd, role: "container" }` |
-| doesn't exist | `<dirname(cwd)>/main` or `/master` passes the main rule | `{ repo: dirname(cwd), role: "worktree", missing: true }` |
+| has a `.git` directory | the cwd passes the main rule | `{ repo: dirname(cwd), role: "main", main: cwd }` |
+| has a `.git` file | `gitdir: <g>` (relative to the cwd) → `<g>/commondir` (relative to `<g>`) → common dir `<M>/.git`; `M` passes the main rule | `{ repo: dirname(M), role: "worktree", main: M }` |
+| exists, no `.git` | `<cwd>/main` or `<cwd>/master` passes the main rule | `{ repo: cwd, role: "container", main: <that folder> }` |
+| doesn't exist | `<dirname(cwd)>/main` or `/master` passes the main rule | `{ repo: dirname(cwd), role: "worktree", main: <that folder>, missing: true }` |
 | anything else | | none |
 
 - Linked worktrees are tied to their repo through `commondir`, not through their position, so one outside the container joins its repo too. A `.git` file without `commondir` (a submodule) or with a common dir not named `.git` (a bare repo) gets none.
@@ -37,6 +37,7 @@ The **main rule** for a folder `M`: `M/.git` is a directory, `basename(M)` is `m
 interface RepoLayout {
   repo: string;                                // the container folder
   role: "container" | "main" | "worktree";
+  main: string;                                // the main checkout, `<repo>/main` or `<repo>/master`
   missing?: true;                              // worktree folder not on disk
 }
 
@@ -127,6 +128,7 @@ interface WorktreeGroup<T> {
 - Items with `layout` group under `layout.repo`. `role: "container"` items go in the repo group's own `items`, directly under its header. The others go in one `WorktreeGroup` per cwd: the main checkout first, then the rest by their first item. Items without `layout` form folder groups by cwd, as in `05`; the optional `missing` key marks a folder group gone (the sidebar passes its rows' `missing`, from `SessionSummary.missing`).
 - Items are ordered by `compareRecency` (prompted first, newest prompt first; then the rest, newest created first), and groups by their first item, so groups without any prompt come last. Top-level labels follow the collision rule of `05` over all top-level groups, using the container's basename for repo groups.
 - The `repos` option adds an empty repo group, after the others, for each listed container without items; the sidebar passes its pinned repos, so a pinned repo with no conversations keeps its header and its label still takes part in the collision rule.
+- The `mains` option (container → main checkout) gives every repo group its main checkout's `WorktreeGroup`, with no items when none sits there (`missing: false`). The main path comes from any of the group's items (`layout.main`), else from `mains`; a repo group with neither gets none. Only the sidebar sets it, outside search, passing the server's `SidebarView.mains` ([`05-desktop.md`](05-desktop.md), "Sidebar state"), so a pinned repo with no conversations shows its main checkout too.
 - In a missing worktree, session rows and exited agents are disabled: resuming would fail with `cwd does not exist` (F2). Their `×` still deletes them ([`08-delete-sessions.md`](08-delete-sessions.md)). A live agent stays usable. `SessionRows` disables a session with `layout.missing` on every list, the share screen's included, unless a live agent holds it (`ownedBy`).
 - Every repo group header, on every surface, offers "New worktree" (`NewWorktreeButton`); worktree sub-group headers of linked and missing worktrees offer "Remove worktree" (`RemoveWorktreeButton`), and missing ones show `MissingMark`. All three live in `features/worktrees/worktree-actions.tsx`.
 
@@ -147,8 +149,9 @@ interface WorktreeGroup<T> {
 ```
 
 - The branch chip sits on whichever header owns the cwd (folder group or worktree sub-group), shown only while that folder has a live row. Every `+` starts a conversation in its own header's folder; the repo header's folder is the container.
+- The main checkout's sub-group is always there, empty (header only) when the main checkout has no conversations, so its `+` can start one there; a pinned repo with no conversations included. Home, `/sessions` and the picker show it only with items.
 - The repo group and each linked worktree sub-group collapse on their own; the main checkout's sub-group hides only with its repo, and a missing worktree's doesn't collapse. Collapsed state is kept by path (the container, the worktree's cwd) and forgotten when the folder goes. Only repo groups have the pin toggle; pinned repos sort first, by label ([`05-desktop.md`](05-desktop.md), "Sidebar").
-- Search results go through the same model; agent rows are filtered as in `05`.
+- Search results go through the same model; agent rows are filtered as in `05`. They add no empty main checkout sub-group, as they add no empty pinned repo.
 
 ### Home and `/sessions`
 
@@ -181,7 +184,7 @@ Real `git` in temp dirs for layout and git operations, the HTTP harness for the 
 ## Limitations
 
 - A new worktree whose conversation closes before any message drops out of every listing (F9); the folder is left on disk, reachable through the picker's path field.
-- A layout repo with no session and no open conversation in any of its folders appears nowhere: the picker and `/sessions` list only session-derived entries. The picker's path field doesn't offer "New worktree": start a conversation in `<repo>/main` from the path field, and its repo group, with the action, appears.
+- A layout repo with no session and no open conversation in any of its folders appears nowhere unless it's pinned: the picker and `/sessions` list only session-derived entries, and the sidebar adds only pinned repos. The picker's path field doesn't offer "New worktree": start a conversation in `<repo>/main` from the path field, and its repo group, with the action, appears.
 - An open, resume, restart or trust request racing a removal of the same worktree can spawn pi in a folder being deleted; single-user, not guarded.
 - Concurrent creates or removes on one repo can surface git's own lock error as `502 git_failed`; the client runs one removal at a time and one create per sheet.
 - Locked worktrees aren't handled: git refuses to remove them, which surfaces as `git_failed`.

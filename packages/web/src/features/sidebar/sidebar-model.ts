@@ -84,6 +84,7 @@ export function buildSidebarGroups({
   known = sessions,
   query = "",
   pinned = [],
+  mains = {},
 }: {
   /** Every agent in the registry. */
   agents: AgentInfo[];
@@ -98,6 +99,11 @@ export function buildSidebarGroups({
    * no rows still gets its group.
    */
   pinned?: readonly string[];
+  /**
+   * Pinned repo → its main checkout. Without a query, every repo group gets its main checkout's
+   * sub-group, even empty; its main comes from its rows' layout, else from here.
+   */
+  mains?: Readonly<Record<string, string>>;
 }): SidebarGroup[] {
   const byFile = new Map(known.map((session) => [session.file, session]));
   // Built from every agent, shown or not: a held session never gets its own row.
@@ -139,7 +145,7 @@ export function buildSidebarGroups({
       recency: (row) => row.recency,
       missing: (row) => row.missing === true,
     },
-    query === "" ? { repos: pinned } : {},
+    query === "" ? { repos: pinned, mains } : {},
   );
   const isPinned = new Set(pinned);
   const top = groups

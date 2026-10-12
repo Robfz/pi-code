@@ -60,21 +60,21 @@ export function layoutOf(cwd: string): RepoLayout | undefined {
   try {
     const dotGit = statSync(join(cwd, ".git"), { throwIfNoEntry: false });
     if (dotGit?.isDirectory()) {
-      return isMainCheckout(cwd) ? { repo: dirname(cwd), role: "main" } : undefined;
+      return isMainCheckout(cwd) ? { repo: dirname(cwd), role: "main", main: cwd } : undefined;
     }
     if (dotGit?.isFile()) {
       const m = commonCheckoutOf(cwd);
       return m !== undefined && isMainCheckout(m)
-        ? { repo: dirname(m), role: "worktree" }
+        ? { repo: dirname(m), role: "worktree", main: m }
         : undefined;
     }
     if (statSync(cwd, { throwIfNoEntry: false }) !== undefined) {
-      return mainCheckoutIn(cwd) !== undefined ? { repo: cwd, role: "container" } : undefined;
+      const main = mainCheckoutIn(cwd);
+      return main !== undefined ? { repo: cwd, role: "container", main } : undefined;
     }
     const repo = dirname(cwd);
-    return mainCheckoutIn(repo) !== undefined
-      ? { repo, role: "worktree", missing: true }
-      : undefined;
+    const main = mainCheckoutIn(repo);
+    return main !== undefined ? { repo, role: "worktree", main, missing: true } : undefined;
   } catch {
     return undefined;
   }

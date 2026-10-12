@@ -76,7 +76,7 @@ interface LiveOverview {                     // Zustand; read by the sidebar, Ho
   agents: Record<AgentId, AgentInfo>;        // every agent the server holds, exited included
   sessions: SessionSummary[];                // every session, most recently prompted first
   branches: Record<string, string>;          // cwd → branch
-  sidebar: SidebarState;                     // pins and collapsed groups
+  sidebar: SidebarView;                      // pins, collapsed groups, pinned repos' main checkouts
   connection: "connecting" | "live" | "reconnecting" | "offline";
 }
 

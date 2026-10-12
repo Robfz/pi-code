@@ -28,6 +28,8 @@ export interface RepoLayout {
   /** The container folder. */
   repo: string;
   role: "container" | "main" | "worktree";
+  /** The main checkout (`<repo>/main` or `<repo>/master`). */
+  main: string;
   /** The worktree folder is not on disk. */
   missing?: true;
 }
@@ -155,8 +157,14 @@ export interface SidebarState {
 /** `PATCH /api/sidebar`: path → whether it is pinned / collapsed; other paths are unchanged. */
 export type SidebarPatch = { [K in keyof SidebarState]?: Record<string, boolean> };
 
+/** `SidebarState` as the server sends it. */
+export interface SidebarView extends SidebarState {
+  /** Pinned repo (container path) → its main checkout; absent when it no longer resolves. */
+  mains: Record<string, string>;
+}
+
 export interface SidebarResponse {
-  sidebar: SidebarState;
+  sidebar: SidebarView;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +268,7 @@ export type StreamFrame =
       sessions: StreamedSession[];
       /** cwd → branch, for folders with a live agent inside a git work tree. */
       branches: Record<string, string>;
-      sidebar: SidebarState;
+      sidebar: SidebarView;
     }
   /** An opened agent's event; `seq` duplicates its pair in the SSE `id:`. */
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent }
@@ -272,7 +280,7 @@ export type StreamFrame =
   /** Every session, as in `baseline`; replaces the previous list. */
   | { type: "catalog"; sessions: StreamedSession[] }
   /** The sidebar state changed; replaces the previous one. */
-  | { type: "sidebar"; sidebar: SidebarState }
+  | { type: "sidebar"; sidebar: SidebarView }
   /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
   | { type: "branch"; cwd: string; branch: string | null };
 

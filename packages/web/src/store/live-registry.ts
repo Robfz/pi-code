@@ -27,6 +27,7 @@ import {
   SIDEBAR_KEYS,
   type SidebarPatch,
   type SidebarState,
+  type SidebarView,
   type Snapshot,
   type StreamedSession,
   type StreamFrame,
@@ -67,14 +68,14 @@ export interface LiveOverview {
   sessions: StreamedSession[];
   /** cwd → branch, for folders with a live agent. */
   branches: Record<string, string>;
-  sidebar: SidebarState;
+  sidebar: SidebarView;
   connection: ConnectionState;
 }
 
 export interface RegistryDeps {
   fetchSnapshot(agentId: AgentId): Promise<Snapshot>;
   ack(agentId: AgentId): Promise<void>;
-  patchSidebar(patch: SidebarPatch): Promise<SidebarState>;
+  patchSidebar(patch: SidebarPatch): Promise<SidebarView>;
   document: Pick<
     Document,
     "visibilityState" | "hasFocus" | "addEventListener" | "removeEventListener"
@@ -113,7 +114,7 @@ export class LiveRegistry {
     agents: {},
     sessions: [],
     branches: {},
-    sidebar: { pinned: [], collapsed: [] },
+    sidebar: { pinned: [], collapsed: [], mains: {} },
     connection: "connecting",
   }));
   private readonly queryClient: Pick<QueryClient, "invalidateQueries">;

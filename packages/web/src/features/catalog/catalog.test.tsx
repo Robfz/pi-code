@@ -532,6 +532,7 @@ describe("Layout repos on Home, /sessions and the picker", () => {
   const layout = (role: RepoLayout["role"], missing = false): RepoLayout => ({
     repo: R,
     role,
+    main: `${R}/main`,
     ...(missing ? { missing: true as const } : {}),
   });
   const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();

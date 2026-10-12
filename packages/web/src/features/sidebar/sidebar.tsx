@@ -317,8 +317,8 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
 
   const groups = useMemo(() => {
     const allAgents = Object.values(agents);
-    const { pinned } = sidebar;
-    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions, pinned });
+    const { pinned, mains } = sidebar;
+    if (!searching) return buildSidebarGroups({ agents: allAgents, sessions, pinned, mains });
     const results = search.data ?? [];
     return buildSidebarGroups({
       agents: allAgents,

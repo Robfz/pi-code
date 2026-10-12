@@ -88,18 +88,23 @@ export function groupPath(group: ListingGroup<unknown>): string {
 /**
  * Items ordered by `compareRecency`, groups by their first item, so groups with a prompt come
  * before those without. `repos` adds a repo group, after the others, for each container path
- * that has no items. Top-level labels are the folder basename, with the parent's basename
- * prepended when another top-level group shares it.
+ * that has no items. With `mains` set, every repo group has its main checkout's sub-group, empty
+ * when no item sits there, once the main path is known: from an item's layout, else from `mains`
+ * (container path → main checkout). Top-level labels are the folder basename, with the parent's
+ * basename prepended when another top-level group shares it.
  */
 export function groupListing<T>(
   items: readonly T[],
   keys: ListingKeys<T>,
-  { repos: emptyRepos = [] }: { repos?: readonly string[] } = {},
+  {
+    repos: emptyRepos = [],
+    mains,
+  }: { repos?: readonly string[]; mains?: Readonly<Record<string, string>> } = {},
 ): ListingGroup<T>[] {
   const groups = new Map<string, ListingGroup<T>>();
   const repos = new Map<
     string,
-    { group: RepoGroup<T>; checkouts: Map<string, WorktreeGroup<T>> }
+    { group: RepoGroup<T>; checkouts: Map<string, WorktreeGroup<T>>; main?: string }
   >();
   const sorted = [...items].sort((a, b) => compareRecency(keys.recency(a), keys.recency(b)));
   // Map insertion order follows the items' order: groups and checkouts come in item order.
@@ -127,6 +132,7 @@ export function groupListing<T>(
       repos.set(layout.repo, repo);
       groups.set(`repo:${layout.repo}`, repo.group);
     }
+    repo.main ??= layout.main;
     if (layout.role === "container") {
       repo.group.items.push(item);
       continue;
@@ -151,7 +157,17 @@ export function groupListing<T>(
     repos.set(repo, { group, checkouts: new Map() });
     groups.set(`repo:${repo}`, group);
   }
-  for (const { group, checkouts } of repos.values()) {
+  for (const { group, checkouts, main: itemsMain } of repos.values()) {
+    const main = itemsMain ?? mains?.[group.repo];
+    if (mains !== undefined && main !== undefined && !checkouts.has(main)) {
+      checkouts.set(main, {
+        cwd: main,
+        label: baseName(main),
+        role: "main",
+        missing: false,
+        items: [],
+      });
+    }
     // Stable sort: the main checkout moves first, the rest keep their recency order.
     group.worktrees = [...checkouts.values()].sort(
       (a, b) => Number(b.role === "main") - Number(a.role === "main"),

@@ -94,6 +94,6 @@ export function sendBaseline(agents: AgentInfo[]) {
     agents,
     sessions: [],
     branches: {},
-    sidebar: { pinned: [], collapsed: [] },
+    sidebar: { pinned: [], collapsed: [], mains: {} },
   });
 }

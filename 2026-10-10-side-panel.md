@@ -53,3 +53,9 @@ Builds on `maps/2026-09-30-desktop.md` (Sidebar) and `maps/2026-09-30-worktrees.
 - [settled] Pinned repos sort by their displayed label (collision prefix included), case-insensitive, numeric-aware — agent's call, delegated by user
 - [settled] Pin affordance must behave the same on every client type (no hover/touch branching) — user
 - [settled] Pin affordance: always-visible pin icon on every repo header, before the new-worktree icon; outline when unpinned, filled when pinned — user accepted agent's proposal
+
+## Main checkout
+- [settled] In the sidebar, a layout repo always shows its main checkout sub-group, even empty, so its `+` can start a conversation there; other surfaces unchanged — user
+- [settled] That includes pinned repos with no conversations; the server sends each pinned repo's main checkout with the sidebar state — user
+- [settled] The repo header keeps its `+` for the container folder — agent's call, accepted by user
+- [settled] Not added to search results, like empty pinned repos — agent's call, accepted by user

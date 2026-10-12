@@ -5,7 +5,7 @@ import {
   type RepoLayout,
   type SessionSummary,
   type SidebarPatch,
-  type SidebarState,
+  type SidebarView,
 } from "@pi-code/protocol";
 import {
   createMemoryHistory,
@@ -42,7 +42,7 @@ function session(patch: Partial<SessionSummary> & { file: string }): SessionSumm
 const recent = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
 
 /** The server's sidebar state, as `PATCH /api/sidebar` leaves it (every path exists). */
-let serverSidebar: SidebarState = { pinned: [], collapsed: [] };
+let serverSidebar: SidebarView = { pinned: [], collapsed: [], mains: {} };
 
 async function renderSidebar(
   path = "/",
@@ -71,8 +71,9 @@ function baseline(
   agents: AgentInfo[],
   sessions: SessionSummary[] = [],
   branches: Record<string, string> = {},
-  sidebar: SidebarState = { pinned: [], collapsed: [] },
+  state: Partial<SidebarView> = {},
 ) {
+  const sidebar = { pinned: [], collapsed: [], mains: {}, ...state };
   serverSidebar = sidebar;
   sendFrame({ type: "baseline", agents, sessions, branches, sidebar });
 }
@@ -703,11 +704,12 @@ describe("Sidebar with layout repos", () => {
   const layout = (role: RepoLayout["role"], missing = false): RepoLayout => ({
     repo: R,
     role,
+    main: `${R}/main`,
     ...(missing ? { missing: true as const } : {}),
   });
 
   /** A layout repo with every kind of folder, plus a plain clone. */
-  function layoutBaseline(sidebar?: SidebarState) {
+  function layoutBaseline(sidebar?: Partial<SidebarView>) {
     baseline(
       [
         makeAgent({
@@ -910,6 +912,53 @@ describe("Sidebar with layout repos", () => {
     ).toEqual([{ cwd: R }, { cwd: `${R}/main` }]);
   });
 
+  it("shows an empty main checkout, pinned repos' included, whose + starts a conversation there", async () => {
+    let n = 0;
+    const { router, calls } = await renderSidebar("/", (call) =>
+      call.url === "/api/agents" && call.method === "POST"
+        ? [201, { agent: makeAgent({ id: `n${++n}`, status: "starting" }) }]
+        : undefined,
+    );
+    const pinned = "/home/me/Dev/tool";
+    baseline(
+      [],
+      [
+        session({
+          file: "w1",
+          cwd: `${R}/worktree-support`,
+          name: "Design worktrees",
+          lastPromptAt: recent(5),
+          layout: layout("worktree"),
+        }),
+      ],
+      {},
+      { pinned: [pinned], mains: { [pinned]: `${pinned}/master` } },
+    );
+    await within(nav()).findByText("Design worktrees");
+    expect(within(repo()).getAllByRole("group").map(groupName)).toEqual([
+      "main",
+      "worktree-support",
+    ]);
+    expect(within(worktree("main")).queryAllByTestId("sidebar-row")).toEqual([]);
+    expect(toggle(worktree("main"))).toBeUndefined();
+    const tool = within(nav()).getByRole("group", { name: "tool" });
+    const master = within(tool).getByRole("group", { name: "master" });
+    expect(within(master).queryAllByTestId("sidebar-row")).toEqual([]);
+
+    const user = userEvent.setup();
+    await user.click(
+      within(worktree("main")).getByRole("button", { name: "New conversation in pi-code/main" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/n1"));
+    await user.click(
+      within(master).getByRole("button", { name: "New conversation in tool/master" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/n2"));
+    expect(
+      calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body),
+    ).toEqual([{ cwd: `${R}/main` }, { cwd: `${pinned}/master` }]);
+  });
+
   it("creates a worktree from the repo header and navigates to its conversation", async () => {
     const { calls } = stubFetch((call) =>
       call.url === "/api/worktrees" && call.method === "POST"
@@ -1046,7 +1095,10 @@ describe("Sidebar with layout repos", () => {
     await renderSidebar();
     layoutBaseline();
     await within(nav()).findByText("Dotfiles");
-    sendFrame({ type: "sidebar", sidebar: { pinned: [], collapsed: ["/home/me/dotfiles"] } });
+    sendFrame({
+      type: "sidebar",
+      sidebar: { pinned: [], collapsed: ["/home/me/dotfiles"], mains: {} },
+    });
     expect(within(nav()).queryByText("Dotfiles")).toBeNull();
   });
 

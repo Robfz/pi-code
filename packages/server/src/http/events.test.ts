@@ -277,7 +277,7 @@ group("live stream", () => {
       agents: [h.manager.require(agent.id).info()],
       sessions: [],
       branches: {},
-      sidebar: { pinned: [], collapsed: [] },
+      sidebar: { pinned: [], collapsed: [], mains: {} },
     });
     expect(client.retry).toBe(2000);
     expect(client.frames[0]?.id).toBe("");

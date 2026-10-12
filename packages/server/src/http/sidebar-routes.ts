@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { validator } from "hono/validator";
-import { parseSidebarPatch, type SidebarStateStore } from "../store/sidebar-state.ts";
+import { parseSidebarPatch, type SidebarStateStore, sidebarView } from "../store/sidebar-state.ts";
 
 /**
  * `PATCH /api/sidebar`: sets pinned / collapsed flags per path, idempotently, so devices
@@ -11,6 +11,6 @@ export function sidebarRoutes(sidebar: SidebarStateStore) {
   return new Hono().patch(
     "/",
     validator("json", (value) => parseSidebarPatch(value)),
-    async (c) => c.json({ sidebar: await sidebar.update(c.req.valid("json")) }, 200),
+    async (c) => c.json({ sidebar: sidebarView(await sidebar.update(c.req.valid("json"))) }, 200),
   );
 }

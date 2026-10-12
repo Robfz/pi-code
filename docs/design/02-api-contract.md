@@ -30,6 +30,7 @@ type Attention = "none" | "finished" | "failed" | "input";
 interface RepoLayout {
   repo: string;                  // the container folder
   role: "container" | "main" | "worktree";
+  main: string;                  // the main checkout, `<repo>/main` or `<repo>/master`
   missing?: true;                // worktree folder not on disk
 }
 
@@ -79,6 +80,11 @@ interface ProjectSummary {
 interface SidebarState {
   pinned: string[];              // pinned layout repos (container paths)
   collapsed: string[];           // collapsed groups: folder cwds, repo containers, worktree cwds
+}
+
+/** `SidebarState` as the server sends it. */
+interface SidebarView extends SidebarState {
+  mains: Record<string, string>; // pinned repo → its main checkout; absent when it doesn't resolve
 }
 
 interface GitStatus { branch: string | null; dirty: boolean }
@@ -139,7 +145,7 @@ interface SidebarPatch {
   collapsed?: Record<string, boolean>;  // absolute path → collapsed
 }
 ```
-→ `200 { sidebar: SidebarState }`, the state after the change; a path whose directory doesn't exist is not added. Every change also goes to every stream as a `sidebar` frame. `400 invalid_body` for another shape, a relative path or a non-boolean flag.
+→ `200 { sidebar: SidebarView }`, the state after the change; a path whose directory doesn't exist is not added. Every change also goes to every stream as a `sidebar` frame. `400 invalid_body` for another shape, a relative path or a non-boolean flag.
 
 ## Agents
 
@@ -212,17 +218,17 @@ Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `
 type CursorList = string;
 
 type StreamFrame =
-  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarState }
+  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarView }
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent } // opened agents only
   | { type: "resync"; agentId: AgentId }                  // the cursor can't be replayed: refetch the snapshot
   | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
   | { type: "agent_closed"; agentId: AgentId }
   | { type: "catalog"; sessions: StreamedSession[] }      // every session; replaces the previous list
   | { type: "branch"; cwd: string; branch: string | null } // null: no longer tracked
-  | { type: "sidebar"; sidebar: SidebarState };           // replaces the previous state
+  | { type: "sidebar"; sidebar: SidebarView };            // replaces the previous state
 ```
 
-- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state.
+- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state. Every `SidebarView` the server sends resolves `mains` (`mainCheckoutIn`) as it sends it.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
 - `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.

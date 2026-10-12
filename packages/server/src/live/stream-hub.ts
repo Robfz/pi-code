@@ -8,7 +8,7 @@ import type {
 import type { AgentManager } from "../agents/agent-manager.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { FolderBranches } from "../git/branches.ts";
-import type { SidebarStateStore } from "../store/sidebar-state.ts";
+import { type SidebarStateStore, sidebarView } from "../store/sidebar-state.ts";
 
 /** Statuses of an agent whose pi process is running. */
 const LIVE: ReadonlySet<AgentStatus> = new Set(["starting", "awaiting_trust", "ready"]);
@@ -37,7 +37,8 @@ async function catalogListing(catalog: SessionCatalog): Promise<StreamedSession[
 /**
  * The live stream's shared inputs: turns manager events, catalog rescans, folder branches and
  * sidebar state changes into frames for every connection, and keeps the session list, the branch
- * map and the sidebar state in memory, so baselines are built without I/O.
+ * map and the sidebar state in memory, so baselines are built without I/O beyond resolving the
+ * pinned repos' main checkouts (`sidebarView`).
  */
 export class StreamHub {
   /** Resolves once the first session list is computed and the sidebar state loaded. */
@@ -69,7 +70,7 @@ export class StreamHub {
       this.broadcast({ type: "branch", cwd, branch }),
     );
     this.unsubscribeSidebar = deps.sidebar.subscribe((sidebar) =>
-      this.broadcast({ type: "sidebar", sidebar }),
+      this.broadcast({ type: "sidebar", sidebar: sidebarView(sidebar) }),
     );
     this.ready = Promise.all([this.refreshCatalog(), deps.sidebar.ready]).then(() => {});
     deps.manager.on("agent", this.onAgent);
@@ -82,7 +83,7 @@ export class StreamHub {
       agents: this.manager.list(),
       sessions: this.sessions,
       branches: this.branches.current(),
-      sidebar: this.sidebar.current(),
+      sidebar: sidebarView(this.sidebar.current()),
     };
   }
 
