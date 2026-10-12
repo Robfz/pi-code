@@ -69,7 +69,7 @@ describe("StreamHub baseline", () => {
     expect(baseline).toMatchObject({
       agents: [],
       branches: {},
-      sidebar: { pinned: [], collapsed: [] },
+      sidebar: { pinned: [], collapsed: [], mains: {} },
     });
     hub.close();
   });
@@ -190,7 +190,7 @@ describe("StreamHub catalog refresh", () => {
     await hub.ready;
     const frames: StreamFrame[] = [];
     hub.subscribe((f) => frames.push(f));
-    expect(hub.baseline().sessions[0]?.layout).toEqual({ repo, role: "worktree" });
+    expect(hub.baseline().sessions[0]?.layout).toEqual({ repo, role: "worktree", main });
 
     rmSync(wt, { recursive: true });
     await hub.refreshCatalog();
@@ -198,7 +198,10 @@ describe("StreamHub catalog refresh", () => {
       {
         type: "catalog",
         sessions: [
-          expect.objectContaining({ id: "w", layout: { repo, role: "worktree", missing: true } }),
+          expect.objectContaining({
+            id: "w",
+            layout: { repo, role: "worktree", main, missing: true },
+          }),
         ],
       },
     ]);
@@ -234,13 +237,45 @@ describe("StreamHub sidebar state", () => {
     hub.subscribe((f) => frames.push(f));
 
     await sidebar.update({ collapsed: { [folder]: true } });
-    expect(hub.baseline().sidebar).toEqual({ pinned: [], collapsed: [folder] });
-    expect(frames).toEqual([{ type: "sidebar", sidebar: { pinned: [], collapsed: [folder] } }]);
+    expect(hub.baseline().sidebar).toEqual({ pinned: [], collapsed: [folder], mains: {} });
+    expect(frames).toEqual([
+      { type: "sidebar", sidebar: { pinned: [], collapsed: [folder], mains: {} } },
+    ]);
 
     rmSync(folder, { recursive: true });
     await hub.refreshCatalog();
     await sidebar.update({}); // queued after the refresh's prune
-    expect(frames.at(-1)).toEqual({ type: "sidebar", sidebar: { pinned: [], collapsed: [] } });
+    expect(frames.at(-1)).toEqual({
+      type: "sidebar",
+      sidebar: { pinned: [], collapsed: [], mains: {} },
+    });
+    hub.close();
+  });
+
+  it("sends each pinned repo's main checkout, resolved when sent", async () => {
+    const { repo, main } = makeLayoutRepo(root, "r", { branches: ["master"], checkout: "master" });
+    const manager = new AgentManager({
+      home: root,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const sidebar = new SidebarStateStore(join(root, "data"));
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
+      sidebar,
+    });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+
+    await sidebar.update({ pinned: { [repo]: true } });
+    const view = { pinned: [repo], collapsed: [], mains: { [repo]: main } };
+    expect(frames).toEqual([{ type: "sidebar", sidebar: view }]);
+    expect(hub.baseline().sidebar).toEqual(view);
+
+    // A pin that no longer resolves to a main checkout has no entry.
+    rmSync(main, { recursive: true });
+    expect(hub.baseline().sidebar).toEqual({ pinned: [repo], collapsed: [], mains: {} });
     hub.close();
   });
 });

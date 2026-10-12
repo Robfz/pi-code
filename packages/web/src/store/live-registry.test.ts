@@ -4,7 +4,7 @@ import type {
   CursorList,
   ServerEvent,
   SidebarPatch,
-  SidebarState,
+  SidebarView,
   Snapshot,
   StreamedSession,
   StreamFrame,
@@ -17,7 +17,7 @@ import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtur
 import type { ConversationStore } from "./conversation-store";
 import { LiveRegistry, type RegistryDeps, STALE_AFTER_MS } from "./live-registry";
 
-const noSidebar: SidebarState = { pinned: [], collapsed: [] };
+const noSidebar: SidebarView = { pinned: [], collapsed: [], mains: {} };
 
 function parseCursors(list: CursorList): Map<AgentId, number> {
   const cursors = new Map<AgentId, number>();
@@ -196,7 +196,7 @@ let queryClient: QueryClient;
 let deps: Partial<RegistryDeps> & {
   fetchSnapshot: ReturnType<typeof vi.fn<(id: AgentId) => Promise<Snapshot>>>;
   ack: ReturnType<typeof vi.fn>;
-  patchSidebar: ReturnType<typeof vi.fn<(patch: SidebarPatch) => Promise<SidebarState>>>;
+  patchSidebar: ReturnType<typeof vi.fn<(patch: SidebarPatch) => Promise<SidebarView>>>;
 };
 let registry: LiveRegistry;
 
@@ -261,14 +261,22 @@ describe("LiveRegistry", () => {
       agents: [makeAgent({ id: "a1" })],
       sessions: [session("s1")],
       branches: { "/home/me/project": "main" },
-      sidebar: { pinned: ["/home/me/repo"], collapsed: [] },
+      sidebar: {
+        pinned: ["/home/me/repo"],
+        collapsed: [],
+        mains: { "/home/me/repo": "/home/me/repo/main" },
+      },
     });
     expect(registry.live.getState()).toMatchObject({
       loaded: true,
       agents: { a1: { id: "a1" } },
       sessions: [{ id: "s1" }],
       branches: { "/home/me/project": "main" },
-      sidebar: { pinned: ["/home/me/repo"], collapsed: [] },
+      sidebar: {
+        pinned: ["/home/me/repo"],
+        collapsed: [],
+        mains: { "/home/me/repo": "/home/me/repo/main" },
+      },
       connection: "live",
     });
 
@@ -310,13 +318,16 @@ describe("LiveRegistry", () => {
       agents: [],
       sessions: [],
       branches: {},
-      sidebar: { pinned: [], collapsed: ["/a"] },
+      sidebar: { pinned: [], collapsed: ["/a"], mains: {} },
     });
-    latest().send({ type: "sidebar", sidebar: { pinned: ["/r"], collapsed: ["/a", "/b"] } });
-    expect(registry.live.getState().sidebar).toEqual({ pinned: ["/r"], collapsed: ["/a", "/b"] });
+    const mains = { "/r": "/r/main" };
+    const sidebar = { pinned: ["/r"], collapsed: ["/a", "/b"], mains };
+    latest().send({ type: "sidebar", sidebar });
+    expect(registry.live.getState().sidebar).toEqual(sidebar);
 
-    // Shown before the server answers; then what it answers for those paths.
-    let answer: (state: SidebarState) => void = () => {};
+    // Shown before the server answers; then what it answers for those paths. `mains` waits for
+    // the next `sidebar` frame.
+    let answer: (state: SidebarView) => void = () => {};
     deps.patchSidebar.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -327,11 +338,16 @@ describe("LiveRegistry", () => {
     expect(registry.live.getState().sidebar).toEqual({
       pinned: [],
       collapsed: ["/a", "/b", "/c"],
+      mains,
     });
     // The server skipped "/c" (its folder is gone).
-    answer({ pinned: [], collapsed: ["/a", "/b"] });
+    answer({ pinned: [], collapsed: ["/a", "/b"], mains: {} });
     await done;
-    expect(registry.live.getState().sidebar).toEqual({ pinned: [], collapsed: ["/a", "/b"] });
+    expect(registry.live.getState().sidebar).toEqual({
+      pinned: [],
+      collapsed: ["/a", "/b"],
+      mains,
+    });
 
     // A refusal puts the flags back.
     deps.patchSidebar.mockRejectedValueOnce(new Error("nope"));
@@ -348,7 +364,7 @@ describe("LiveRegistry", () => {
       agents: [],
       sessions: [],
       branches: {},
-      sidebar: { pinned: [], collapsed: ["/repo", "/other"] },
+      sidebar: { pinned: [], collapsed: ["/repo", "/other"], mains: {} },
     });
     registry.expand(["/repo/wt", "/elsewhere"]);
     expect(deps.patchSidebar).not.toHaveBeenCalled();

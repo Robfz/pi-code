@@ -162,7 +162,12 @@ describe("Share target", () => {
       name,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-02T00:00:00.000Z",
-      layout: { repo: "/home/me/repo", role: "worktree", ...(missing ? { missing } : {}) },
+      layout: {
+        repo: "/home/me/repo",
+        role: "worktree",
+        main: "/home/me/repo/main",
+        ...(missing ? { missing } : {}),
+      },
     });
     stubApi((call) =>
       call.url === "/api/sessions"

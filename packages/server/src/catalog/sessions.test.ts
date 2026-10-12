@@ -347,17 +347,17 @@ describe("SessionCatalog layout", () => {
 
     const layouts = Object.fromEntries((await catalog.sessions()).map((s) => [s.id, s.layout]));
     expect(layouts).toEqual({
-      container: { repo, role: "container" },
-      main: { repo, role: "main" },
-      wt: { repo, role: "worktree" },
+      container: { repo, role: "container", main },
+      main: { repo, role: "main", main },
+      wt: { repo, role: "worktree", main },
       plain: undefined,
     });
     expect((await catalog.sessions())[0]).not.toHaveProperty("layout");
     expect((await catalog.projects()).map((p) => [p.cwd, p.layout])).toEqual([
       [plain, undefined],
-      [wt, { repo, role: "worktree" }],
-      [main, { repo, role: "main" }],
-      [repo, { repo, role: "container" }],
+      [wt, { repo, role: "worktree", main }],
+      [main, { repo, role: "main", main }],
+      [repo, { repo, role: "container", main }],
     ]);
 
     rmSync(wt, { recursive: true });
@@ -365,6 +365,7 @@ describe("SessionCatalog layout", () => {
     expect((await catalog.sessions()).find((s) => s.id === "wt")?.layout).toEqual({
       repo,
       role: "worktree",
+      main,
       missing: true,
     });
   });

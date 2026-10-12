@@ -83,7 +83,11 @@ describe("buildSidebarGroups", () => {
 
   it("lists pinned repos first by label, case-insensitive and numeric-aware", () => {
     const repo = (name: string) => `/home/me/${name}`;
-    const layout = (name: string) => ({ repo: repo(name), role: "main" as const });
+    const layout = (name: string) => ({
+      repo: repo(name),
+      role: "main" as const,
+      main: `${repo(name)}/main`,
+    });
     const groups = buildSidebarGroups({
       agents: [],
       sessions: [
@@ -124,6 +128,40 @@ describe("buildSidebarGroups", () => {
       query: "x",
     });
     expect(groups).toEqual([]);
+  });
+
+  it("shows each repo's main checkout, even empty, except in search results", () => {
+    const repo = "/home/me/pi-code";
+    const pinned = "/home/me/tool";
+    const sessions = [
+      session({
+        file: "w1",
+        cwd: `${repo}/wt`,
+        firstMessage: "match",
+        layout: { repo, role: "worktree", main: `${repo}/main` },
+      }),
+    ];
+    const mains = { [pinned]: `${pinned}/master` };
+    const groups = buildSidebarGroups({ agents: [], sessions, pinned: [pinned], mains });
+    expect(
+      groups.map((g) => g.kind === "repo" && g.worktrees.map((w) => [w.cwd, w.items.length])),
+    ).toEqual([
+      [[`${pinned}/master`, 0]],
+      [
+        [`${repo}/main`, 0],
+        [`${repo}/wt`, 1],
+      ],
+    ]);
+    const found = buildSidebarGroups({
+      agents: [],
+      sessions,
+      pinned: [pinned],
+      mains,
+      query: "match",
+    });
+    expect(found.map((g) => g.kind === "repo" && g.worktrees.map((w) => w.cwd))).toEqual([
+      [`${repo}/wt`],
+    ]);
   });
 
   it("hides session rows held by an agent and titles the agent from its session", () => {
@@ -203,21 +241,21 @@ describe("buildSidebarGroups", () => {
           id: "a1",
           cwd: `${repo}/spike`,
           sessionFile: "f1",
-          layout: { repo, role: "worktree" },
+          layout: { repo, role: "worktree", main: `${repo}/main` },
         }),
         // A fresh worktree: no session file yet.
         makeAgent({
           id: "a2",
           cwd: `${repo}/fresh`,
           startedAt: at(9),
-          layout: { repo, role: "worktree" },
+          layout: { repo, role: "worktree", main: `${repo}/main` },
         }),
       ],
       sessions: [
         session({
           file: "f1",
           cwd: `${repo}/spike`,
-          layout: { repo, role: "worktree", missing: true },
+          layout: { repo, role: "worktree", main: `${repo}/main`, missing: true },
         }),
       ],
     });
@@ -225,10 +263,11 @@ describe("buildSidebarGroups", () => {
     const [group] = groups;
     if (group?.kind !== "repo") throw new Error("expected a repo group");
     expect(group.worktrees.map((w) => [w.label, w.missing])).toEqual([
+      ["main", false],
       ["fresh", false],
       ["spike", true],
     ]);
-    expect(group.worktrees[1]?.items[0]?.layout?.missing).toBe(true);
+    expect(group.worktrees[2]?.items[0]?.layout?.missing).toBe(true);
   });
 
   it("marks a folder missing from its sessions, an agent's included", () => {

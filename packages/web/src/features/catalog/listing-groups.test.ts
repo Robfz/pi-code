@@ -12,7 +12,7 @@ interface Item {
   missing?: true;
 }
 
-const group = (items: Item[], repos?: string[]) =>
+const group = (items: Item[], options?: Parameters<typeof groupListing>[2]) =>
   groupListing(
     items,
     {
@@ -21,7 +21,7 @@ const group = (items: Item[], repos?: string[]) =>
       recency: (item) => ({ prompted: item.unprompted !== true, at: item.at }),
       missing: (item) => item.missing === true,
     },
-    repos ? { repos } : {},
+    options,
   );
 
 const ids = (items: Item[]) => items.map((item) => item.id);
@@ -33,9 +33,9 @@ function repoGroup(groups: ListingGroup<Item>[], repo: string) {
 }
 
 const R = "/home/me/Dev/pi-code";
-const main: RepoLayout = { repo: R, role: "main" };
-const linked: RepoLayout = { repo: R, role: "worktree" };
-const container: RepoLayout = { repo: R, role: "container" };
+const main: RepoLayout = { repo: R, role: "main", main: `${R}/main` };
+const linked: RepoLayout = { repo: R, role: "worktree", main: `${R}/main` };
+const container: RepoLayout = { repo: R, role: "container", main: `${R}/main` };
 
 describe("groupListing", () => {
   it("nests checkouts in their repo group: main first, then by most recent item", () => {
@@ -63,7 +63,12 @@ describe("groupListing", () => {
       { id: "c1", cwd: R, at: 4, layout: container },
       { id: "m1", cwd: `${R}/main`, at: 5, layout: main },
       { id: "c2", cwd: R, at: 6, layout: container },
-      { id: "n1", cwd: other, at: 1, layout: { repo: other, role: "container" } },
+      {
+        id: "n1",
+        cwd: other,
+        at: 1,
+        layout: { repo: other, role: "container", main: `${other}/main` },
+      },
     ]);
     const repo = repoGroup(groups, R);
     expect(ids(repo.items)).toEqual(["c2", "c1"]);
@@ -112,16 +117,63 @@ describe("groupListing", () => {
   });
 
   it("adds empty repo groups for `repos` without items, labelled with the rest", () => {
-    const groups = group([{ id: "f1", cwd: "/home/me/forks/pi-code", at: 2 }], [R, "/x/empty"]);
+    const groups = group([{ id: "f1", cwd: "/home/me/forks/pi-code", at: 2 }], {
+      repos: [R, "/x/empty"],
+    });
     expect(groups.map((g) => [g.kind, g.label, g.items.length])).toEqual([
       ["folder", "forks/pi-code", 1],
       ["repo", "Dev/pi-code", 0],
       ["repo", "empty", 0],
     ]);
     // A repo that has items keeps its place.
-    const withItems = group([{ id: "m1", cwd: `${R}/main`, at: 1, layout: main }], [R]);
+    const withItems = group([{ id: "m1", cwd: `${R}/main`, at: 1, layout: main }], { repos: [R] });
     expect(withItems).toHaveLength(1);
     expect(repoGroup(withItems, R).worktrees).toHaveLength(1);
+  });
+
+  it("with `mains`, gives every repo group its main checkout's sub-group, empty if need be", () => {
+    const items: Item[] = [
+      { id: "w1", cwd: `${R}/wt`, at: 2, layout: linked },
+      { id: "c1", cwd: R, at: 1, layout: container },
+    ];
+    expect(repoGroup(group(items), R).worktrees.map((w) => w.cwd)).toEqual([`${R}/wt`]);
+    // The main path comes from the items' layout.
+    expect(repoGroup(group(items, { mains: {} }), R).worktrees).toEqual([
+      { cwd: `${R}/main`, label: "main", role: "main", missing: false, items: [] },
+      { cwd: `${R}/wt`, label: "wt", role: "worktree", missing: false, items: [items[0]] },
+    ]);
+    // A container-only repo gets one too.
+    const containerOnly = group([items[1] as Item], { mains: {} });
+    expect(repoGroup(containerOnly, R).worktrees.map((w) => [w.cwd, w.items])).toEqual([
+      [`${R}/main`, []],
+    ]);
+  });
+
+  it("with `mains`, keeps an occupied main checkout's sub-group as it is", () => {
+    const groups = group(
+      [
+        { id: "m1", cwd: `${R}/main`, at: 1, layout: main },
+        { id: "w1", cwd: `${R}/wt`, at: 2, layout: linked },
+      ],
+      { mains: {} },
+    );
+    expect(repoGroup(groups, R).worktrees.map((w) => [w.label, ids(w.items)])).toEqual([
+      ["main", ["m1"]],
+      ["wt", ["w1"]],
+    ]);
+  });
+
+  it("with `mains`, gives empty `repos` the main checkout `mains` names", () => {
+    const groups = group([], {
+      repos: [R, "/x/unknown"],
+      mains: { [R]: `${R}/master` },
+    });
+    expect(repoGroup(groups, R).worktrees).toEqual([
+      { cwd: `${R}/master`, label: "master", role: "main", missing: false, items: [] },
+    ]);
+    expect(repoGroup(groups, "/x/unknown").worktrees).toEqual([]);
+    // Without `mains`, an empty repo stays empty.
+    expect(repoGroup(group([], { repos: [R] }), R).worktrees).toEqual([]);
   });
 
   it("marks a worktree missing when any of its items says so", () => {

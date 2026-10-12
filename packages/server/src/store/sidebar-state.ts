@@ -9,7 +9,9 @@ import {
   SIDEBAR_KEYS,
   type SidebarPatch,
   type SidebarState,
+  type SidebarView,
 } from "@pi-code/protocol";
+import { mainCheckoutIn } from "../catalog/layout.ts";
 import { ApiError } from "../errors.ts";
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.ts";
 
@@ -35,6 +37,16 @@ function paths(value: unknown): string[] {
   return Array.isArray(value)
     ? [...new Set(value.filter((p): p is string => typeof p === "string" && isAbsolute(p)))]
     : [];
+}
+
+/** `state` as sent to clients: with each pinned repo's main checkout, resolved now. */
+export function sidebarView(state: SidebarState): SidebarView {
+  const mains: Record<string, string> = {};
+  for (const repo of state.pinned) {
+    const main = mainCheckoutIn(repo);
+    if (main !== undefined) mains[repo] = main;
+  }
+  return { ...state, mains };
 }
 
 /** Validates a `PATCH /api/sidebar` body; throws `invalid_body`. */

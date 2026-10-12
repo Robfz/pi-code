@@ -7,7 +7,7 @@ export const SIDEBAR_KEYS = Object.keys({
 } satisfies Record<keyof SidebarState, true>) as (keyof SidebarState)[];
 
 /** `state` with `patch`'s flags set; a list `patch` doesn't change keeps its identity. */
-export function applySidebarPatch(state: SidebarState, patch: SidebarPatch): SidebarState {
+export function applySidebarPatch<S extends SidebarState>(state: S, patch: SidebarPatch): S {
   const next = { ...state };
   for (const key of SIDEBAR_KEYS) {
     for (const [path, on] of Object.entries(patch[key] ?? {})) {

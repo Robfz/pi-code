@@ -112,7 +112,7 @@ describe("POST /api/worktrees", () => {
     expect(res.body.agent).toMatchObject({
       cwd: path,
       status: "starting",
-      layout: { repo: layout.repo, role: "worktree" },
+      layout: { repo: layout.repo, role: "worktree", main: layout.main },
     });
     expect(git(path, "symbolic-ref", "--short", "HEAD").trim()).toBe("feature/wt");
     const frame = await client.waitFor(
@@ -121,6 +121,7 @@ describe("POST /api/worktrees", () => {
     expect((frame as Extract<StreamFrame, { type: "agent" }>).agent.layout).toEqual({
       repo: layout.repo,
       role: "worktree",
+      main: layout.main,
     });
   });
 

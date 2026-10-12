@@ -23,16 +23,21 @@ describe("layoutOf", () => {
     git(main, "worktree", "add", "-q", "-b", "feature", sibling);
     git(main, "worktree", "add", "-q", "-b", "spike", outside);
 
-    expect(layoutOf(main)).toEqual({ repo, role: "main" });
-    expect(layoutOf(repo)).toEqual({ repo, role: "container" });
-    expect(layoutOf(sibling)).toEqual({ repo, role: "worktree" });
-    expect(layoutOf(outside)).toEqual({ repo, role: "worktree" });
+    expect(layoutOf(main)).toEqual({ repo, role: "main", main });
+    expect(layoutOf(repo)).toEqual({ repo, role: "container", main });
+    expect(layoutOf(sibling)).toEqual({ repo, role: "worktree", main });
+    expect(layoutOf(outside)).toEqual({ repo, role: "worktree", main });
   });
 
   it("accepts a master checkout", () => {
     const { repo, main } = makeLayoutRepo(root, "r", { branches: ["master"], checkout: "master" });
-    expect(layoutOf(main)).toEqual({ repo, role: "main" });
-    expect(layoutOf(repo)).toEqual({ repo, role: "container" });
+    const wt = join(repo, "wt");
+    git(main, "worktree", "add", "-q", "-b", "wt", wt);
+    expect(main).toBe(join(repo, "master"));
+    expect(layoutOf(main)).toEqual({ repo, role: "main", main });
+    expect(layoutOf(repo)).toEqual({ repo, role: "container", main });
+    expect(layoutOf(wt)).toEqual({ repo, role: "worktree", main });
+    expect(layoutOf(join(repo, "gone"))).toEqual({ repo, role: "worktree", main, missing: true });
   });
 
   it("gives none when both main and master are checkouts", () => {
@@ -55,10 +60,11 @@ describe("layoutOf", () => {
   });
 
   it("marks a missing folder under a layout container, not under a plain folder", () => {
-    const { repo } = makeLayoutRepo(root, "r");
+    const { repo, main } = makeLayoutRepo(root, "r");
     expect(layoutOf(join(repo, "old-spike"))).toEqual({
       repo,
       role: "worktree",
+      main,
       missing: true,
     });
     const plain = join(root, "plain");
@@ -94,7 +100,7 @@ describe("layoutOf", () => {
     const wt = join(repo, "rel");
     mkdirSync(wt);
     writeFileSync(join(wt, ".git"), "gitdir: ../main/.git/worktrees/rel\n");
-    expect(layoutOf(wt)).toEqual({ repo, role: "worktree" });
+    expect(layoutOf(wt)).toEqual({ repo, role: "worktree", main });
   });
 
   it("gives none for plain clones, checkout subfolders and relative paths", () => {

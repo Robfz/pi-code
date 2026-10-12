@@ -31,7 +31,7 @@ import type {
   SessionsResponse,
   SidebarPatch,
   SidebarResponse,
-  SidebarState,
+  SidebarView,
   Snapshot,
   UiResponseBody,
   VapidKeyResponse,
@@ -237,7 +237,7 @@ export function navigateTree(id: AgentId, body: NavigateBody): Promise<NavigateR
 // Sidebar
 
 /** Sets pinned / collapsed flags per path; every client gets the result as a `sidebar` frame. */
-export async function patchSidebar(patch: SidebarPatch): Promise<SidebarState> {
+export async function patchSidebar(patch: SidebarPatch): Promise<SidebarView> {
   return (await request<SidebarResponse>("PATCH", "/api/sidebar", patch)).sidebar;
 }
 
