@@ -7,9 +7,10 @@ import { join } from "node:path";
 import { layoutOf, mainCheckoutIn } from "../catalog/layout.ts";
 import { ApiError } from "../errors.ts";
 import { canonicalPath } from "../paths.ts";
-import { GitError, type RunGitOptions, runGit } from "./git.ts";
+import { GitError, gitFailed, type RunGitOptions, runGit } from "./git.ts";
+import { fetchOrigin } from "./refs.ts";
 
-/** `git fetch` and `git worktree add`. */
+/** `git worktree add`. */
 const SLOW_GIT_TIMEOUT_MS = 60_000;
 /**
  * `git worktree remove`: deleting `node_modules` can take minutes, and a kill mid-delete can
@@ -22,11 +23,6 @@ async function exists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
-}
-
-function gitFailed(args: readonly string[], e: unknown): ApiError {
-  const detail = e instanceof GitError ? e.stderr.trim() || e.message : String(e);
-  return new ApiError("git_failed", `git ${args.join(" ")} failed: ${detail}`);
 }
 
 /** `runGit`, with every failure as `git_failed`. */
@@ -55,17 +51,6 @@ async function validBranch(main: string, branch: string): Promise<boolean> {
     okCodes: [0, 1, 128],
   });
   return code === 0 && stdout === `${branch}\n`;
-}
-
-/**
- * `ssh -o BatchMode=yes` for `git fetch`, so an ssh passphrase prompt fails instead of waiting
- * for the timeout; nothing when the user picked an ssh command (`GIT_SSH_COMMAND`, `GIT_SSH`,
- * `core.sshCommand`).
- */
-async function fetchEnv(main: string): Promise<Record<string, string>> {
-  if (process.env.GIT_SSH_COMMAND !== undefined || process.env.GIT_SSH !== undefined) return {};
-  const { stdout } = await git(main, ["config", "--get", "core.sshCommand"], { okCodes: [0, 1] });
-  return stdout.trim() === "" ? { GIT_SSH_COMMAND: "ssh -o BatchMode=yes" } : {};
 }
 
 export interface CreateWorktreeRequest {
@@ -112,10 +97,7 @@ export async function createWorktree(req: CreateWorktreeRequest): Promise<string
     throw new ApiError("branch_exists", `branch ${branch} already exists`);
   }
 
-  await git(main, ["fetch", "origin"], {
-    timeoutMs: SLOW_GIT_TIMEOUT_MS,
-    env: await fetchEnv(main),
-  });
+  await fetchOrigin(main);
 
   let start = base;
   if (start === undefined) {

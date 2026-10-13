@@ -5,12 +5,19 @@
  */
 
 import type { CodeRef, GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRightIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { countPatchLines, type LineSelection } from "@/components/diff";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getGitBranches, getGitDiff, isApiRequestError } from "@/lib/api";
+import {
+  errorMessage,
+  fetchOrigin,
+  getGitBranches,
+  getGitDiff,
+  isApiRequestError,
+} from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { LoadError, NotARepo, retryServerErrors } from "./query-states";
@@ -181,6 +188,15 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     retry: retryServerErrors,
   });
 
+  const queryClient = useQueryClient();
+  const fetching = useMutation({
+    mutationFn: () => fetchOrigin(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.gitDiffs(agentId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.gitBranches(agentId) });
+    },
+  });
+
   const update = (change: Partial<DiffMode>) =>
     useReviewStore.getState().setDiffMode(agentId, change);
 
@@ -249,7 +265,21 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
             />
             Include uncommitted
           </label>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={fetching.isPending}
+            onClick={() => fetching.mutate()}
+          >
+            {fetching.isPending ? <LoaderIcon className="animate-spin" /> : <RefreshCwIcon />}
+            Fetch
+          </Button>
         </div>
+      )}
+      {branchMode && fetching.isError && (
+        <p role="alert" className="text-xs text-destructive">
+          Couldn't fetch: {errorMessage(fetching.error)}
+        </p>
       )}
     </div>
   );

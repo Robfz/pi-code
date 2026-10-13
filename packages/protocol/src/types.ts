@@ -318,7 +318,7 @@ export interface GitDiffResponse {
 }
 
 export interface GitBranchesResponse {
-  /** Local branches, most recent commit first. */
+  /** Local and `origin` branches (without `origin/`, once each), most recent commit first. */
   branches: string[];
   defaultBranch: string | null;
 }

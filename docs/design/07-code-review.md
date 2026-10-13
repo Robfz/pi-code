@@ -19,7 +19,7 @@ All paths in this feature are relative to the agent's cwd, which is what the mod
 | Branch, uncommitted off (the toggle's default) | `merge-base(<base>, HEAD)` | `HEAD` | not included |
 | Branch, uncommitted on | `merge-base(<base>, HEAD)` | working tree | included |
 
-- Branch mode shows what the current branch changed since it left `<base>`, PR-style. `<base>` is a local branch, picked from the branch list and defaulting to the detected default branch (`GET git/branches`).
+- Branch mode shows what the current branch changed since it left `<base>`, PR-style. `<base>` is picked from the branch list (local and `origin`), defaulting to the detected default branch (`GET git/branches`). The diff uses `origin/<base>` when it exists, else the local branch: worktrees start from `origin/main`, and a stale local `main` would add upstream commits to the diff. `POST git/fetch` (the Fetch button) updates the `origin/*` refs on demand.
 - The mode, base and toggle are per conversation, in the review state (Web client).
 - Version naming depends on the mode (References): the old side is always a commit; the new side is one only in branch mode with uncommitted off.
 
@@ -31,7 +31,7 @@ All paths in this feature are relative to the agent's cwd, which is what the mod
 
 - Every command runs in the agent's cwd. Tracked diffs use `--relative`, so paths are cwd-relative and changes outside the cwd's subtree are left out; untracked files come from `git ls-files --others --exclude-standard` run there. Blob lookups use `<rev>:./<path>`.
 - Without `base`: uncommitted mode (tracked files against `HEAD`, plus untracked files as new-file patches); `uncommitted` is ignored.
-- With `base`: `base` must not start with `-` and `refs/heads/<base>` must exist as written (`git show-ref --verify --quiet`, which rejects expressions such as `main~1`), else `400 invalid_body` "unknown branch <base>". A repo without commits → `400 invalid_body` "no commits yet". `git merge-base refs/heads/<base> HEAD` exiting 1 → `400 invalid_body` "<base> and HEAD have no common commit".
+- With `base`: `base` must not start with `-` or be `HEAD` (which would match the symbolic `origin/HEAD`), and `refs/remotes/origin/<base>` or else `refs/heads/<base>` must exist as written (`git show-ref --verify --quiet`, which rejects expressions such as `main~1`), else `400 invalid_body` "unknown branch <base>". The first that exists is `<ref>`. A repo without commits → `400 invalid_body` "no commits yet". `git merge-base <ref> HEAD` exiting 1 → `400 invalid_body` "<base> and HEAD have no common commit".
   - `uncommitted=1`: tracked files diffed from the merge-base to the working tree, plus untracked files.
   - Otherwise: `git diff <merge-base> HEAD`. Size checks use blob sizes (`git cat-file -s`) at `HEAD`, or at the merge-base for deleted files. Each file whose working-tree copy differs from `HEAD` (in `git diff --name-only -z --relative HEAD`) gets `worktreeChanged: true`.
 - Limits: files over 1 MB (`MAX_PATCH_BYTES`) are listed `tooLarge` without a patch, binary patches are flagged, nested repos are listed without a patch.
@@ -56,13 +56,20 @@ interface GitDiffResponse {
 
 ```ts
 interface GitBranchesResponse {
-  branches: string[];          // local branches, most recent commit first
+  branches: string[];          // local and origin branches, most recent commit first
   defaultBranch: string | null;
 }
 ```
 
-- `branches`: `git for-each-ref --sort=-committerdate --format=%(refname:lstrip=2) refs/heads` (`refname:short` would write `heads/x` when a tag is also named `x`).
-- `defaultBranch`: the local branch named by `refs/remotes/origin/HEAD` (`git symbolic-ref --quiet`, `refs/remotes/origin/` stripped) if it exists locally, else `main`, else `master`, else `null`. With `null`, branch mode waits for a pick.
+- `branches`: `git for-each-ref --sort=-committerdate --format=%(refname) refs/heads refs/remotes/origin`, with `refs/heads/` and `refs/remotes/origin/` stripped, `origin/HEAD` skipped, and a name on both kept once at its first position (`refname:short` would write `heads/x` when a tag is also named `x`, and blur `x` with `origin/x`).
+- `defaultBranch`: the branch named by `refs/remotes/origin/HEAD` (`git symbolic-ref --quiet`, `refs/remotes/origin/` stripped) if it is in `branches`, else `main`, else `master`, else `null`. With `null`, branch mode waits for a pick.
+- Outside a work tree → `404 not_a_git_repo`.
+
+### `POST /api/agents/:id/git/fetch`
+
+`fetchOrigin(cwd)` (`git/refs.ts`), after `requireWorkTree`: `git fetch origin` with a 60 s timeout. It never prompts: `runGit` sets `GIT_TERMINAL_PROMPT=0`, and ssh gets `-o BatchMode=yes` unless the user set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` (shared with worktree creation).
+
+- → `204`. No `origin` remote, a network or an auth failure → `502 git_failed` "git fetch origin failed: <git's stderr>".
 - Outside a work tree → `404 not_a_git_repo`.
 
 ### `GET /api/agents/:id/files?q=<text>`
@@ -92,7 +99,7 @@ interface FileContentResponse {
 
 ### Routes and errors
 
-`http/review-routes.ts` holds `/:id/git/diff`, `/:id/git/branches`, `/:id/files` and `/:id/files/content`. It is mounted at `/api/agents` beside `agentsRoutes` and resolves agents through `manager.require`. One new code: `file_not_found` (404).
+`http/review-routes.ts` holds `/:id/git/diff`, `/:id/git/branches`, `/:id/git/fetch`, `/:id/files` and `/:id/files/content`. It is mounted at `/api/agents` beside `agentsRoutes` and resolves agents through `manager.require`. One new code: `file_not_found` (404).
 
 ### Refresh signal
 
@@ -251,12 +258,13 @@ interface ReviewState {
 
 ```
 (•) Uncommitted  ( ) Branch
-    Base [main ▾]  [ ] Include uncommitted       ← branch mode only
+    Base [main ▾]  [ ] Include uncommitted  [Fetch]   ← branch mode only
 3 files changed · +12 −4
 ▸ M  src/app.ts                           +3 −1
 ```
 
 - The base is a native `<select>` over `GET git/branches` (`["agent", id, "branches"]`, fetched when branch mode is shown). It defaults to `defaultBranch` until a base is stored; with no default and no stored base, the list asks to pick one. Errors from the diff (an unknown or deleted base) show inline with the picker still usable.
+- Fetch runs `POST git/fetch` only when pressed (`fetchOrigin`, a mutation). It is disabled with a spinner while running; a failure shows "Couldn't fetch: <message>" under the mode bar; success invalidates the agent's diffs and branches.
 - Query `queryKeys.gitDiff(agentId, mode, base, uncommitted)` = `["agent", id, "review", "diff", …]` → `getGitDiff(id, { base, uncommitted })`. The empty state reads "No changes. The working tree is clean." in uncommitted mode and "No changes against <base>." in branch mode.
 - Each expanded file renders `SelectableDiff`, with `toReference` per Version naming from the response's `oldRev`, `newRev` and the file's `worktreeChanged`.
 
@@ -336,7 +344,7 @@ The handler returns nothing, so pi keeps building the prompt from its sections. 
 ## Tests
 
 - **Protocol**: table tests for `findCodeRefs` and `formatCodeRef` (every syntax rule, the non-references, round trips).
-- **Server**: real `git` in temp dirs for the diff modes, merge-base, `worktreeChanged`, revs, subfolder scoping, branches and default detection, file listing, search ranking and reads. Harness route tests for the four routes and the `git_status` refresh. A unit test for the extension's handler.
+- **Server**: real `git` in temp dirs for the diff modes, merge-base, `worktreeChanged`, revs, subfolder scoping, branches and default detection, file listing, search ranking and reads. Harness route tests for the five routes and the `git_status` refresh. A unit test for the extension's handler.
 - **Web**: unit tests for the draft store and the rehype plugin; component tests for the composer overlay and delete, `SelectableDiff` on desktop and phone (mouse events on line-number spans, with the canvas stub), the review panel, pane and page, the file viewer and reference opening.
 
 Coverage per task is in [`../plan/07-code-review.md`](../plan/07-code-review.md).
@@ -349,7 +357,7 @@ Coverage per task is in [`../plan/07-code-review.md`](../plan/07-code-review.md)
 - In agent replies, only `@path:N` is linked; bare `src/foo.ts:42` isn't (F17). References in fenced code blocks aren't linked. Each Markdown text node is scanned on its own, so a reference split by Markdown syntax outside inline code (`@pkg/__init__.py:3`, whose `__init__` becomes bold) isn't linked.
 - A version-named reference opens the current file; old versions aren't shown.
 - A conversation in a subfolder of a repo sees only that subtree's changes and files, while the header's dirty marker covers the whole repo.
-- Branch mode compares with a local branch; a local default branch behind its remote includes commits already upstream.
+- Branch mode compares with `origin/<base>` as of the last fetch; nothing fetches automatically. Without `origin/<base>` it compares with the local branch, which may lag behind upstream.
 - Editing a reference's characters turns it into plain text; only deletions remove it whole (F8).
 - Phone selection relies on the browser's compatibility mouse events for taps on the line-number column; selection is on one side only (F3).
 - The flow follows the viewport width, not the input: a tablet at ≥1024px gets the desktop flow, where touch can't drag, so it selects single lines only.

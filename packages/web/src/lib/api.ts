@@ -156,8 +156,8 @@ export function ackAgent(id: AgentId): Promise<void> {
 
 /**
  * The agent's project diff: uncommitted changes against `HEAD`, or with `base` the branch's changes
- * since its merge-base with that local branch (`uncommitted` adds the working tree and untracked
- * files). `not_a_git_repo` outside a repository.
+ * since its merge-base with `origin/<base>`, else the local branch (`uncommitted` adds the working
+ * tree and untracked files). `not_a_git_repo` outside a repository.
  */
 export function getGitDiff(
   id: AgentId,
@@ -175,6 +175,11 @@ export function getGitDiff(
 /** Local branches, most recent first, and the detected default branch. */
 export function getGitBranches(id: AgentId): Promise<GitBranchesResponse> {
   return request<GitBranchesResponse>("GET", agentPath(id, "/git/branches"));
+}
+
+/** `git fetch origin` in the agent's cwd; `git_failed` (with git's error) when it fails. */
+export function fetchOrigin(id: AgentId): Promise<void> {
+  return request<void>("POST", agentPath(id, "/git/fetch"), {});
 }
 
 /** Fuzzy file search in the agent's cwd: at most 10 cwd-relative paths, best first. */

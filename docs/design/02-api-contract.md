@@ -339,7 +339,7 @@ interface RemoveWorktreeBody {
 The review panel's routes; behavior, limits and rationale in [`07-code-review.md`](07-code-review.md). Each runs in the agent's cwd, with cwd-relative paths, and answers `404 not_a_git_repo` outside a git work tree.
 
 ### `GET /api/agents/:id/git/diff?base=<branch>&uncommitted=1`
-Both optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a local branch name: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included.
+Both optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a branch name, resolved to `origin/<base>` if it exists, else the local branch: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included.
 ```ts
 interface GitDiffResponse {
   files: GitFileDiff[];
@@ -347,16 +347,19 @@ interface GitDiffResponse {
   newRev?: string;               // short sha of HEAD when the new side is HEAD; absent when it is the working tree
 }
 ```
-→ `200 GitDiffResponse`. `400 invalid_body`: `base` starts with `-` or isn't an existing local branch as written ("unknown branch <base>"), the repo has no commits, or `<base>` and `HEAD` have no common commit.
+→ `200 GitDiffResponse`. `400 invalid_body`: `base` starts with `-`, is `HEAD`, or names neither `origin/<base>` nor a local branch as written ("unknown branch <base>"), the repo has no commits, or `<base>` and `HEAD` have no common commit.
 
 ### `GET /api/agents/:id/git/branches`
 ```ts
 interface GitBranchesResponse {
-  branches: string[];            // local branches, most recent commit first
-  defaultBranch: string | null;  // origin/HEAD's branch if it exists locally, else main, else master
+  branches: string[];            // local and origin branches (no origin/ prefix, once each), most recent commit first
+  defaultBranch: string | null;  // origin/HEAD's branch if listed, else main, else master
 }
 ```
 → `200 GitBranchesResponse`.
+
+### `POST /api/agents/:id/git/fetch`
+`git fetch origin`, never prompting for credentials. → `204`. `502 git_failed` with git's error: no `origin` remote, network or auth failure.
 
 ### `GET /api/agents/:id/files?q=<text>`
 Fuzzy search over the cwd's tracked and untracked, non-ignored files. `q` is trimmed; empty → no results; over 200 characters → `400 invalid_body`.

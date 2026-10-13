@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import type { AgentManager } from "../agents/agent-manager.ts";
 import { ApiError } from "../errors.ts";
 import { readProjectFile, searchFiles } from "../git/files.ts";
-import { gitDiff } from "../git/git.ts";
-import { listBranches } from "../git/refs.ts";
+import { gitDiff, requireWorkTree } from "../git/git.ts";
+import { fetchOrigin, listBranches } from "../git/refs.ts";
 
 /**
  * The review panel's routes (design/07-code-review.md), mounted at `/api/agents`. Chained so the
@@ -21,6 +21,12 @@ export function reviewRoutes(manager: AgentManager) {
     .get("/:id/git/branches", async (c) => {
       const agent = manager.require(c.req.param("id"));
       return c.json(await listBranches(agent.cwd), 200);
+    })
+    .post("/:id/git/fetch", async (c) => {
+      const agent = manager.require(c.req.param("id"));
+      await requireWorkTree(agent.cwd);
+      await fetchOrigin(agent.cwd);
+      return c.body(null, 204);
     })
     .get("/:id/files", async (c) => {
       const agent = manager.require(c.req.param("id"));

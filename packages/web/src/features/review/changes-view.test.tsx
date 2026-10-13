@@ -143,6 +143,38 @@ describe("ChangesView", () => {
     expect(await screen.findByTestId("diff-file")).toHaveAttribute("data-path", "a.ts");
   });
 
+  it("fetches origin on demand and refreshes the diff and branches", async () => {
+    useReviewStore.getState().setDiffMode("a1", { mode: "branch" });
+    let fetchStatus: [number, unknown] = [
+      502,
+      { error: { code: "git_failed", message: "git fetch origin failed: no origin" } },
+    ];
+    const { calls } = stubFetch((call: FetchCall) => {
+      if (call.url === "/api/agents/a1/git/fetch") return fetchStatus;
+      if (call.url === "/api/agents/a1/git/branches") return [200, branches];
+      if (call.url === "/api/agents/a1/git/diff") return [200, { files: [] }];
+      return undefined;
+    });
+    const count = (suffix: string) => calls.filter((call) => call.url.endsWith(suffix)).length;
+    await renderView();
+    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
+    expect(count("/git/fetch")).toBe(0);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't fetch: git fetch origin failed: no origin",
+    );
+    expect(count("/git/diff")).toBe(1);
+
+    fetchStatus = [204, null];
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    await waitFor(() => expect(count("/git/diff")).toBe(2));
+    expect(count("/git/branches")).toBe(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(calls.find((call) => call.url.endsWith("/git/fetch"))?.method).toBe("POST");
+  });
+
   it("says when the project isn't a git repository", async () => {
     stubFetch(() => [404, { error: { code: "not_a_git_repo", message: "Not a git repository" } }]);
     await renderView();

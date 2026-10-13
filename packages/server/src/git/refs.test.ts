@@ -73,12 +73,45 @@ describe("listBranches", () => {
     expect(defaultBranch).toBe("trunk");
   });
 
-  it("falls back to main when origin/HEAD names a branch missing locally", async () => {
+  it("falls back to main when origin/HEAD names a missing branch", async () => {
     const { main } = makeLayoutRepo(root, "r", { branches: ["trunk", "main"] });
     git(main, "checkout", "-q", "-b", "main", "origin/main");
     git(main, "branch", "-q", "-D", "trunk");
+    git(main, "update-ref", "-d", "refs/remotes/origin/trunk");
 
     expect(await listBranches(main)).toEqual({ branches: ["main"], defaultBranch: "main" });
+  });
+
+  it("lists branches only on origin, which can be the default", async () => {
+    const repo = init("dev");
+    commitAt(repo, 1_700_000_000);
+    const first = git(repo, "rev-parse", "HEAD").trim();
+    commitAt(repo, 1_700_000_100);
+    git(repo, "update-ref", "refs/remotes/origin/trunk", first);
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+
+    expect(await listBranches(repo)).toEqual({
+      branches: ["dev", "trunk"],
+      defaultBranch: "trunk",
+    });
+  });
+
+  it("lists a branch on origin and local once, at its most recent commit", async () => {
+    const repo = init("main");
+    commitAt(repo, 1_700_000_000);
+    const oldest = git(repo, "rev-parse", "HEAD").trim();
+    git(repo, "branch", "mid");
+    git(repo, "checkout", "-q", "-b", "tmp");
+    commitAt(repo, 1_700_000_200);
+    const newest = git(repo, "rev-parse", "HEAD").trim();
+    git(repo, "checkout", "-q", "main");
+    git(repo, "branch", "-q", "-D", "tmp");
+    commitAt(repo, 1_700_000_100);
+    git(repo, "update-ref", "refs/remotes/origin/mid", newest);
+    git(repo, "update-ref", "refs/remotes/origin/main", oldest);
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+
+    expect(await listBranches(repo)).toEqual({ branches: ["mid", "main"], defaultBranch: "main" });
   });
 
   it("falls back to master", async () => {

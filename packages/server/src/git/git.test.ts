@@ -251,6 +251,33 @@ describe("gitDiff in branch mode", () => {
     expect(diff.newRev).toMatch(/^[0-9a-f]{7,40}$/);
   });
 
+  /** `featureBranch`, with local `main` reset to "main 1", behind the merge-base. */
+  function staleMain(): { mergeBase: string; tip: string } {
+    featureBranch();
+    const refs = {
+      mergeBase: git("rev-parse", "main~1").trim(),
+      tip: git("rev-parse", "main").trim(),
+    };
+    git("branch", "-f", "main", "main~2");
+    return refs;
+  }
+
+  it("prefers origin/<base> over the local branch", async () => {
+    const { mergeBase, tip } = staleMain();
+    git("update-ref", "refs/remotes/origin/main", tip);
+    const diff = await gitDiff(repo, { base: "main" });
+    expect(diff.oldRev).toBe(shortSha(mergeBase));
+    expect(paths(diff.files)).toEqual(["edited.txt", "feature.txt"]);
+  });
+
+  it("falls back to the local branch without origin/<base>", async () => {
+    staleMain();
+    git("update-ref", "refs/remotes/origin/other", "HEAD");
+    const diff = await gitDiff(repo, { base: "main" });
+    expect(diff.oldRev).toBe(shortSha("main"));
+    expect(paths(diff.files)).toEqual(["edited.txt", "feature.txt", "main-only.txt"]);
+  });
+
   it("is empty against the current branch", async () => {
     featureBranch();
     writeFileSync(join(repo, "edited.txt"), "dirty\n");
@@ -264,6 +291,9 @@ describe("gitDiff in branch mode", () => {
 
   it("rejects unknown branches, expressions, options and missing history", async () => {
     featureBranch();
+    // As in a clone: `origin/HEAD` must not make `HEAD` a base.
+    git("update-ref", "refs/remotes/origin/main", "main");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
     for (const base of ["nope", "main~1", "HEAD", "-main", "--all"]) {
       const err = await diffError(repo, { base });
       expect(isApiError(err, "invalid_body"), base).toBe(true);
