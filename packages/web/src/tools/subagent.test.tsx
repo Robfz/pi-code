@@ -285,6 +285,21 @@ describe("subagent modes", () => {
     );
     expect(row()).toHaveAttribute("data-tone", "ultraspawn");
     expect(header().querySelector('[data-slot="row-icon"] svg')).toHaveClass("text-ultraspawn");
+    expect(header().querySelector('[data-slot="row-verb"]')).toHaveClass(
+      "shimmer",
+      "shimmer-ultraspawn",
+    );
+
+    rerender(
+      <ToolCallView
+        toolCallId="x"
+        toolName="spawn"
+        args={{ ultraspawn: "review" }}
+        status="done"
+        isError={false}
+      />,
+    );
+    expect(header().querySelector('[data-slot="row-verb"]')).toHaveClass("text-ultraspawn");
 
     rerender(
       <ToolCallView
@@ -296,6 +311,236 @@ describe("subagent modes", () => {
       />,
     );
     expect(row()).not.toHaveAttribute("data-tone");
+  });
+
+  it("ultraspawn running: progress meta, phases, agents (running, then failed) and recent logs", async () => {
+    const agent = (id: number, patch: Record<string, unknown>) => ({
+      id,
+      agent: "worker",
+      phase: "fix",
+      phaseIndex: 1,
+      status: "queued",
+      attempts: 0,
+      cost: 0,
+      ...patch,
+    });
+    const details = {
+      mode: "ultraspawn",
+      runId: "r",
+      name: "review",
+      source: "user",
+      script: "",
+      args: {},
+      status: "running",
+      phases: [
+        {
+          name: "scan",
+          status: "done",
+          startedAt: 0,
+          endedAt: 2500,
+          spawned: 2,
+          done: 1,
+          failed: 1,
+        },
+        { name: "fix", status: "running", startedAt: 2500, spawned: 1, done: 0, failed: 0 },
+      ],
+      agents: [
+        agent(0, {
+          agent: "scout",
+          label: "frontend",
+          phase: "scan",
+          phaseIndex: 0,
+          status: "done",
+          startedAt: 0,
+          endedAt: 1200,
+          attempts: 1,
+          cost: 0.01,
+        }),
+        ...Array.from({ length: 7 }, (_, i) => agent(3 + i, {})),
+        agent(2, { status: "running", startedAt: Date.now(), attempts: 1, isolated: true }),
+        agent(1, {
+          agent: "scout",
+          phase: "scan",
+          phaseIndex: 0,
+          status: "failed",
+          reason: "timeout",
+          error: "no answer\nstack",
+          startedAt: 0,
+          endedAt: 2000,
+          attempts: 2,
+          cost: 0.02,
+        }),
+      ],
+      spawned: 3,
+      logs: ["l1", "l2", "l3", "l4", "l5", "l6", "l7"],
+      results: [{ usage: { cost: 0.01 } }, { usage: { cost: 0.02 } }],
+      startedAt: Date.now() - 65_000,
+    };
+    render(
+      <ToolCallView
+        toolCallId="u1"
+        toolName="spawn"
+        args={{ ultraspawn: "review" }}
+        status="running"
+        isError={false}
+        partialResult={{ content: [{ type: "text", text: "running" }], details }}
+      />,
+    );
+    expect(row()).toHaveAttribute("data-tone", "ultraspawn");
+    expect(label()).toMatchObject({
+      verb: "Running",
+      target: "10 agents",
+      meta: "· 1/10 done · 1 failed · $0.0300",
+    });
+    await expand();
+    expect(screen.queryByText("Starting…")).toBeNull();
+    expect(screen.getByTestId("ultraspawn-header")).toHaveTextContent(
+      "review · running · 1 done · 1 failed · 1 running · 7 queued · 3 spawned · $0.0300 · 1m 5s",
+    );
+    const phases = screen.getAllByTestId("ultraspawn-phase");
+    expect(phases[0]).toHaveTextContent("scan2/21 failed2.5s");
+    expect(within(phases[1] as HTMLElement).getByLabelText("Running")).toBeInTheDocument();
+    expect(phases[1]).toHaveTextContent("fix0/8");
+
+    const agents = within(screen.getByTestId("ultraspawn-agents")).getAllByTestId(
+      "ultraspawn-agent",
+    );
+    expect(agents).toHaveLength(8);
+    expect(agents.map((a) => a.dataset.status).slice(0, 3)).toEqual(["running", "failed", "done"]);
+    expect(agents[0]).toHaveTextContent("isolated");
+    expect(agents[1]).toHaveTextContent("2×");
+    expect(agents[1]).toHaveTextContent("timeout: no answer");
+    expect(agents[1]).not.toHaveTextContent("stack");
+    expect(agents[2]).toHaveTextContent("scoutfrontendscan$0.01001.2s");
+    expect(screen.getByText("2 more agents")).toBeInTheDocument();
+
+    const logs = screen.getByTestId("ultraspawn-logs");
+    expect(within(logs).getByText("2 earlier log lines")).toBeInTheDocument();
+    expect(within(logs).getByText("l7")).toBeInTheDocument();
+    expect(within(logs).queryByText("l1")).toBeNull();
+  });
+
+  it("ultraspawn finished: the result text under the agent summary", async () => {
+    const details = {
+      mode: "ultraspawn",
+      name: "inline",
+      status: "done",
+      phases: [],
+      agents: [
+        {
+          id: 0,
+          agent: "scout",
+          status: "done",
+          startedAt: 0,
+          endedAt: 3000,
+          attempts: 1,
+          cost: 0.5,
+        },
+      ],
+      spawned: 1,
+      logs: [],
+      results: [{ usage: { cost: 0.5 } }],
+      startedAt: 0,
+      endedAt: 4000,
+    };
+    render(
+      <ToolCallView
+        toolCallId="u2"
+        toolName="spawn"
+        args={{ script: "return 1" }}
+        status="done"
+        isError={false}
+        result={{
+          content: [{ type: "text", text: "Ultraspawn inline finished\n\nall good" }],
+          details,
+        }}
+      />,
+    );
+    expect(label()).toMatchObject({
+      verb: "Ran",
+      target: "1 agent",
+      meta: "· 1/1 done · $0.5000",
+    });
+    await expand();
+    expect(screen.getByTestId("ultraspawn-header")).toHaveTextContent(
+      "inline · done · 1 done · 0 failed · 0 running · 1 spawned · $0.5000 · 4.0s",
+    );
+    expect(screen.getByTestId("ultraspawn-agent")).toHaveTextContent("3.0s");
+    expect(screen.queryByTestId("ultraspawn-phases")).toBeNull();
+    expect(screen.queryByTestId("ultraspawn-logs")).toBeNull();
+    expect(screen.getByText(/all good/)).toBeInTheDocument();
+  });
+
+  it("ultraspawn interrupted: agents left running read as failed, not spinning", async () => {
+    const details = {
+      mode: "ultraspawn",
+      name: "inline",
+      status: "running",
+      phases: [{ name: "scan", status: "running", startedAt: 0 }],
+      agents: [
+        {
+          id: 0,
+          agent: "scout",
+          phaseIndex: 0,
+          status: "running",
+          startedAt: 0,
+          attempts: 1,
+          cost: 0,
+        },
+      ],
+      spawned: 1,
+      logs: [],
+      results: [],
+      startedAt: 0,
+    };
+    render(
+      <ToolCallView
+        toolCallId="u3"
+        toolName="spawn"
+        args={{ script: "return 1" }}
+        status="error"
+        isError
+        partialResult={{ content: [{ type: "text", text: "" }], details }}
+      />,
+    );
+    await expand();
+    expect(screen.getByTestId("ultraspawn-header")).toHaveTextContent(
+      "inline · running · 0 done · 1 failed · 0 running · 1 spawned · $0.0000",
+    );
+    const agent = screen.getByTestId("ultraspawn-agent");
+    expect(agent).toHaveAttribute("data-status", "failed");
+    expect(agent).toHaveTextContent("interrupted");
+    expect(screen.queryByLabelText("Running")).toBeNull();
+    expect(screen.getByTestId("ultraspawn-phase")).toHaveTextContent("scan1/11 failed");
+  });
+
+  it("ultraspawn canceled: the header is just name and status", async () => {
+    const details = {
+      mode: "ultraspawn",
+      name: "inline",
+      status: "canceled",
+      phases: [],
+      agents: [],
+      spawned: 0,
+      logs: [],
+      results: [],
+      startedAt: 0,
+    };
+    render(
+      <ToolCallView
+        toolCallId="u4"
+        toolName="spawn"
+        args={{ script: "return 1" }}
+        status="done"
+        isError={false}
+        result={{
+          content: [{ type: "text", text: "Canceled: ultraspawn not approved." }],
+          details,
+        }}
+      />,
+    );
+    await expand();
+    expect(screen.getByTestId("ultraspawn-header")).toHaveTextContent(/^inline · canceled$/);
   });
 
   it("status and usage helpers", () => {

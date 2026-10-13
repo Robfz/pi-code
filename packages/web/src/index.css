@@ -184,14 +184,15 @@
 /*
  * Live text: a muted-to-foreground sweep; static foreground under reduced motion. shadcn's
  * stylesheet has a `shimmer` too; this one comes later and sets every property that one does.
+ * `--shimmer-base`/`--shimmer-peak` tint it (see `shimmer-ultraspawn`).
  */
 @utility shimmer {
   background:
     linear-gradient(
       90deg,
-      var(--muted-foreground) 0 40%,
-      var(--foreground) 50%,
-      var(--muted-foreground) 60% 100%
+      var(--shimmer-base, var(--muted-foreground)) 0 40%,
+      var(--shimmer-peak, var(--foreground)) 50%,
+      var(--shimmer-base, var(--muted-foreground)) 60% 100%
     )
     0 0 / 300% 100%;
   -webkit-background-clip: text;
@@ -199,6 +200,11 @@
   color: transparent;
   -webkit-text-fill-color: transparent;
   animation: shimmer 1.6s linear infinite;
+}
+
+@utility shimmer-ultraspawn {
+  --shimmer-base: color-mix(in oklch, var(--ultraspawn) 55%, transparent);
+  --shimmer-peak: var(--ultraspawn);
 }
 
 @keyframes shimmer {
@@ -214,7 +220,7 @@
   .shimmer {
     animation: none;
     background: none;
-    color: var(--foreground);
+    color: var(--shimmer-peak, var(--foreground));
     -webkit-text-fill-color: currentColor;
   }
   [data-slot="collapsible-content"] {
