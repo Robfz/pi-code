@@ -30,6 +30,12 @@ export class GitError extends Error {
   }
 }
 
+/** A failed `git args` as `git_failed`, with git's stderr in the message. */
+export function gitFailed(args: readonly string[], e: unknown): ApiError {
+  const detail = e instanceof GitError ? e.stderr.trim() || e.message : String(e);
+  return new ApiError("git_failed", `git ${args.join(" ")} failed: ${detail}`);
+}
+
 interface GitResult {
   code: number;
   stdout: string;
@@ -339,14 +345,29 @@ async function shortRev(cwd: string, rev: string): Promise<string> {
   return (await runGit(cwd, ["rev-parse", "--short=7", rev])).stdout.trim();
 }
 
-/** The merge-base of local branch `base` and `HEAD`; throws `invalid_body` when there is none. */
+async function refExists(cwd: string, ref: string): Promise<boolean> {
+  const { code } = await runGit(cwd, ["show-ref", "--verify", "--quiet", ref], { okCodes: [0, 1] });
+  return code === 0;
+}
+
+/**
+ * The merge-base of branch `base` and `HEAD`, taking `base` from `origin/<base>` when it exists
+ * (a local branch may lag behind it), else from the local branch. Throws `invalid_body` when
+ * neither exists or there is no merge-base.
+ */
 async function mergeBase(cwd: string, base: string): Promise<string> {
-  // `show-ref --verify` takes only a full ref name, so expressions like `main~1` are rejected.
-  const ref = `refs/heads/${base}`;
-  const exists =
-    !base.startsWith("-") &&
-    (await runGit(cwd, ["show-ref", "--verify", "--quiet", ref], { okCodes: [0, 1] })).code === 0;
-  if (!exists) throw new ApiError("invalid_body", `unknown branch ${base}`);
+  // `show-ref --verify` takes only a full ref name, so expressions like `main~1` are rejected;
+  // `HEAD` would match the symbolic `origin/HEAD`.
+  let ref: string | undefined;
+  if (!base.startsWith("-") && base !== "HEAD") {
+    for (const candidate of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+      if (await refExists(cwd, candidate)) {
+        ref = candidate;
+        break;
+      }
+    }
+  }
+  if (ref === undefined) throw new ApiError("invalid_body", `unknown branch ${base}`);
   const { code, stdout } = await runGit(cwd, ["merge-base", ref, "HEAD"], { okCodes: [0, 1] });
   if (code === 1) throw new ApiError("invalid_body", `${base} and HEAD have no common commit`);
   return stdout.trim();
@@ -366,7 +387,10 @@ async function worktreeChangedPaths(cwd: string): Promise<Set<string>> {
 }
 
 export interface GitDiffOptions {
-  /** Local branch to diff against, from its merge-base with `HEAD` (branch mode). */
+  /**
+   * Branch to diff against, from its merge-base with `HEAD` (branch mode): `origin/<base>` when
+   * it exists, else the local branch.
+   */
   base?: string;
   /** Branch mode: diff the merge-base against the working tree, untracked files included. */
   uncommitted?: boolean;
@@ -375,7 +399,8 @@ export interface GitDiffOptions {
 /**
  * The changes under `cwd` (design/07-code-review.md, "Diff modes"), paths relative to `cwd`.
  * Without `base`: tracked files against `HEAD` (the empty tree without commits), plus untracked
- * files as new-file patches. With `base`: from its merge-base with `HEAD` to the working tree
+ * files as new-file patches. With `base` (`origin/<base>` when it exists, else the local
+ * branch): from its merge-base with `HEAD` to the working tree
  * plus untracked files (`uncommitted`), or to `HEAD`. Throws `not_a_git_repo` outside a work
  * tree and `invalid_body` for an unusable `base`.
  */

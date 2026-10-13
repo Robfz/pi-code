@@ -102,6 +102,40 @@ describe("GET /api/agents/:id/git/branches", () => {
   });
 });
 
+describe("POST /api/agents/:id/git/fetch", () => {
+  it("fetches origin", async () => {
+    const h = await start();
+    const origin = join(h.root, "origin.git");
+    git(h.root, "init", "-q", "--bare", origin);
+    git(h.project, "remote", "add", "origin", origin);
+    // Pushed by path, so no remote-tracking ref exists until the fetch.
+    git(h.project, "push", "-q", origin, "main");
+    const agent = await h.open();
+
+    const res = await h.api("POST", `/api/agents/${agent.id}/git/fetch`);
+    expect(res.status).toBe(204);
+    expect(git(h.project, "rev-parse", "origin/main")).toBe(git(h.project, "rev-parse", "main"));
+  });
+
+  it("answers 502 git_failed with git's error without an origin remote", async () => {
+    const h = await start();
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>("POST", `/api/agents/${agent.id}/git/fetch`);
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe("git_failed");
+    expect(res.body.error.message).toMatch(/^git fetch origin failed: .*origin/);
+  });
+
+  it("answers 404 outside a work tree", async () => {
+    const h = await startHarness();
+    harness = h;
+    const agent = await h.open();
+    const res = await h.json<ErrorEnvelope>("POST", `/api/agents/${agent.id}/git/fetch`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("not_a_git_repo");
+  });
+});
+
 describe("GET /api/agents/:id/files", () => {
   it("searches the project's files", async () => {
     const h = await start();

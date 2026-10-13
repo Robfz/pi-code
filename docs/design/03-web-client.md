@@ -287,7 +287,7 @@ Disabled while a run is active.
 
 Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has two tabs, Refresh and the active tab, and renders as the desktop pane beside the conversation or as the phone's `/agents/$agentId/diff` page:
 
-- **Changes**: `GET /git/diff` in uncommitted or branch mode (base from `GET /git/branches`, optional uncommitted changes). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
+- **Changes**: `GET /git/diff` in uncommitted or branch mode (base from `GET /git/branches`, compared as `origin/<base>` when it exists, optional uncommitted changes; a Fetch button runs `POST /git/fetch` on demand and refreshes the diff and branches). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
 - **Files**: fuzzy search (`GET /files?q=`) and a file viewer (`GET /files/content`) with selectable lines.
 - Selecting lines inserts a reference into the composer: on desktop on mouse release, on phone through the Add to chat bar, which returns to the conversation.
 - Every `git_status` event and snapshot hydration invalidates the agent's review queries, so the diff and open file refresh after each turn.

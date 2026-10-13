@@ -9,7 +9,7 @@ src/
   agents/            AgentHost (process + RPC client), AgentManager, event pipeline, event log, idle sweep
   live/              StreamHub: shared inputs of the live stream
   catalog/           projects, sessions, path autocomplete, session watcher, repo layouts, session deletion
-  git/               diff + status, folder branches, local branches, project files, worktree create/remove
+  git/               diff + status, folder branches, branch list, project files, worktree create/remove
   push/              VAPID keys, subscriptions, triggers
   curator/           curator proxy listener
   store/             small JSON files in the data dir
@@ -135,10 +135,11 @@ Read-only over `~/.pi/agent/sessions`, parsing the documented session format; se
 
 - **Diff** (explicit action, `gitDiff`): tracked diffs use `--relative` (cwd-relative paths, changes outside the cwd left out); untracked files come from `git ls-files --others --exclude-standard` run in the cwd, each rendered as a new-file patch (`git diff --no-index /dev/null <file>`); blob lookups use `<rev>:./<path>`. Two modes:
   - **Uncommitted** (default): `HEAD` to the working tree, plus untracked files. Empty repo (no HEAD) → diff against the empty tree.
-  - **Branch** (`base=<local branch>`, checked with `git show-ref --verify`): from `merge-base(<base>, HEAD)` to `HEAD`, or with `uncommitted=1` to the working tree plus untracked files. An unknown base, a repo without commits or unrelated histories → `400 invalid_body`.
+  - **Branch** (`base=<branch>`: `origin/<base>` if it exists, else the local branch, checked with `git show-ref --verify`): from `merge-base(<base>, HEAD)` to `HEAD`, or with `uncommitted=1` to the working tree plus untracked files. An unknown base, a repo without commits or unrelated histories → `400 invalid_body`.
 
   Returns `{ files, oldRev?, newRev? }` (short shas of the old side and, when it is `HEAD`, the new side), per file `{ path, oldPath?, status, patch, binary, tooLarge, worktreeChanged? }`. `worktreeChanged` marks files whose working copy differs from `HEAD` when the new side is `HEAD`. Files over 1 MB are listed without patch, measured as blob sizes when the new side is `HEAD`. Non-repo → `404 not_a_git_repo`.
-- **Branches** (`listBranches`, `git/refs.ts`): local branches, most recent commit first, and the default branch (`origin/HEAD` if it exists locally, else `main`, else `master`, else `null`).
+- **Branches** (`listBranches`, `git/refs.ts`): local and `origin` branches (without `origin/`, once each), most recent commit first, and the default branch (`origin/HEAD`'s branch if listed, else `main`, else `master`, else `null`).
+- **Fetch** (`fetchOrigin`, `git/refs.ts`, explicit action): `git fetch origin` in the cwd, 60 s timeout, ssh in batch mode; failures → `502 git_failed`.
 - **Files** (`git/files.ts`): `searchFiles` fuzzy-matches (`fuzzysort`, basename matches first, at most 10) the tracked and untracked, non-ignored files of the cwd, listed on every request; `readProjectFile` reads a working-tree file confined to the cwd's realpath, with the diff's 1 MB and binary limits. Missing or not a regular file → `404 file_not_found`.
 - **Status** (status bar): `git rev-parse --abbrev-ref HEAD` + `git status --porcelain=v1 -uno` → `{ branch, dirty }`. Refreshed 2 s after `turn_end` and after a `bash` command; `git_status` is published after every such refresh, changed or not, because it is also the web client's signal to refetch the review panel. The startup read publishes only when the status differs.
 
