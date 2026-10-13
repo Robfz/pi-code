@@ -278,7 +278,7 @@ export function TreeScreen() {
           A run is in progress — tree actions are disabled until it finishes.
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
         <div className="mx-auto w-full max-w-3xl px-2 py-3">
           {!hydrated && (
             <p className="flex items-center gap-2 px-2 text-sm text-muted-foreground">

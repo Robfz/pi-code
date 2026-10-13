@@ -45,7 +45,7 @@ export function ConversationScreen() {
         <div
           ref={scrollRef}
           inert={inert}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable_both-edges]"
         >
           <div
             ref={contentRef}

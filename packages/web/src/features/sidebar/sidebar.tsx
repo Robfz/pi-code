@@ -449,7 +449,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
       </div>
       <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} onOpened={select} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 [scrollbar-gutter:stable]">
         {!loaded && (
           <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
             <LoaderIcon className="size-4 animate-spin" /> Loading…

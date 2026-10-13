@@ -44,7 +44,10 @@ export function SelectDialogView({ request, expiresAt, busy, onAnswer }: ViewPro
       <Header title={request.title} expiresAt={expiresAt}>
         <SheetDescription className="sr-only">Choose an option</SheetDescription>
       </Header>
-      <div className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto px-4" role="listbox">
+      <div
+        className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto px-4 [scrollbar-gutter:stable]"
+        role="listbox"
+      >
         {request.options.map((option) => (
           <Button
             key={option}
