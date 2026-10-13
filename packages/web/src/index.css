@@ -120,6 +120,7 @@
   --status-idle: var(--faint-foreground);
   --diff-add: var(--status-done);
   --diff-del: var(--status-error);
+  --scrollbar-thumb: oklch(0.3 0 0 / 0.18);
 }
 
 .dark {
@@ -157,17 +158,20 @@
   --status-input: oklch(0.8 0.15 75);
   --status-done: oklch(0.76 0.15 160);
   --ultraspawn: oklch(0.72 0.16 300);
+  --scrollbar-thumb: oklch(0.96 0 0 / 0.14);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
   }
   body {
     @apply bg-background text-foreground antialiased;
   }
   html {
     @apply font-sans;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
   code,
   kbd,

@@ -84,7 +84,10 @@ export function ReviewPanel({
         </Button>
         {trailing}
       </ScreenHeader>
-      <div role="tabpanel" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div
+        role="tabpanel"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]"
+      >
         <div className="mx-auto flex w-full max-w-6xl flex-col px-2 pt-3 pb-6">
           {tab === "changes" ? (
             <ChangesView agentId={agentId} {...(onAdded && { onAdded })} />

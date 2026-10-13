@@ -261,7 +261,7 @@ export function ProjectPicker({
             </p>
           ) : null;
         })()}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable]">
           {suggestions.length > 0 && (
             <ul aria-label="Folder suggestions" className="flex flex-col">
               {suggestions.map((dir) => (

@@ -68,7 +68,7 @@ function NewWorktreeForm({
 
   return (
     <form
-      className="flex flex-col gap-3 overflow-y-auto px-4 pb-4"
+      className="flex flex-col gap-3 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable]"
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSubmit) return;

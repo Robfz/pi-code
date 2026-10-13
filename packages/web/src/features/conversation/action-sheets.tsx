@@ -93,7 +93,10 @@ function ForkSheet({ onClose }: { onClose(): void }) {
         <p className="px-4 pb-4 text-sm text-muted-foreground">No messages to fork from.</p>
       )}
       {list.length > 0 && (
-        <ul className="flex min-h-0 flex-col gap-1 overflow-y-auto px-4 pb-4" aria-label="Messages">
+        <ul
+          className="flex min-h-0 flex-col gap-1 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable]"
+          aria-label="Messages"
+        >
           {list.map((message) => (
             <li key={message.entryId}>
               <Button
@@ -294,7 +297,7 @@ function ModelSheet({ onClose }: { onClose(): void }) {
       {models.data && filtered.length === 0 && (
         <p className="px-4 pb-4 text-sm text-muted-foreground">No models.</p>
       )}
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-4">
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable]">
         {groupModels(filtered).map(([provider, list]) => (
           <section key={provider} aria-label={provider} className="flex flex-col gap-0.5">
             <h3 className="text-xs font-medium text-muted-foreground">{provider}</h3>
@@ -412,7 +415,7 @@ function StatsSheet({ onClose }: { onClose(): void }) {
       {!data && stats.isPending && <Loading />}
       {!data && stats.isError && <QueryError error={stats.error} />}
       {data && (
-        <dl className="overflow-y-auto px-4 pb-4 text-sm">
+        <dl className="overflow-y-auto px-4 pb-4 text-sm [scrollbar-gutter:stable]">
           {data.sessionFile && <StatRow label="File" value={data.sessionFile} />}
           <StatRow label="Session id" value={data.sessionId} />
           <StatRow
