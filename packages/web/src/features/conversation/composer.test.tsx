@@ -48,6 +48,18 @@ describe("Composer", () => {
     expect(box).toHaveValue("");
   });
 
+  it("calls onSubmit on a non-empty submit only", async () => {
+    stubFetch(() => [200, { data: undefined }]);
+    const onSubmit = vi.fn();
+    await renderWithStore(<Composer onSubmit={onSubmit} />, hydratedStore());
+    const user = userEvent.setup();
+    const box = screen.getByRole("textbox", { name: "Message" });
+    await user.type(box, "   {Enter}");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.type(box, "hi{Enter}");
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
   it("Enter sends on desktop, Shift+Enter inserts a newline", async () => {
     const { calls } = stubFetch();
     await renderWithStore(<Composer />, hydratedStore());
