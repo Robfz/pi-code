@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isUltraspawnCall, subagentCost } from "./subagent-details";
+import {
+  isUltraspawnCall,
+  subagentCost,
+  subagentDetails,
+  ultraspawnDetails,
+} from "./subagent-details";
 
 describe("isUltraspawnCall", () => {
   it("detects the ultraspawn mode from parsed args", () => {
@@ -37,5 +42,107 @@ describe("subagentCost", () => {
     expect(subagentCost({ details: { mode: "single", results: [{ usage: { cost: "1" } }] } })).toBe(
       0,
     );
+  });
+});
+
+describe("ultraspawnDetails", () => {
+  const details = {
+    mode: "ultraspawn",
+    agentScope: "user",
+    runId: "r1",
+    name: "review",
+    source: "user",
+    script: "return 1",
+    args: {},
+    status: "running",
+    phases: [
+      { name: "scan", status: "done", startedAt: 1, endedAt: 5, spawned: 1, done: 1, failed: 0 },
+    ],
+    agents: [
+      {
+        id: 0,
+        agent: "scout",
+        label: "a",
+        phase: "scan",
+        phaseIndex: 0,
+        status: "failed",
+        reason: "timeout",
+        error: "took too long",
+        startedAt: 1,
+        endedAt: 4,
+        attempts: 2,
+        cost: 0.1,
+        isolated: true,
+      },
+    ],
+    spawned: 1,
+    logs: ["hello"],
+    results: [{ usage: { cost: 0.06 } }, { usage: { cost: 0.04 } }],
+    startedAt: 1,
+  };
+
+  it("reads the fields the UI shows", () => {
+    expect(ultraspawnDetails({ details })).toEqual({
+      name: "review",
+      status: "running",
+      phases: [{ name: "scan", status: "done", startedAt: 1, endedAt: 5 }],
+      agents: [
+        {
+          id: 0,
+          agent: "scout",
+          label: "a",
+          phase: "scan",
+          phaseIndex: 0,
+          status: "failed",
+          reason: "timeout",
+          error: "took too long",
+          startedAt: 1,
+          endedAt: 4,
+          attempts: 2,
+          cost: 0.1,
+          isolated: true,
+        },
+      ],
+      spawned: 1,
+      logs: ["hello"],
+      cost: 0.1,
+      error: undefined,
+      startedAt: 1,
+      endedAt: undefined,
+    });
+    expect(subagentDetails({ details })).toBeUndefined();
+  });
+
+  it("only accepts the ultraspawn mode", () => {
+    expect(ultraspawnDetails(undefined)).toBeUndefined();
+    expect(ultraspawnDetails({ details: "x" })).toBeUndefined();
+    expect(ultraspawnDetails({ details: { mode: "parallel", results: [] } })).toBeUndefined();
+  });
+
+  it("tolerates malformed fields", () => {
+    const parsed = ultraspawnDetails({
+      details: {
+        mode: "ultraspawn",
+        status: "weird",
+        phases: [null, { status: 3 }],
+        agents: "nope",
+        logs: ["ok", 1, null],
+        results: [{ usage: { cost: "1" } }],
+      },
+    });
+    expect(parsed).toMatchObject({
+      name: "inline",
+      status: "running",
+      phases: [{ name: "phase", status: "done" }],
+      agents: [],
+      spawned: 0,
+      logs: ["ok"],
+      cost: 0,
+    });
+    expect(
+      ultraspawnDetails({ details: { mode: "ultraspawn", agents: [{ status: "x" }, 5] } })?.agents,
+    ).toEqual([
+      expect.objectContaining({ id: 0, agent: "agent", status: "queued", attempts: 0, cost: 0 }),
+    ]);
   });
 });

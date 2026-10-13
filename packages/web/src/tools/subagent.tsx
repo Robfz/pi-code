@@ -1,10 +1,18 @@
 /**
  * `spawn` tool (pi-extensions subagent extension): a progress widget from `SubagentDetails` in the
  * latest `partialResult` / final result — single, parallel or chain; one card per agent with
- * agent, task, status, duration, usage, nested tool calls and markdown output.
+ * agent, task, status, duration, usage, nested tool calls and markdown output. Ultraspawn runs
+ * show the script's phases, `agent()` calls and logs instead, like the extension's TUI.
  */
 
-import { BotIcon, CheckIcon, CircleAlertIcon, LoaderIcon, XIcon } from "lucide-react";
+import {
+  BotIcon,
+  CheckIcon,
+  CircleAlertIcon,
+  CircleDashedIcon,
+  LoaderIcon,
+  XIcon,
+} from "lucide-react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
@@ -16,8 +24,13 @@ import {
   type SubagentResult,
   type SubagentUsage,
   subagentDetails,
+  type UltraspawnAgent,
+  type UltraspawnAgentStatus,
+  type UltraspawnDetails,
+  ultraspawnDetails,
 } from "@/lib/subagent-details";
-import { formatDuration, formatTokens } from "@/lib/time";
+import { formatDuration, formatSeconds, formatTokens } from "@/lib/time";
+import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
 import {
   asRecord,
@@ -151,7 +164,10 @@ function NestedToolRow({ call, agentRunning }: { call: NestedToolCall; agentRunn
   );
 }
 
-function StatusIcon({ status }: { status: SubagentStatus }) {
+function StatusIcon({ status }: { status: SubagentStatus | UltraspawnAgentStatus }) {
+  if (status === "queued") {
+    return <CircleDashedIcon aria-label="Queued" className="size-3.5 text-muted-foreground" />;
+  }
   if (status === "running") {
     return (
       <LoaderIcon aria-label="Running" className="size-3.5 animate-spin text-muted-foreground" />
@@ -263,6 +279,32 @@ function currentDetails(props: ToolRendererProps): SubagentDetails | undefined {
   return subagentDetails(props.result) ?? subagentDetails(props.partialResult);
 }
 
+function currentUltraspawn(props: ToolRendererProps): UltraspawnDetails | undefined {
+  return ultraspawnDetails(props.result) ?? ultraspawnDetails(props.partialResult);
+}
+
+function agentCounts(agents: UltraspawnAgent[]) {
+  const count = (status: UltraspawnAgentStatus) => agents.filter((a) => a.status === status).length;
+  return {
+    done: count("done"),
+    failed: count("failed"),
+    running: count("running"),
+    queued: count("queued"),
+  };
+}
+
+const formatCost = (cost: number) => `$${cost.toFixed(4)}`;
+
+/** "3/5 done · 1 failed · $0.0123" */
+function ultraspawnProgress(details: UltraspawnDetails): string | undefined {
+  const { done, failed } = agentCounts(details.agents);
+  const parts: string[] = [];
+  if (details.agents.length > 0) parts.push(`${done}/${details.agents.length} done`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (details.cost > 0) parts.push(formatCost(details.cost));
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 interface ArgTask {
   agent: string;
   task: string;
@@ -303,6 +345,19 @@ function progressLabel(details: SubagentDetails, active: boolean): string {
 }
 
 function subagentLabel(props: ToolRendererProps): ToolLabel {
+  const verb = statusVerb(props.status, "Running", "Ran", "Agents failed");
+  const ultraspawn = currentUltraspawn(props);
+  if (ultraspawn) {
+    const count = ultraspawn.agents.length;
+    const progress = ultraspawnProgress(ultraspawn);
+    return {
+      icon: BotIcon,
+      verb,
+      target: count > 0 ? { kind: "text", text: plural(count, "agent", "agents") } : undefined,
+      meta: progress && `· ${progress}`,
+      tone: "ultraspawn",
+    };
+  }
   const details = currentDetails(props);
   const results = details?.results ?? [];
   const count = results.length > 0 ? results.length : argTasks(props.args).tasks.length;
@@ -312,14 +367,199 @@ function subagentLabel(props: ToolRendererProps): ToolLabel {
       : undefined;
   return {
     icon: BotIcon,
-    verb: statusVerb(props.status, "Running", "Ran", "Agents failed"),
+    verb,
     target: count > 0 ? { kind: "text", text: plural(count, "agent", "agents") } : undefined,
     meta: progress && `· ${progress}`,
     tone: isUltraspawnCall(props.args, props.argsText) ? "ultraspawn" : undefined,
   };
 }
 
+/** Agent rows shown before the rest collapse under "N more agents". */
+const VISIBLE_AGENTS = 8;
+const VISIBLE_LOGS = 5;
+/** Failed agents rank right after running ones so their reasons stay in the visible slice. */
+const AGENT_STATUS_RANK: Record<UltraspawnAgent["status"], number> = {
+  running: 0,
+  failed: 1,
+  done: 2,
+  queued: 2,
+};
+
+function UltraspawnAgentItem({ agent, live }: { agent: UltraspawnAgent; live: boolean }) {
+  const elapsed = useElapsed(live && agent.status === "running" ? agent.startedAt : undefined);
+  const duration =
+    agent.startedAt !== undefined && agent.endedAt !== undefined
+      ? formatDuration(agent.endedAt - agent.startedAt)
+      : elapsed !== undefined
+        ? formatSeconds(elapsed)
+        : undefined;
+  const failure =
+    agent.status === "failed"
+      ? [agent.reason, agent.error?.split("\n")[0]].filter(Boolean).join(": ")
+      : "";
+  return (
+    <li data-testid="ultraspawn-agent" data-status={agent.status} className="flex min-w-0 flex-col">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <StatusIcon status={agent.status} />
+        <span className="shrink-0 font-medium">{agent.agent}</span>
+        {agent.label && <Muted className="min-w-0 truncate">{agent.label}</Muted>}
+        {agent.phase && <Badge variant="outline">{agent.phase}</Badge>}
+        {agent.isolated && <Badge variant="outline">isolated</Badge>}
+        {agent.attempts > 1 && <Badge variant="secondary">{agent.attempts}×</Badge>}
+        <span className="flex-1" />
+        {agent.cost > 0 && <Muted className="tabular-nums">{formatCost(agent.cost)}</Muted>}
+        {duration && <Muted className="tabular-nums">{duration}</Muted>}
+      </div>
+      {failure && (
+        <p className="flex items-start gap-1 pl-5 text-destructive">
+          <CircleAlertIcon className="mt-0.5 size-3 shrink-0" />
+          <span className="break-words">{truncate(failure, 200)}</span>
+        </p>
+      )}
+    </li>
+  );
+}
+
+function UltraspawnBody({
+  details,
+  result,
+  isError,
+  status,
+}: { details: UltraspawnDetails } & ToolRendererProps) {
+  const live = isActive(status) && details.status === "running";
+  const elapsed = useElapsed(live ? details.startedAt : undefined);
+  // Details persisted from an interrupted run can hold phases and agents still marked running.
+  const allAgents = live
+    ? details.agents
+    : details.agents.map((a) =>
+        a.status === "running" ? { ...a, status: "failed" as const, reason: "interrupted" } : a,
+      );
+  const counts = agentCounts(allAgents);
+  // A canceled run was refused at approval and never spawned anything.
+  const header = (
+    details.status === "canceled"
+      ? [details.status]
+      : [
+          details.status,
+          `${counts.done} done`,
+          `${counts.failed} failed`,
+          `${counts.running} running`,
+          counts.queued > 0 && `${counts.queued} queued`,
+          `${details.spawned} spawned`,
+          formatCost(details.cost),
+          details.startedAt !== undefined && details.endedAt !== undefined
+            ? formatDuration(details.endedAt - details.startedAt)
+            : elapsed !== undefined && formatSeconds(elapsed),
+        ]
+  )
+    .filter(Boolean)
+    .join(" · ");
+  const agents = allAgents.toSorted(
+    (a, b) => AGENT_STATUS_RANK[a.status] - AGENT_STATUS_RANK[b.status],
+  );
+  const hiddenAgents = agents.slice(VISIBLE_AGENTS);
+  const earlierLogs = details.logs.slice(0, -VISIBLE_LOGS);
+  const recentLogs = details.logs.slice(-VISIBLE_LOGS);
+  const text = toolResultText(result);
+
+  return (
+    <div data-testid="ultraspawn-widget" className="flex flex-col gap-2 text-xs">
+      <p data-testid="ultraspawn-header" className="text-muted-foreground tabular-nums">
+        <span className="font-medium text-foreground">{details.name}</span> · {header}
+      </p>
+      {details.error && details.status !== "done" && result === undefined && (
+        <p className="whitespace-pre-wrap break-words text-destructive">{details.error}</p>
+      )}
+      {details.phases.length > 0 && (
+        <ul data-testid="ultraspawn-phases" className="flex flex-col gap-0.5">
+          {details.phases.map((phase, i) => {
+            const inPhase = allAgents.filter((a) => a.phaseIndex === i);
+            const failed = inPhase.filter((a) => a.status === "failed").length;
+            const finished = inPhase.filter((a) => a.status === "done").length + failed;
+            const running = phase.status === "running" && live;
+            return (
+              <li
+                // biome-ignore lint/suspicious/noArrayIndexKey: phases only append; names can repeat
+                key={i}
+                data-testid="ultraspawn-phase"
+                className="flex min-w-0 items-center gap-1.5"
+              >
+                <StatusIcon status={running ? "running" : "done"} />
+                <span className="truncate font-medium">{phase.name}</span>
+                <Muted className="tabular-nums">
+                  {finished}/{inPhase.length}
+                </Muted>
+                {failed > 0 && <span className="text-destructive">{failed} failed</span>}
+                <span className="flex-1" />
+                {phase.startedAt !== undefined && phase.endedAt !== undefined && (
+                  <Muted className="tabular-nums">
+                    {formatDuration(phase.endedAt - phase.startedAt)}
+                  </Muted>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {agents.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <ul data-testid="ultraspawn-agents" className="flex flex-col gap-0.5">
+            {agents.slice(0, VISIBLE_AGENTS).map((agent) => (
+              <UltraspawnAgentItem key={agent.id} agent={agent} live={live} />
+            ))}
+          </ul>
+          {hiddenAgents.length > 0 && (
+            <CollapsibleRow
+              label={<Muted>{plural(hiddenAgents.length, "more agent", "more agents")}</Muted>}
+            >
+              <ul className="flex flex-col gap-0.5">
+                {hiddenAgents.map((agent) => (
+                  <UltraspawnAgentItem key={agent.id} agent={agent} live={live} />
+                ))}
+              </ul>
+            </CollapsibleRow>
+          )}
+        </div>
+      )}
+      {details.logs.length > 0 && (
+        <div
+          data-testid="ultraspawn-logs"
+          className="-mx-2 flex max-h-60 flex-col overflow-auto px-2 text-muted-foreground"
+        >
+          {earlierLogs.length > 0 && (
+            <CollapsibleRow
+              label={
+                <Muted>{plural(earlierLogs.length, "earlier log line", "earlier log lines")}</Muted>
+              }
+            >
+              {earlierLogs.map((line, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: log lines only append
+                <p key={i} className="whitespace-pre-wrap break-words font-mono">
+                  {line}
+                </p>
+              ))}
+            </CollapsibleRow>
+          )}
+          {recentLogs.map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: log lines only append
+            <p key={earlierLogs.length + i} className="whitespace-pre-wrap break-words font-mono">
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
+      {result !== undefined && (
+        <p className={cn("whitespace-pre-wrap", isError && "text-destructive")}>
+          {text || "(no output)"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SubagentBody(props: ToolRendererProps) {
+  const ultraspawn = currentUltraspawn(props);
+  if (ultraspawn) return <UltraspawnBody {...props} details={ultraspawn} />;
   const details = currentDetails(props);
   const active = isActive(props.status);
   const text = toolResultText(props.result ?? props.partialResult);

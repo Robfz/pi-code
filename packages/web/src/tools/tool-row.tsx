@@ -46,20 +46,29 @@ function PathTarget({ path }: { path: string }) {
   );
 }
 
-function Target({ target }: { target: NonNullable<ToolLabel["target"]> }) {
+function Target({
+  target,
+  className,
+}: {
+  target: NonNullable<ToolLabel["target"]>;
+  className?: string;
+}) {
   if (target.kind === "path") return <PathTarget path={target.text} />;
   if (target.kind === "code") {
     return (
       <span
         data-slot="row-target"
-        className="min-w-0 truncate font-mono text-[12.5px] tracking-[-0.01em] text-subtle-foreground"
+        className={cn(
+          "min-w-0 truncate font-mono text-[12.5px] tracking-[-0.01em] text-subtle-foreground",
+          className,
+        )}
       >
         {target.text}
       </span>
     );
   }
   return (
-    <span data-slot="row-target" className="min-w-0 truncate text-foreground">
+    <span data-slot="row-target" className={cn("min-w-0 truncate text-foreground", className)}>
       {target.text}
     </span>
   );
@@ -96,11 +105,7 @@ export function ToolRow({
     <CollapsibleRow
       {...rest}
       data-tone={label.tone}
-      className={cn(
-        // -mx-2/px-2 puts the outline where the row's hover background bleeds, keeping alignment.
-        ultraspawn && "-mx-2 my-1 rounded-[7px] px-2 outline outline-ultraspawn/70",
-        className,
-      )}
+      className={className}
       open={open}
       onOpenChange={onOpenChange}
       icon={<Icon className={cn(failed ? "text-status-error" : ultraspawn && "text-ultraspawn")} />}
@@ -110,17 +115,26 @@ export function ToolRow({
             data-slot="row-verb"
             className={cn(
               "shrink-0 font-medium",
-              active ? "shimmer" : failed ? "text-status-error" : "text-foreground",
+              active
+                ? cn("shimmer", ultraspawn && "shimmer-ultraspawn")
+                : failed
+                  ? "text-status-error"
+                  : ultraspawn
+                    ? "text-ultraspawn"
+                    : "text-foreground",
             )}
           >
             {label.verb}
           </span>
-          {label.target && label.target.text !== "" && <Target target={label.target} />}
+          {label.target && label.target.text !== "" && (
+            <Target target={label.target} className={ultraspawn ? "text-ultraspawn" : undefined} />
+          )}
           {(hasMeta || error) && (
             <span
               data-slot="row-meta"
               className={cn(
-                "text-muted-foreground tabular-nums",
+                ultraspawn ? "text-ultraspawn" : "text-muted-foreground",
+                "tabular-nums",
                 error ? "min-w-0 truncate" : "shrink-0",
               )}
             >
