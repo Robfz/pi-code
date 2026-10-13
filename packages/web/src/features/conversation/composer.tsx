@@ -135,8 +135,9 @@ function SlashMenu({
  *   changed outside the composer (fork, share, an inserted reference) focuses the textarea at
  *   the draft's selection, now or on the next mount.
  * - `ComposerInput` colors line references blue and deletes them whole.
+ * - `onSubmit` runs on every non-empty submit, before it is dispatched.
  */
-export function Composer() {
+export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
   const store = useConversationStore();
   const agentId = useConversation((s) => s.agentId);
   const hydrated = useConversation((s) => s.hydrated);
@@ -268,6 +269,7 @@ export function Composer() {
   async function send(behavior?: "steer" | "followUp") {
     const typed = text.trim();
     if (!ready || (typed === "" && attachments.length === 0)) return;
+    onSubmit?.();
 
     if (attachments.length === 0) {
       const bash = parseBash(typed);

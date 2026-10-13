@@ -24,7 +24,7 @@ import { useStickToBottom } from "./use-stick-to-bottom";
 export function ConversationScreen() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  useStickToBottom(scrollRef, contentRef);
+  const stickToBottom = useStickToBottom(scrollRef, contentRef);
   const exited = useConversation((s) => s.agent.status === "exited");
   const desktop = useIsDesktop();
   const agentId = useConversation((s) => s.agentId);
@@ -64,7 +64,7 @@ export function ConversationScreen() {
         >
           <QueueDisplay />
           <Widgets placement="aboveEditor" />
-          {!exited && <Composer />}
+          {!exited && <Composer onSubmit={stickToBottom} />}
           <Widgets placement="belowEditor" />
           <StatusBar />
         </div>
