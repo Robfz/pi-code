@@ -165,15 +165,20 @@ interface Draft {
   selection: { start: number; end: number };  // the textarea's, updated on select/input/blur
   attachments: Attachment[];                  // features/conversation/attachments.ts
   external: number;                           // bumped by changes made outside the composer
+  browse?: {                                  // while browsing prompt history
+    index: number;                            // the entry shown, 0 the newest
+    stash: { text: string; selection: { start: number; end: number } }; // the draft from before
+  };
 }
 
 interface Drafts {
   drafts: Record<AgentId, Draft>;
   edit(agentId, text, selection): void;       // typing
   setAttachments(agentId, attachments): void;
-  replace(agentId, text): void;               // fork, share, set_editor_text, Stop & edit; caret at the end; bumps `external`
+  replace(agentId, text): void;               // fork, share, set_editor_text, Stop & edit; caret at the end; bumps `external`; ends browsing
+  recall(agentId, text, selection, browse): void; // prompt history; bumps `external`
   insertReference(agentId, ref: string): void; // at the selection; bumps `external`
-  clear(agentId): void;                       // on send
+  clear(agentId): void;                       // on send; ends browsing
 }
 ```
 
@@ -181,6 +186,7 @@ interface Drafts {
 
 - `insertReference` replaces the selection with the reference. It adds a space before it unless it lands at the start or after whitespace, and a space after it unless whitespace follows. The caret goes after the inserted text.
 - When `external` changes, the mounted composer focuses the textarea and applies the stored selection. A composer mounting later (phone, back from the diff page) does the same if `external` changed since its last mount.
+- Prompt history (`docs/design/09-ui-overhaul.md`, "Composer") keeps its position and the stashed draft in `browse`, so leaving the conversation mid-browse loses neither. Typing and `insertReference` keep `browse`; attachments are untouched.
 - Fork (`session-actions.ts`) and share (`share-screen.tsx`) hand text over with `replace`; `useConversationUi` holds only the action-sheet state.
 
 ### Highlight overlay

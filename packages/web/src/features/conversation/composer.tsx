@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
 import { caretAt, type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
-import { selectEditorText, selectIsRunning } from "@/store/selectors";
+import { selectEditorText, selectIsRunning, selectPromptHistory } from "@/store/selectors";
 import { type Attachment, prepareAttachment } from "./attachments";
 import { ComposerInput, selectionOf } from "./composer-input";
 import { ModelPicker } from "./model-picker";
@@ -126,6 +126,10 @@ function SlashMenu({
  *   Stop → `abort`.
  * - Desktop keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter newline.
  * - `/` autocompletes built-in and pi commands; built-ins run in the client.
+ * - Up with the caret at the start recalls the previous prompt of the active branch
+ *   (`selectPromptHistory`), caret at its start; Down with the caret at the end recalls the next
+ *   one, caret at its end, and past the newest restores the draft from before browsing. Edits to
+ *   a recalled prompt are dropped on the next step. The slash menu takes the arrows first.
  * - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
  * - Attached images go into `prompt.images` when the model accepts images, downscaled to
  *   2048 px / re-encoded as JPEG when large (`prepareImage`). Other files are read as text
@@ -144,6 +148,7 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
   const ready = useConversation((s) => s.hydrated && s.agent.status === "ready");
   const running = useConversation(selectIsRunning);
   const editorText = useConversation(selectEditorText);
+  const history = useConversation(selectPromptHistory);
   const supportsImages = useConversation((s) => s.state?.model?.input.includes("image") === true);
   const draft = useDrafts((s) => s.drafts[agentId] ?? EMPTY_DRAFT);
   const { text, attachments } = draft;
@@ -345,6 +350,33 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
     setAttachments([...current, ...added]);
   }
 
+  /**
+   * Steps through prompt history, older (1) from the start of the text or newer (-1) from its
+   * end; returns whether the key was taken. Elsewhere the arrow first moves the caret natively,
+   * so the next press steps without measuring wrapped lines.
+   */
+  function browseHistory(el: HTMLTextAreaElement, step: 1 | -1): boolean {
+    const { selectionStart: start, selectionEnd: end } = el;
+    if (start !== end || start !== (step === 1 ? 0 : el.value.length)) return false;
+    const { drafts, recall } = useDrafts.getState();
+    const browse = drafts[agentId]?.browse;
+    if (step === 1) {
+      const index = browse ? browse.index + 1 : 0;
+      const entry = history[index];
+      // At the oldest entry the key does nothing.
+      if (entry === undefined) return browse !== undefined;
+      const stash = browse?.stash ?? { text: el.value, selection: selectionOf(el) };
+      recall(agentId, entry, caretAt(0), { index, stash });
+      return true;
+    }
+    if (!browse) return false;
+    const index = browse.index - 1;
+    const entry = index >= 0 ? history[index] : undefined;
+    if (entry === undefined) recall(agentId, browse.stash.text, browse.stash.selection, undefined);
+    else recall(agentId, entry, caretAt(entry.length), { ...browse, index });
+    return true;
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (menuOpen) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -365,6 +397,14 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
         setMenuDismissed(true);
         return;
       }
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const modified = event.shiftKey || event.altKey || event.metaKey || event.ctrlKey;
+      if (modified || event.nativeEvent.isComposing) return;
+      if (browseHistory(event.currentTarget, event.key === "ArrowUp" ? 1 : -1)) {
+        event.preventDefault();
+      }
+      return;
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     if (isCoarsePointer()) return;

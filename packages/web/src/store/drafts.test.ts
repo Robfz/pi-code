@@ -83,4 +83,16 @@ describe("drafts", () => {
     useDrafts.getState().clear("a1");
     expect(draft()).toEqual({ ...EMPTY_DRAFT, external: 1 });
   });
+
+  it("recall sets text, selection and browse and bumps external; replace and clear end browsing", () => {
+    const browse = { index: 0, stash: { text: "draft", selection: { start: 0, end: 0 } } };
+    useDrafts.getState().recall("a1", "older", { start: 0, end: 0 }, browse);
+    expect(draft()).toMatchObject({ text: "older", selection: { start: 0, end: 0 }, external: 1 });
+    expect(draft().browse).toBe(browse);
+    useDrafts.getState().replace("a1", "forked");
+    expect(draft().browse).toBeUndefined();
+    useDrafts.getState().recall("a1", "older", { start: 0, end: 0 }, browse);
+    useDrafts.getState().clear("a1");
+    expect(draft().browse).toBeUndefined();
+  });
 });
