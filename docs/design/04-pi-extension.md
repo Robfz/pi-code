@@ -2,7 +2,7 @@
 
 A small pi extension loaded **only** into server-spawned pi processes (`pi --mode rpc --extension <path>`). The TUI never loads it. Source: `packages/pi-extension/src/index.ts` (pi loads TypeScript directly).
 
-It fills two gaps in pi's RPC mode and adds one prompt guideline, using documented extension APIs. Trust and tree navigation were verified in `docs/spikes/e1-e2.md`.
+It fills two gaps in pi's RPC mode, adds one prompt guideline and names conversations, using documented extension APIs. Trust and tree navigation were verified in `docs/spikes/e1-e2.md`.
 
 It is typed against `@earendil-works/pi-coding-agent` `1.1.0` (dev dependency, type-only imports), the installed pi's version, for `BeforeAgentStartEvent.systemPromptOptions` (section 3). The protocol package keeps its own pin.
 
@@ -66,6 +66,23 @@ pi.on("before_agent_start", (event) => {
 - The guideline is added at most once per run.
 - Since only server-spawned pi loads the extension, TUI sessions never get the guideline.
 
+## 4. Automatic conversation names
+
+**Problem.** Unnamed conversations show their first prompt as the title, which is often long or vague. pi names a session only on request (`/name`, Rename…).
+
+**Mechanism.** An `agent_end` handler (`src/auto-name.ts`) names an unnamed session after its first reply:
+
+1. Skip when the session has a name (`pi.getSessionName()`) or this session was already attempted.
+2. Take the first exchange from `ctx.sessionManager.getBranch()`: the first user message and the first run's last assistant text. Until that reply has text, wait for the next `agent_end`. Each side is cut to 4,000 characters: the user side keeps its end, since attached `<file>` blocks come first, and the reply keeps its start.
+3. Find `anthropic/claude-haiku-5-5` in `ctx.modelRegistry`. Without the model or configured auth, stop silently: that is a provider choice, not an error.
+4. Ask it for a 3–6 word title through `ctx.modelRegistry.streamSimple()` (pi's auth, `reasoning: "low"`, the lightest level Haiku 5.5 allows), without awaiting it, so pi goes idle as usual.
+5. Clean the reply (first line, no wrapping quotes or trailing punctuation, at most 80 characters) and call `pi.setSessionName()` unless a name was set meanwhile. pi emits `session_info_changed`, which the server and web client already handle.
+
+- One attempt per session (reset on `session_start`), so a failure can't repeat. A failed request or empty reply shows one `warning` notice ("Couldn't auto-name this conversation: …") and the title stays the first prompt.
+- `session_shutdown` aborts an in-flight request, so a title can't land on the session that replaced it.
+- Sessions resumed without a name are named after their next run.
+- The title request's cost isn't added to the session's usage.
+
 ## Non-goals
 
-No tool registration, no rendering, no state. Anything that must also work in the TUI does not belong here.
+No tool registration, no rendering, no persisted state. Anything that must also work in the TUI does not belong here.

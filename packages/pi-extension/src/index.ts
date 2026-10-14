@@ -4,6 +4,7 @@ import type {
   ExtensionCommandContext,
   ProjectTrustEventResult,
 } from "@earendil-works/pi-coding-agent";
+import { registerAutoName } from "./auto-name.ts";
 
 /** Asks the model to write line references the web client can parse and link. */
 export const REFERENCE_GUIDELINE =
@@ -20,6 +21,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
     description: "Internal: pi-code tree navigation",
     handler: treeCommand,
   });
+  registerAutoName(pi);
 }
 
 /** Relays the trust decision the server obtained before spawning pi (`PI_CODE_TRUST`). */
