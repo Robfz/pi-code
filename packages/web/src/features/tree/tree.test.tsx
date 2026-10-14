@@ -7,7 +7,8 @@ import { useConversationUi } from "@/features/conversation/conversation-ui";
 import { useDrafts } from "@/store/drafts";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { buildTreeModel, flattenTree } from "./tree-model";
-import { MAX_INDENT, TreeScreen } from "./tree-screen";
+import { TreeScreen } from "./tree-screen";
+import { MAX_INDENT } from "./tree-view";
 
 vi.mock("sonner", async (importOriginal) => {
   const actual = await importOriginal<typeof import("sonner")>();

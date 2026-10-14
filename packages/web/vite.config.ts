@@ -30,6 +30,8 @@ export default defineConfig({
         description: "A client for the pi coding agent running on your Mac.",
         start_url: "/",
         scope: "/",
+        // The title bar's space goes to the app's top row (`titlebar` in `src/index.css`).
+        display_override: ["window-controls-overlay"],
         display: "standalone",
         orientation: "any",
         theme_color: THEME_COLOR,

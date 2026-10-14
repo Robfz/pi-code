@@ -34,7 +34,7 @@ afterEach(() => {
 describe("ConversationRoot", () => {
   it("acks the conversation on mount, on visible, and on attention while focused", async () => {
     const { acks } = renderAgent();
-    expect(await screen.findByRole("heading", { name: "alpha" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
     expect(acks()).toHaveLength(1);
 
     act(() => {
@@ -49,7 +49,7 @@ describe("ConversationRoot", () => {
 
   it("acks attention raised while unfocused once the window is focused", async () => {
     const { acks } = renderAgent();
-    expect(await screen.findByRole("heading", { name: "alpha" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
     expect(acks()).toHaveLength(1);
 
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -64,7 +64,7 @@ describe("ConversationRoot", () => {
 
   it("shows a conversation closed while on screen, with New conversation", async () => {
     renderAgent();
-    expect(await screen.findByRole("heading", { name: "alpha" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
     sendFrame({ type: "agent_closed", agentId: "a1" });
     expect(await screen.findByRole("heading", { name: "Conversation closed" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();

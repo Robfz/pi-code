@@ -85,6 +85,8 @@ export interface DiffViewerProps {
    * without changes, so an all-context patch (`fileAsPatch`) needs it.
    */
   content?: string;
+  /** Without its own border and rounding, for a container that frames it (the Changes tab). */
+  flush?: boolean;
 }
 
 export const DiffViewer = memo(function DiffViewer({
@@ -97,24 +99,26 @@ export const DiffViewer = memo(function DiffViewer({
   scrollTo,
   unified = false,
   content,
+  flush = false,
 }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
   const [widthRef, wide] = useWidthAtLeast<HTMLDivElement>(SPLIT_MIN_WIDTH);
   const { resolvedTheme, forcedTheme } = useTheme();
   const [force, setForce] = useState(false);
 
+  const message = cn("text-xs text-muted-foreground", flush && "px-3 py-2");
   if (parsed.binary && parsed.hunks.length === 0) {
-    return <p className="text-xs text-muted-foreground">Binary file, no text diff.</p>;
+    return <p className={message}>Binary file, no text diff.</p>;
   }
   if (parsed.hunks.length === 0) {
-    return <p className="text-xs text-muted-foreground">No changes.</p>;
+    return <p className={message}>No changes.</p>;
   }
   const large = parsed.lineCount > maxLines || patch.length > LARGE_DIFF_CHARS;
   if (large && !force) {
     return (
       <div
         data-testid="diff-too-large"
-        className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        className={cn("flex flex-wrap items-center gap-2", message)}
       >
         <span>
           Large diff ({parsed.lineCount} lines, +{parsed.additions} −{parsed.deletions}).
@@ -134,7 +138,7 @@ export const DiffViewer = memo(function DiffViewer({
       ref={widthRef}
       data-testid="diff-viewer"
       data-mode={split ? "split" : "unified"}
-      className={cn("min-w-0 overflow-hidden rounded-md border text-xs", className)}
+      className={cn("min-w-0 overflow-hidden text-xs", !flush && "rounded-md border", className)}
     >
       <DiffErrorBoundary fallback={<PlainPatch patch={patch} />}>
         <Suspense fallback={<p className="p-2 text-muted-foreground">Loading diff…</p>}>

@@ -22,7 +22,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
 | `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
-| `/agents/$agentId/tree` | Session tree |
+| `/agents/$agentId/tree` | Session tree (phone). On desktop it opens the review pane on its Tree tab and replaces itself with `/agents/$agentId` |
 | `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
 | `/settings` | Notifications permission, transcript density, about |
@@ -40,9 +40,9 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | Back chevron to Home | Hidden (conversation header, settings, sessions, "Conversation closed" and other placeholder screens) | Shown |
 | Settings | Sidebar footer | Home header, sidebar sheet footer |
 | Conversation column | Centred, `max-w-[46rem]` with `px-6`; fits the half beside the review pane while that is open | Centred, `max-w-[46rem]` with `px-4` |
-| Review panel | Pane beside the conversation, toggled from the header or `/diff` | `/agents/$agentId/diff` page, from the header menu's Diff or `/diff` |
+| Review panel | Pane beside the conversation (Changes, Files, Tree), opened from the activity rail at the right edge, `/diff` or `/tree` | `/agents/$agentId/diff` page (Changes, Files), from the header menu's Diff or `/diff`; the tree is its own page |
 
-The tree screen (on both) and the phone review page keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
+The phone tree and review pages keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
 - **Rows:** every agent in `live.agents`, exited included, plus every session no agent holds (matched by `sessionFile`), in listing groups (below); pinned repos first, by label, then groups and rows by their last prompt ([`05-desktop.md`](05-desktop.md), "Ordering"). Group label: folder basename, with the parent's prepended when two top-level groups share it; the branch from `live.branches` on the header owning the cwd while the folder has a live agent.
 - **Row:** a `StatusMark` (the status vocabulary, [`09-ui-overhaul.md`](09-ui-overhaul.md), "Status vocabulary"): a neutral spinner for Working, a dot coloured for Needs input, Failed, Finished or Idle, nothing for Closed (exited agents, session rows); title; the relative time of the last prompt (else of the creation), refreshed every 60 s. The route's agent is highlighted.
@@ -133,17 +133,21 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 ## Conversation screen
 
 ```
-┌ header: session name · project · changes (desktop) · density · ⋮ (tree, diff on phone, fork…, stop, delete) ┐
-│ transcript: the active branch as turns, the live turn last, !cmd runs in flight                              │
-│ queue display                                                                                                │
-│ widgets (aboveEditor)                                                                                        │
-│ composer                                                                                                     │
-│ widgets (belowEditor)                                                                                        │
-│ status bar                                                                                                   │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ header: repo › worktree › title · branch · online · Working · fork, compact · density · ⋮ ┬ rail ──┐
+│ transcript: the active branch as turns, the live turn last, !cmd runs in flight           │ Changes│
+│ queue display                                                                             │ Files  │
+│ widgets (aboveEditor)                                                                     │ Tree   │
+│ composer                                                                                  │        │
+│ widgets (belowEditor)                                                                     │        │
+│ status bar                                                                                │        │
+└───────────────────────────────────────────────────────────────────────────────────────────┴────────┘
 ```
 
-The header spans the full width; the transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop, the header's "Show changes" button (`aria-pressed`) and `/diff` toggle the review pane, which takes the right half of the content area ([`07-code-review.md`](07-code-review.md), "Desktop pane"), and the column fits the half left beside it; the header menu's Diff item exists only on phone.
+- **Header:** a single-line breadcrumb, `repo › worktree › title` in a `<repo>/main` layout (the container: `repo › title`), `folder › title` elsewhere; the folders are muted; only the title truncates, and as the header narrows (a container query, so the open review pane counts) the folders hide below 42rem of breadcrumb width, then the branch chip below 32rem; the title (`<h1>`) is the sidebar row's (`conversationTitle`: the session name, else its session's name or first prompt, else "New conversation"). Then the branch chip (`gitStatus.branch`), the connection dot, "Working · 2m 13s" while the agent works (from 640px), and on desktop the Fork… and Compact… icon buttons (tooltips), a separator, the density dropdown and `⋮`: Clone, Rename…, New session, Stop, Delete, with Tree, Diff, Fork… and Compact… first below the desktop breakpoint. Session commands need a ready agent.
+
+The header spans the width up to the activity rail; the transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop a 44px activity rail is pinned to the right edge, pane open or closed: Changes, Files and Tree icon buttons in a vertical toolbar (named "Changes panel" and so on, tooltips on the left, `aria-pressed` on the tab showing, a `status-input` dot on Changes while `gitStatus.dirty`, announced as "uncommitted changes"). A button opens the review pane on its tab; the button of the tab showing closes it, as does the pane's Close, which moves focus to that button. The pane and the conversation split the width the rail leaves ([`07-code-review.md`](07-code-review.md), "Desktop pane"), and the column fits the half left beside it; the header menu's Tree and Diff items exist only on phone.
+
+The transcript follows live output (`useStickToBottom`): it stays at the bottom while content grows until the user scrolls up, and every send returns it there, as does the leaf moving to another branch (the tree's Go here). On desktop, where the transcript's right margin holds it (a container query, so the open review pane hides it), a conversation outline lists the prompts, marks the one in view and scrolls to one on click, which stops following live as a scroll up does ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Conversation outline").
 
 ### Transcript rendering
 
@@ -244,12 +248,12 @@ Built-in commands:
 | `/model [provider/id]` | model sheet / `set_model` |
 | `/thinking [level]` | thinking sheet / `set_thinking_level` |
 | `/compact [instructions]` | `compact` |
-| `/tree` | tree screen |
+| `/tree` | the review pane's Tree tab (desktop); tree screen (phone) |
 | `/fork` | picker from `get_fork_messages` → `fork` |
 | `/clone` | `clone` |
 | `/session` | stats sheet (`get_session_stats`) |
 | `/copy` | copy last assistant text |
-| `/diff` | toggle the review pane (desktop); review page (phone) |
+| `/diff` | toggle the review pane on Changes (desktop); review page (phone) |
 | `/settings`, `/login`, `/logout`, `/trust`, `/export`, `/share`, `/import`, `/reload`, `/scoped-models`, `/hotkeys`, `/quit` … | "Use the TUI for this" |
 
 ### Extension UI
@@ -272,23 +276,24 @@ On phone, dialogs and the trust sheet are modal bottom sheets; outside taps don'
 
 ### Status bar
 
-One 12px faint line under the composer: folder name (from 1024px) · git branch + dirty dot, then on the right the context bar (5 cells from `stats.contextUsage.percent`, with its percentage from 1024px) · cost, with `(sa $x)` once the conversation has a `spawn` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools` · "Working" with a spinner while the run is active, compacting or retrying. The context bar and cost open the stats sheet. Extension `setStatus` chips sit below. The session name is in the header; the model and its thinking level are in the composer's picker.
+One 12px faint line under the composer: folder name (from 1024px) · git branch + dirty dot, then on the right the context bar (5 cells from `stats.contextUsage.percent`, with its percentage from 1024px) · cost, with `(sa $x)` once the conversation has a `spawn` call: the summed `usage.cost` of its results' details, from committed tool results on all branches (like the session cost) plus uncommitted calls in `live.tools` · "Working" with a spinner while the run is active, compacting or retrying (below 640px; from there the header shows the timed run state). The context bar and cost open the stats sheet. Extension `setStatus` chips sit below. The session name is in the header; the model and its thinking level are in the composer's picker.
 
 ## Tree screen
 
-The store's transcript (all branches) and labels rendered as an indented tree of user and assistant entries (tool traffic collapsed), labels as badges, the current leaf highlighted. Actions on an entry:
+`TreeView` (`features/tree/tree-view.tsx`) is the body of both the phone's `/agents/$agentId/tree` page (`TreeScreen`, with its back chevron and "Session tree" title) and the desktop review pane's Tree tab (no header of its own). It shows the store's transcript (all branches) and labels rendered as an indented tree of user and assistant entries (tool traffic collapsed), labels as badges, the current leaf highlighted. Actions on an entry:
 
 - **Go here** → `POST /tree/navigate` with a "summarize the branch you're leaving?" choice (and optional instructions).
 - **Fork from here** (user messages) → `fork`.
 
-Disabled while a run is active.
+Disabled while a run is active, with a notice sticking to the top of the scroll area. Both actions end on `/agents/$agentId`: from the page they return to the conversation; in the pane, already there, the pane stays open on Tree.
 
 ## Review panel
 
-Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has two tabs, Refresh and the active tab, and renders as the desktop pane beside the conversation or as the phone's `/agents/$agentId/diff` page:
+Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tabs, Refresh (Changes and Files) and the active tab, and renders as the desktop pane beside the conversation (Changes, Files, Tree) or as the phone's `/agents/$agentId/diff` page (Changes, Files):
 
 - **Changes**: `GET /git/diff` in uncommitted or branch mode (base from `GET /git/branches`, compared as `origin/<base>` when it exists, optional uncommitted changes; a Fetch button runs `POST /git/fetch` on demand and refreshes the diff and branches). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
 - **Files**: fuzzy search (`GET /files?q=`) and a file viewer (`GET /files/content`) with selectable lines.
+- **Tree** (pane only): the tree view (Tree screen).
 - Selecting lines inserts a reference into the composer: on desktop on mouse release, on phone through the Add to chat bar, which returns to the conversation.
 - Every `git_status` event and snapshot hydration invalidates the agent's review queries, so the diff and open file refresh after each turn.
 
@@ -296,11 +301,13 @@ Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has two tab
 
 ## PWA
 
-**Manifest:** name "pi-code", standalone display, icons, theme colors, a `focus-existing` launch handler (launching focuses the open window and `useLaunchQueue` routes it in-app to the launch URL), a "New conversation" shortcut (`/?new=1`: `/` opens the project picker and strips the param), and
+**Manifest:** name "pi-code", standalone display with a `window-controls-overlay` display override, icons, theme colors, a `focus-existing` launch handler (launching focuses the open window and `useLaunchQueue` routes it in-app to the launch URL), a "New conversation" shortcut (`/?new=1`: `/` opens the project picker and strips the param), and
 
 ```json
 "share_target": { "action": "/share", "method": "GET", "params": { "title": "title", "text": "text", "url": "url" } }
 ```
+
+**Window Controls Overlay** (the installed app with its title bar hidden): the top rows (the sidebar's New conversation row, the conversation header and every `ScreenHeader`, the review pane's included) carry `titlebar` (`src/index.css`, `@media (display-mode: window-controls-overlay)`): they take `env(titlebar-area-height)`, drag the window (`app-region: drag`, its links, buttons, inputs and tabs `no-drag`) and pad clear of the traffic lights (`titlebar-area-x`) and the browser's controls where they reach them. A row's distance from the window's edges comes from `--titlebar-left` / `--titlebar-right`, set by the shell beside the docked or collapsed sidebar, by the sidebar itself, by the sidebar sheet, and on the conversation screen: the activity rail's width for the pane header, plus the pane's for the conversation header. The activity rail's top cell is an empty title-bar cell with no inset of its own, which the browser's controls may cover. The collapsed sidebar and Home start below the title bar area. Outside the overlay nothing changes.
 
 **Service worker** (`src/sw.ts`, injectManifest):
 

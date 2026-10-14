@@ -83,7 +83,8 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
           await actions.compact(args);
           break;
         case "tree":
-          void navigate({ to: "/agents/$agentId/tree", params: { agentId } });
+          if (desktop) useReviewStore.getState().openPane(agentId, "tree");
+          else void navigate({ to: "/agents/$agentId/tree", params: { agentId } });
           break;
         case "fork":
           openSheet("fork");
@@ -98,7 +99,7 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
           await actions.copyLastAssistantText();
           break;
         case "diff":
-          if (desktop) useReviewStore.getState().togglePane(agentId);
+          if (desktop) useReviewStore.getState().toggleTab(agentId, "changes");
           else void navigate({ to: "/agents/$agentId/diff", params: { agentId } });
           break;
         default:

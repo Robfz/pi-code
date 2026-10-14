@@ -10,6 +10,7 @@ import {
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { createQueryClient } from "@/lib/query-client";
 import { ConversationStoreProvider, LiveRegistryProvider } from "@/store/context";
@@ -27,8 +28,8 @@ export function hydratedStore(patch: Partial<Snapshot> = {}): ConversationStore 
 }
 
 /**
- * Render inside a store provider, a live registry (never started), the Stop-or-Delete provider
- * and a minimal router (for `Link` / `useNavigate`).
+ * Render inside a store provider, a live registry (never started), the Stop-or-Delete and
+ * tooltip providers and a minimal router (for `Link` / `useNavigate`).
  */
 export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
   const queryClient = createQueryClient();
@@ -39,7 +40,9 @@ export async function renderWithStore(ui: ReactNode, store: ConversationStore) {
       <QueryClientProvider client={queryClient}>
         <LiveRegistryProvider registry={registry}>
           <StopOrDeleteProvider>
-            <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>
+            <TooltipProvider>
+              <ConversationStoreProvider store={store}>{ui}</ConversationStoreProvider>
+            </TooltipProvider>
           </StopOrDeleteProvider>
         </LiveRegistryProvider>
       </QueryClientProvider>

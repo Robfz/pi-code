@@ -156,7 +156,7 @@ interface LiveRegistry {
 | Back chevron to Home | Hidden on the conversation header, settings, `/sessions`, "Conversation closed" and other placeholder screens | Shown |
 | Settings | Icon in the sidebar footer | Home header, sheet footer |
 
-Tree, share, settings and `/sessions` are routes rendered in the content area on desktop (tree keeps its back-to-conversation chevron); the sidebar lists every conversation. The review panel (Changes, Files) is a pane beside the conversation instead of a route: `/agents/$agentId/diff` opens the pane and replaces itself with `/agents/$agentId` ([`07-code-review.md`](07-code-review.md), "Desktop pane").
+Share, settings and `/sessions` are routes rendered in the content area on desktop; the sidebar lists every conversation. The review panel (Changes, Files) and the session tree are tabs of a pane beside the conversation instead of routes: `/agents/$agentId/diff` and `/agents/$agentId/tree` open the pane and replace themselves with `/agents/$agentId` ([`07-code-review.md`](07-code-review.md), "Desktop pane").
 
 ### Sidebar
 
@@ -184,8 +184,8 @@ Tree, share, settings and `/sessions` are routes rendered in the content area on
 
 ### Layout
 
-- **Transcript width.** The transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` (736px), with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. The header spans the full width.
-- **Review pane.** At ≥1024px, with the pane open for the conversation (persisted per conversation), the conversation and `ReviewPane` split the content width in halves, each `h-dvh` with its own scroll; the column keeps its cap and padding and fits the half left to it. The header's "Show changes" / "Hide changes" button and `/diff` toggle it; the tree route shows no pane. Below 1024px the pane isn't rendered and the review panel is the `/agents/$agentId/diff` page. Details in [`07-code-review.md`](07-code-review.md).
+- **Transcript width.** The transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` (736px), with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. The header spans the width up to the activity rail.
+- **Review pane.** At ≥1024px an activity rail (44px) sits at the conversation screen's right edge, with Changes, Files and Tree buttons that open the pane on that tab or close it from the tab showing. With the pane open for the conversation (persisted per conversation, with its tab), the conversation and `ReviewPane` split the width the rail leaves in halves, each `h-dvh` with its own scroll; the column keeps its cap and padding and fits the half left to it. `/diff` toggles it on Changes, `/tree` opens it on Tree. Below 1024px the pane isn't rendered and the review panel is the `/agents/$agentId/diff` page. Details in [`07-code-review.md`](07-code-review.md).
 - **Diff split.** `DiffViewer` measures its own width (`useWidthAtLeast`, a `ResizeObserver` on its container) and is split when it is ≥1024px, unified otherwise, whatever the viewport.
 - **Conversation sheets.** On desktop, extension dialogs (`DialogHost`) and the trust prompt (`TrustSheet`) are non-modal bottom sheets portalled into the conversation column (their `container` prop) with a `ScopedOverlay` dimming only that column, so the sidebar and the rest of the page stay usable. Clicks outside the sheet don't answer it, and neither does Escape pressed outside it; Tab can leave the sheet (`SheetContent loopFocus={false}`), skipping the covered column, which is `inert` while it's open. Inside a dialog, Escape, Cancel and × answer `cancelled`; the trust prompt answers only through its buttons. User-initiated action sheets (rename, model, thinking, stats) stay page-modal. On phone, dialogs and the trust prompt are modal bottom sheets, and outside taps don't cancel them.
 

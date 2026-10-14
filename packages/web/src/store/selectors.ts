@@ -77,6 +77,18 @@ export const selectWidgets = (s: ConversationState) => s.live.widgets;
 export const selectNotices = (s: ConversationState) => s.live.notices;
 export const selectEditorText = (s: ConversationState) => s.live.editorText;
 export const selectRun = (s: ConversationState) => s.live.run;
+
+/** The agent is working: the run is active, compacting or retrying, or pi says it streams. */
+export const selectWorking = (s: ConversationState): boolean =>
+  s.live.run.active ||
+  s.live.run.retry !== undefined ||
+  s.live.run.compaction !== undefined ||
+  s.state?.isCompacting === true ||
+  s.state?.isStreaming === true;
+
+/** When the active run started (`agent_start`); undefined between runs. */
+export const selectRunStartedAt = (s: ConversationState): number | undefined =>
+  s.live.run.active ? s.live.run.startedAt : undefined;
 export const selectBash = (s: ConversationState) => s.live.bash;
 export const selectAgent = (s: ConversationState) => s.agent;
 export const selectConnection = (s: ConversationState) => s.connection;

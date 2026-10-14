@@ -407,14 +407,14 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
 
   return (
     <nav aria-label="Conversations" className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-col gap-3 border-b p-4">
-        <div className="flex items-center gap-1">
+      <div className="flex flex-col gap-3 border-b pb-4">
+        <div className="titlebar flex items-center gap-1 px-4 pt-4 [--titlebar-pad:1rem]">
           {action}
           <Button className="flex-1" onClick={() => setPickerOpen(true)}>
             <PlusIcon /> New conversation
           </Button>
         </div>
-        <div className="relative">
+        <div className="relative mx-4">
           <SearchIcon
             aria-hidden
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"

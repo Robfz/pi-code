@@ -67,17 +67,24 @@ function parentName(path: string): string {
   return baseName(trimmed.slice(0, trimmed.lastIndexOf("/")) || "/");
 }
 
+/** The listed session an agent holds, if the catalog has it yet. */
+export function agentSession(
+  agent: AgentInfo,
+  sessions: readonly StreamedSession[],
+): StreamedSession | undefined {
+  const file = agent.sessionFile;
+  return file === undefined ? undefined : sessions.find((session) => session.file === file);
+}
+
 /**
  * An agent's layout: its session's from the latest scan, which knows when the folder went
  * missing, else the one from when it was opened.
  */
 export function agentLayout(
   agent: AgentInfo,
-  sessionsByFile: ReadonlyMap<string, StreamedSession>,
+  session: StreamedSession | undefined,
 ): RepoLayout | undefined {
-  return (
-    (agent.sessionFile ? sessionsByFile.get(agent.sessionFile)?.layout : undefined) ?? agent.layout
-  );
+  return session?.layout ?? agent.layout;
 }
 
 /** A group's path: the container for repo groups. */

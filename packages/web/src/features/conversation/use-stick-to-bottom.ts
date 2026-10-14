@@ -1,15 +1,25 @@
-import { type RefObject, useCallback, useEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef } from "react";
 
 const THRESHOLD_PX = 80;
 
+export interface StickToBottom {
+  /** Jumps to the bottom and pins again. */
+  toBottom: () => void;
+  /**
+   * Smooth-scrolls to `top` (instantly under reduced motion), unpinning when that's upward, as a
+   * user's scroll up does.
+   */
+  scrollTo: (top: number) => void;
+}
+
 /**
  * Keeps a scroll container pinned to the bottom while its content grows, unless the user has
- * scrolled up. Starts pinned. Returns a function that jumps to the bottom and pins again.
+ * scrolled up. Starts pinned.
  */
 export function useStickToBottom(
   scrollRef: RefObject<HTMLElement | null>,
   contentRef: RefObject<HTMLElement | null>,
-): () => void {
+): StickToBottom {
   const pinned = useRef(true);
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -40,9 +50,22 @@ export function useStickToBottom(
       observer.disconnect();
     };
   }, [scrollRef, contentRef]);
-  return useCallback(() => {
+  const toBottom = useCallback(() => {
     pinned.current = true;
     const scroller = scrollRef.current;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [scrollRef]);
+  const scrollTo = useCallback(
+    (top: number) => {
+      const scroller = scrollRef.current;
+      if (!scroller) return;
+      // Unpinned before the first scroll event: content growing in between would otherwise pin
+      // the scroller back to the bottom, cancelling the smooth scroll.
+      if (top < scroller.scrollTop) pinned.current = false;
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      scroller.scrollTo({ top, behavior: reduced ? "instant" : "smooth" });
+    },
+    [scrollRef],
+  );
+  return useMemo(() => ({ toBottom, scrollTo }), [toBottom, scrollTo]);
 }

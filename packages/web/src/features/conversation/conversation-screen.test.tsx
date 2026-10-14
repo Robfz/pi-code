@@ -1,5 +1,5 @@
-import { initialLiveState, type ServerEvent } from "@pi-code/protocol";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { initialLiveState, type ServerEvent, type SessionEntry } from "@pi-code/protocol";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
@@ -154,6 +154,63 @@ describe("ConversationScreen live rendering", () => {
   });
 });
 
+describe("ConversationScreen branch switch", () => {
+  const message = (id: string, parentId: string | null, role: "user" | "assistant") =>
+    ({
+      id,
+      parentId,
+      timestamp: new Date(0).toISOString(),
+      type: "message",
+      message:
+        role === "user"
+          ? { role, content: `Prompt ${id}`, timestamp: 0 }
+          : { role, stopReason: "stop", content: [{ type: "text", text: `Reply ${id}` }] },
+    }) as unknown as SessionEntry;
+
+  it("returns to the bottom and follows live once the leaf moves to another branch", async () => {
+    // a1 forks into u2 → a2 (the current branch) and u3 → a3.
+    const entries = [
+      message("u1", null, "user"),
+      message("a1", "u1", "assistant"),
+      message("u2", "a1", "user"),
+      message("a2", "u2", "assistant"),
+      message("u3", "a1", "user"),
+      message("a3", "u3", "assistant"),
+    ];
+    const store = hydratedStore({ transcript: { entries, leafId: "a2" } });
+    await renderWithStore(<ConversationScreen />, store);
+    const scroller = screen.getByTestId("transcript-column").parentElement as HTMLElement;
+    let height = 3000;
+    Object.defineProperties(scroller, {
+      scrollTop: { value: 0, writable: true, configurable: true },
+      scrollHeight: { get: () => height, configurable: true },
+      clientHeight: { value: 600, configurable: true },
+    });
+    const scrollTo = (top: number) => {
+      scroller.scrollTop = top;
+      fireEvent.scroll(scroller);
+    };
+    const moveLeaf = (leafId: string, appended: SessionEntry[] = []) =>
+      act(() =>
+        store
+          .getState()
+          .apply({ type: "entries_appended", entries: appended, leafId }, store.getState().seq + 1),
+      );
+    // Scrolled up: no longer following.
+    scrollTo(2400);
+    scrollTo(1000);
+
+    // Along the branch: the reader stays where they are.
+    moveLeaf("u4", [message("u4", "a2", "user")]);
+    expect(scroller.scrollTop).toBe(1000);
+
+    height = 2000;
+    moveLeaf("a3");
+    expect(scroller.scrollTop).toBe(2000);
+    expect(screen.getByText("Reply a3")).toBeInTheDocument();
+  });
+});
+
 describe("ConversationScreen width", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -178,9 +235,15 @@ describe("ConversationScreen width", () => {
     );
     await renderWithStore(<ConversationScreen />, hydratedStore());
     expectCapped();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Show changes" }));
+    // Under Window Controls Overlay the header clears the rail, then the rail and the pane.
+    const column = screen.getByRole("banner").parentElement;
+    expect(column?.parentElement).toHaveClass("[--titlebar-right:var(--rail-width)]");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Changes panel" }));
     expect(await screen.findByRole("complementary", { name: "Review" })).toBeInTheDocument();
     expectCapped();
+    expect(column).toHaveClass(
+      "[--titlebar-right:calc((100vw-var(--titlebar-left,0px)-var(--rail-width))/2+var(--rail-width))]",
+    );
   });
 });
 
@@ -204,24 +267,24 @@ function tabStop(from: Element, shift = false): Element | undefined {
 }
 
 describe("ConversationScreen desktop scoped sheets", () => {
-  // Sidebar stand-ins, before and after the conversation in document order.
+  // A sidebar stand-in, before the conversation in document order.
   let before: HTMLButtonElement;
-  let after: HTMLButtonElement;
   const render = async (store: ReturnType<typeof hydratedStore>) => {
     stubMatchMedia((query) => query === DESKTOP_QUERY);
     await renderWithStore(<ConversationScreen />, store);
     before = document.createElement("button");
     before.textContent = "Before";
-    after = document.createElement("button");
-    after.textContent = "After";
     document.body.prepend(before);
-    document.body.append(after);
   };
   afterEach(() => {
     before.remove();
-    after.remove();
     vi.unstubAllGlobals();
   });
+
+  const railChanges = () =>
+    within(screen.getByRole("toolbar", { name: "Side panel" })).getByRole("button", {
+      name: "Changes panel",
+    });
 
   /** The first and last focusable elements of `sheet`. */
   const edges = (sheet: HTMLElement) => {
@@ -263,9 +326,9 @@ describe("ConversationScreen desktop scoped sheets", () => {
     }
     expect(sheet.closest("[inert]")).toBeNull();
 
-    // Focus leaving the sheet skips the covered controls, either way.
+    // Focus leaving the sheet skips the covered controls, either way; the rail isn't covered.
     const [first, last] = edges(sheet);
-    expect(tabStop(last)).toBe(after);
+    expect(tabStop(last)).toBe(railChanges());
     expect(tabStop(first, true)).toBe(before);
 
     // Escape where focus can't be in a browser (the inert composer), or outside, isn't for it.
@@ -292,7 +355,7 @@ describe("ConversationScreen desktop scoped sheets", () => {
     const sheet = await screen.findByTestId("trust-sheet");
     expect(screen.getByTestId("composer-column")).toHaveAttribute("inert");
     const [first, last] = edges(sheet);
-    expect(tabStop(last)).toBe(after);
+    expect(tabStop(last)).toBe(railChanges());
     expect(tabStop(first, true)).toBe(before);
     act(() =>
       store.getState().apply({ type: "agent_status", agent: makeAgent({ status: "ready" }) }, 1),

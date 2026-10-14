@@ -68,11 +68,12 @@ function OpenConversations({ agents }: { agents: AgentInfo[] }) {
   const sessions = useLive((s) => s.sessions);
   const groups = useMemo(() => {
     const byFile = new Map(sessions.map((session) => [session.file, session]));
+    const sessionOf = (agent: AgentInfo) =>
+      agent.sessionFile ? byFile.get(agent.sessionFile) : undefined;
     return groupListing(agents, {
       cwd: (agent) => agent.cwd,
-      layout: (agent) => agentLayout(agent, byFile),
-      recency: (agent) =>
-        agentRecency(agent, agent.sessionFile ? byFile.get(agent.sessionFile) : undefined),
+      layout: (agent) => agentLayout(agent, sessionOf(agent)),
+      recency: (agent) => agentRecency(agent, sessionOf(agent)),
     });
   }, [agents, sessions]);
   return (
@@ -136,7 +137,7 @@ export function HomeScreen() {
   const [pickerOpen, setPickerOpen] = useNewConversationPicker();
   const agents = useLiveAgents();
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top),env(titlebar-area-height,0px))] pb-8">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">pi-code</h1>
         <nav className="flex gap-1">

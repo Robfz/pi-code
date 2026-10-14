@@ -1,8 +1,11 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { initialLiveState, type RepoLayout } from "@pi-code/protocol";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useUiPrefs } from "@/store/ui-prefs";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { makeAgent } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
@@ -54,8 +57,8 @@ function rpcHandler(call: FetchCall): [number, unknown] | undefined {
   }
 }
 
-async function renderHeader() {
-  const store = hydratedStore({ agent: makeAgent({ sessionName: "Old name" }) });
+async function renderHeader(agent = makeAgent({ sessionName: "Old name" })) {
+  const store = hydratedStore({ agent });
   const result = await renderWithStore(
     <>
       <ConversationHeader />
@@ -238,6 +241,189 @@ describe("ConversationHeader menu", () => {
     );
     expect(screen.getByRole("menuitem", { name: /Stop/ })).not.toHaveAttribute("aria-disabled");
     expect(screen.getByRole("menuitem", { name: /Delete/ })).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+const menuItems = () =>
+  screen.getAllByRole("menuitem").map((item) => item.textContent?.trim() ?? "");
+
+describe("ConversationHeader on desktop", () => {
+  beforeEach(() => stubMatchMedia((query) => query === DESKTOP_QUERY));
+
+  it("promotes Fork… and Compact… out of the menu; Tree and changes live in the rail", async () => {
+    stubFetch(rpcHandler);
+    const { user } = await renderHeader();
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("link", { name: "Tree" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: /changes/i })).toBeNull();
+    const order = ["Fork", "Compact", "Transcript density", "More"].map((name) =>
+      within(header).getByRole("button", { name }),
+    );
+    for (const [i, element] of order.slice(1).entries()) {
+      expect(
+        (order[i] as HTMLElement).compareDocumentPosition(element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await screen.findByRole("menu");
+    expect(menuItems()).toEqual(["Clone", "Rename…", "New session", "Stop", "Delete"]);
+  });
+
+  it("Fork and Compact open their sheets", async () => {
+    stubFetch(rpcHandler);
+    const { user } = await renderHeader();
+    await user.click(screen.getByRole("button", { name: "Fork" }));
+    expect(await screen.findByTestId("fork-sheet")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("fork-sheet")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Compact" }));
+    expect(await screen.findByTestId("compact-sheet")).toBeInTheDocument();
+  });
+
+  it("disables Fork and Compact until the agent is ready", async () => {
+    stubFetch();
+    await renderWithStore(
+      <ConversationHeader />,
+      hydratedStore({ agent: makeAgent({ status: "starting" }) }),
+    );
+    expect(screen.getByRole("button", { name: "Fork" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
+  });
+});
+
+describe("ConversationHeader on phones", () => {
+  it("keeps Tree, Diff, Fork… and Compact… in the menu", async () => {
+    stubFetch();
+    const { user } = await renderHeader();
+    expect(screen.queryByRole("button", { name: "Fork" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Tree" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await screen.findByRole("menu");
+    expect(menuItems()).toEqual([
+      "Tree",
+      "Diff",
+      "Fork…",
+      "Clone",
+      "Compact…",
+      "Rename…",
+      "New session",
+      "Stop",
+      "Delete",
+    ]);
+  });
+});
+
+describe("ConversationHeader breadcrumb", () => {
+  const folders = () => screen.queryAllByTestId("breadcrumb-folder").map((el) => el.textContent);
+
+  it("shows folder › title outside a layout repo", async () => {
+    stubFetch();
+    await renderHeader(makeAgent({ cwd: "/home/me/notes", sessionName: "Plan the week" }));
+    expect(folders()).toEqual(["notes"]);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Plan the week");
+  });
+
+  it("shows repo › worktree › title in a layout repo", async () => {
+    stubFetch();
+    const layout: RepoLayout = {
+      repo: "/home/me/pi-code",
+      role: "worktree",
+      main: "/home/me/pi-code/main",
+    };
+    await renderHeader(
+      makeAgent({ cwd: "/home/me/pi-code/ui-overhaul", layout, sessionName: "Header" }),
+    );
+    expect(folders()).toEqual(["pi-code", "ui-overhaul"]);
+    expect(screen.getAllByTestId("breadcrumb-folder")[0]).toHaveAttribute(
+      "title",
+      "/home/me/pi-code",
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Header");
+  });
+
+  it("shows only the repo for its container", async () => {
+    stubFetch();
+    const layout: RepoLayout = {
+      repo: "/home/me/pi-code",
+      role: "container",
+      main: "/home/me/pi-code/main",
+    };
+    await renderHeader(makeAgent({ cwd: "/home/me/pi-code", layout }));
+    expect(folders()).toEqual(["pi-code"]);
+  });
+
+  it("titles an unnamed session by its first prompt, as the sidebar does", async () => {
+    stubFetch();
+    const { registry } = await renderHeader(makeAgent({ sessionFile: "/s/a1.jsonl" }));
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("New conversation");
+    act(() =>
+      registry.live.setState({
+        sessions: [
+          {
+            file: "/s/a1.jsonl",
+            id: "s1",
+            cwd: "/home/me/project",
+            firstMessage: "Fix the flaky test",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Fix the flaky test");
+  });
+
+  it("shows the branch chip once the branch is known", async () => {
+    stubFetch();
+    await renderWithStore(
+      <ConversationHeader />,
+      hydratedStore({ gitStatus: { branch: "feat/header", dirty: false } }),
+    );
+    expect(screen.getByTestId("header-branch")).toHaveTextContent("feat/header");
+  });
+
+  it("shows no branch chip without one", async () => {
+    stubFetch();
+    await renderHeader();
+    expect(screen.queryByTestId("header-branch")).toBeNull();
+  });
+});
+
+describe("ConversationHeader run state", () => {
+  it("reads Working with the run's elapsed time while it runs", async () => {
+    stubFetch();
+    const startedAt = Date.now() - 133_000;
+    await renderWithStore(
+      <ConversationHeader />,
+      hydratedStore({ live: { ...initialLiveState(), run: { active: true, startedAt } } }),
+    );
+    const label = screen.getByTestId("header-run-state");
+    expect(label).toHaveTextContent("Working · 2m 13s");
+    expect(label).toHaveClass("shimmer");
+  });
+
+  it("is absent while idle", async () => {
+    stubFetch();
+    await renderWithStore(<ConversationHeader />, hydratedStore());
+    expect(screen.queryByTestId("header-run-state")).toBeNull();
+  });
+});
+
+describe("ConnectionIndicator", () => {
+  it.each([
+    ["live", "bg-status-online", false],
+    ["connecting", "bg-status-idle", true],
+    ["reconnecting", "bg-status-idle", true],
+    ["offline", "bg-status-error", false],
+  ] as const)("%s: a %s dot", async (connection, color, pulses) => {
+    stubFetch();
+    const store = hydratedStore();
+    store.getState().setConnection(connection);
+    await renderWithStore(<ConversationHeader />, store);
+    const dot = screen.getByTestId("connection").firstElementChild;
+    expect(dot).toHaveClass(color);
+    expect(dot?.classList.contains("animate-pulse")).toBe(pulses);
   });
 });
 

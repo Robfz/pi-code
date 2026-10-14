@@ -1,17 +1,32 @@
 import type { GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubCanvas } from "@/components/diff/testing";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
-import { ChangesView } from "./changes-view";
+import { ChangesView, EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./changes-view";
 import { useReviewStore } from "./review-state";
 
 beforeAll(stubCanvas);
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  // jsdom has neither; cmdk scrolls its selected item into view and measures its list.
+  Element.prototype.scrollIntoView = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
+});
 
 /** Old lines 1–3, new lines 1–3: line 2 changed. */
 const patch = (path: string) =>
@@ -58,35 +73,65 @@ async function tap(row: HTMLElement, side: "old" | "new", line: number) {
   fireEvent.mouseUp(span);
 }
 
-async function expand(path: string) {
-  const row = (await screen.findAllByTestId("diff-file")).find(
+async function fileRow(path: string) {
+  return (await screen.findAllByTestId("diff-file")).find(
     (r) => r.dataset.path === path,
   ) as HTMLElement;
-  await userEvent.setup().click(within(row).getByRole("button", { expanded: false }));
-  return row;
 }
+
+const basePicker = () => screen.getByRole("combobox", { name: "Base branch" });
+
+async function pickBase(branch: string) {
+  const user = userEvent.setup();
+  await user.click(basePicker());
+  await user.click(await screen.findByRole("option", { name: branch }));
+}
+
+/** `count` files of `lines` added lines each. */
+function addedFiles(count: number, lines = 1): GitFileDiff[] {
+  return Array.from({ length: count }, (_, i) => {
+    const path = `src/f${i}.ts`;
+    const body = Array.from({ length: lines }, (_, n) => `+line ${n}`);
+    return file(path, {
+      status: "added",
+      patch: [`--- /dev/null`, `+++ b/${path}`, `@@ -0,0 +1,${lines} @@`, ...body, ""].join("\n"),
+    });
+  });
+}
+
+const toggles = () =>
+  screen
+    .getAllByTestId("diff-file")
+    .map((row) => within(row).getAllByRole("button")[0]?.getAttribute("aria-expanded"));
 
 describe("ChangesView", () => {
   it("switches modes, defaulting the base to the default branch", async () => {
     const { calls } = serve();
     await renderView();
-    expect(await screen.findByText("No changes. The working tree is clean.")).toBeInTheDocument();
+    expect(await screen.findByText("The working tree is clean.")).toBeInTheDocument();
     expect(diffSearches(calls)).toEqual([""]);
-    expect(calls.some((call) => call.url.endsWith("/git/branches"))).toBe(false);
+    expect(screen.getByRole("radio", { name: "Uncommitted" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("radio", { name: "Branch" }));
-    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Base branch" })).toHaveValue("main");
+    expect(await screen.findByText("No changes against main")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Branch" })).toHaveAttribute("aria-checked", "true");
+    expect(basePicker()).toHaveTextContent("main");
     expect(diffSearches(calls)).toEqual(["", "?base=main"]);
 
-    await user.click(screen.getByRole("checkbox", { name: "Include uncommitted" }));
+    const include = screen.getByRole("switch", { name: "Include uncommitted" });
+    expect(include).not.toBeChecked();
+    await user.click(include);
+    expect(include).toBeChecked();
     await waitFor(() =>
       expect(diffSearches(calls)).toEqual(["", "?base=main", "?base=main&uncommitted=1"]),
     );
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Base branch" }), "dev");
-    expect(await screen.findByText("No changes against dev.")).toBeInTheDocument();
+    await pickBase("dev");
+    expect(await screen.findByText("No changes against dev")).toBeInTheDocument();
     expect(diffSearches(calls).at(-1)).toBe("?base=dev&uncommitted=1");
     expect(useReviewStore.getState().reviews.a1?.diff).toEqual({
       mode: "branch",
@@ -95,16 +140,43 @@ describe("ChangesView", () => {
     });
 
     await user.click(screen.getByRole("radio", { name: "Uncommitted" }));
-    expect(await screen.findByText("No changes. The working tree is clean.")).toBeInTheDocument();
+    expect(await screen.findByText("The working tree is clean.")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Base branch" })).toBeNull();
+    // The active mode stays on when clicked again.
+    await user.click(screen.getByRole("radio", { name: "Uncommitted" }));
+    expect(useReviewStore.getState().reviews.a1?.diff.mode).toBe("uncommitted");
+  });
+
+  it("a clean tree offers to compare with the default branch", async () => {
+    const { calls } = serve();
+    await renderView();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Compare with main" }));
+    expect(await screen.findByText("No changes against main")).toBeInTheDocument();
+    expect(useReviewStore.getState().reviews.a1?.diff.mode).toBe("branch");
+    expect(diffSearches(calls)).toEqual(["", "?base=main"]);
+  });
+
+  it("without a default branch the compare button names no base", async () => {
+    branches.defaultBranch = null;
+    try {
+      serve();
+      await renderView();
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Compare with branch" }));
+      expect(await screen.findByText("Pick a base branch to compare with.")).toBeInTheDocument();
+    } finally {
+      branches.defaultBranch = "main";
+    }
   });
 
   it("keeps a chosen base across remounts", async () => {
     useReviewStore.getState().setDiffMode("a1", { mode: "branch", base: "feat" });
     const { calls } = serve();
     await renderView();
-    expect(await screen.findByText("No changes against feat.")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Base branch" })).toHaveValue("feat");
+    expect(await screen.findByText("No changes against feat")).toBeInTheDocument();
+    expect(basePicker()).toHaveTextContent("feat");
     expect(diffSearches(calls)).toEqual(["?base=feat"]);
   });
 
@@ -116,10 +188,9 @@ describe("ChangesView", () => {
       await renderView();
       expect(await screen.findByText("Pick a base branch to compare with.")).toBeInTheDocument();
       expect(diffSearches(calls)).toEqual([]);
-      await userEvent
-        .setup()
-        .selectOptions(screen.getByRole("combobox", { name: "Base branch" }), "feat");
-      expect(await screen.findByText("No changes against feat.")).toBeInTheDocument();
+      expect(basePicker()).toHaveTextContent("Pick a branch");
+      await pickBase("feat");
+      expect(await screen.findByText("No changes against feat")).toBeInTheDocument();
       expect(diffSearches(calls)).toEqual(["?base=feat"]);
     } finally {
       branches.defaultBranch = "main";
@@ -137,9 +208,8 @@ describe("ChangesView", () => {
     expect(
       await screen.findByText("Couldn't load the diff: unknown branch gone"),
     ).toBeInTheDocument();
-    const picker = screen.getByRole("combobox", { name: "Base branch" });
-    expect(picker).toHaveValue("gone");
-    await userEvent.setup().selectOptions(picker, "main");
+    expect(basePicker()).toHaveTextContent("gone");
+    await pickBase("main");
     expect(await screen.findByTestId("diff-file")).toHaveAttribute("data-path", "a.ts");
   });
 
@@ -157,7 +227,7 @@ describe("ChangesView", () => {
     });
     const count = (suffix: string) => calls.filter((call) => call.url.endsWith(suffix)).length;
     await renderView();
-    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
+    expect(await screen.findByText("No changes against main")).toBeInTheDocument();
     expect(count("/git/fetch")).toBe(0);
 
     const user = userEvent.setup();
@@ -182,6 +252,65 @@ describe("ChangesView", () => {
     expect(screen.queryByRole("radio", { name: "Branch" })).toBeNull();
   });
 
+  describe("files", () => {
+    it("expands every file under its header, with totals and a file list", async () => {
+      const { calls } = serve(() => [
+        200,
+        {
+          files: [
+            file("src/lib/app.ts"),
+            file("notes.txt", { status: "renamed", oldPath: "old.txt" }),
+          ],
+        },
+      ]);
+      await renderView();
+      const app = await fileRow("src/lib/app.ts");
+      expect(toggles()).toEqual(["true", "true"]);
+      await waitFor(() => expect(screen.getAllByTestId("diff-viewer")).toHaveLength(2));
+      expect(within(app).getByTitle("Modified")).toHaveTextContent("M");
+      expect(within(app).getByTitle("src/lib/app.ts")).toHaveTextContent("src/lib/app.ts");
+      expect(within(await fileRow("notes.txt")).getByTitle("old.txt → notes.txt")).toBeVisible();
+      expect(screen.getByText("2 files")).toBeInTheDocument();
+      const list = screen.getByRole("navigation", { name: "Changed files" });
+      expect(within(list).getAllByRole("button")).toHaveLength(2);
+
+      await userEvent.setup().click(within(app).getByRole("button", { expanded: true }));
+      expect(toggles()).toEqual(["false", "true"]);
+      expect(screen.getAllByTestId("diff-viewer")).toHaveLength(1);
+      expect(calls.some((call) => call.url.endsWith("/git/branches"))).toBe(false);
+    });
+
+    it(`starts collapsed past ${EXPAND_MAX_FILES} files`, async () => {
+      serve(() => [200, { files: addedFiles(EXPAND_MAX_FILES + 1) }]);
+      await renderView();
+      await screen.findAllByTestId("diff-file");
+      expect(new Set(toggles())).toEqual(new Set(["false"]));
+      expect(screen.queryByTestId("diff-viewer")).toBeNull();
+    });
+
+    it(`starts collapsed past ${EXPAND_MAX_LINES} changed lines`, async () => {
+      serve(() => [200, { files: addedFiles(2, EXPAND_MAX_LINES / 2 + 1) }]);
+      await renderView();
+      await screen.findAllByTestId("diff-file");
+      expect(toggles()).toEqual(["false", "false"]);
+    });
+
+    it("a file in the list opens and scrolls to its diff", async () => {
+      const scrolled: Element[] = [];
+      Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+        scrolled.push(this);
+      });
+      serve(() => [200, { files: addedFiles(EXPAND_MAX_FILES + 1) }]);
+      await renderView();
+      const list = await screen.findByRole("navigation", { name: "Changed files" });
+      await userEvent.setup().click(within(list).getByRole("button", { name: /f7\.ts/ }));
+      const row = await fileRow("src/f7.ts");
+      expect(scrolled).toEqual([row]);
+      expect(within(row).getAllByRole("button")[0]).toHaveAttribute("aria-expanded", "true");
+      expect(await within(row).findByTestId("diff-viewer")).toBeInTheDocument();
+    });
+  });
+
   describe("references", () => {
     it("uncommitted mode: old lines name the old commit, new lines are unversioned", async () => {
       stubMatchMedia((query) => query === DESKTOP_QUERY);
@@ -191,7 +320,7 @@ describe("ChangesView", () => {
       };
       serve(() => [200, response]);
       await renderView();
-      const row = await expand("notes.txt");
+      const row = await fileRow("notes.txt");
       await tap(row, "old", 2);
       expect(draftText()).toBe("@abc1234:./old.txt:2 ");
       useDrafts.setState({ drafts: {} });
@@ -209,11 +338,11 @@ describe("ChangesView", () => {
       };
       serve(() => [200, response]);
       await renderView();
-      const a = await expand("a.ts");
+      const a = await fileRow("a.ts");
       await tap(a, "new", 2);
       expect(draftText()).toBe("@2222222:./a.ts:2 ");
       useDrafts.setState({ drafts: {} });
-      const b = await expand("b.ts");
+      const b = await fileRow("b.ts");
       await tap(b, "new", 2);
       expect(draftText()).toBe("@b.ts:2 ");
       useDrafts.setState({ drafts: {} });
@@ -226,7 +355,7 @@ describe("ChangesView", () => {
       useReviewStore.getState().setDiffMode("a1", { mode: "branch", uncommitted: true });
       serve(() => [200, { files: [file("a.ts")], oldRev: "1111111" }]);
       await renderView();
-      const row = await expand("a.ts");
+      const row = await fileRow("a.ts");
       await tap(row, "new", 2);
       expect(draftText()).toBe("@a.ts:2 ");
     });

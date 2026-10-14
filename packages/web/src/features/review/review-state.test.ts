@@ -56,7 +56,19 @@ describe("review state", () => {
     expect(review("a2")).toBe(DEFAULT_REVIEW);
   });
 
-  it("persists only open panes", async () => {
+  it("toggles a tab: opens the pane on it, closes the pane when it already shows it", () => {
+    const { toggleTab } = useReviewStore.getState();
+    toggleTab("a1", "tree");
+    expect(review("a1")).toMatchObject({ paneOpen: true, tab: "tree" });
+    toggleTab("a1", "files");
+    expect(review("a1")).toMatchObject({ paneOpen: true, tab: "files" });
+    toggleTab("a1", "files");
+    expect(review("a1")).toMatchObject({ paneOpen: false, tab: "files" });
+    toggleTab("a1", "files");
+    expect(review("a1")).toMatchObject({ paneOpen: true, tab: "files" });
+  });
+
+  it("persists only open panes, with their tab", async () => {
     const { openPane, togglePane, setDiffMode, setFilesQuery } = useReviewStore.getState();
     openPane("a1", "files");
     setDiffMode("a1", { mode: "branch", base: "dev" });
@@ -64,16 +76,31 @@ describe("review state", () => {
     openPane("a2");
     togglePane("a2");
     setDiffMode("a3", { mode: "branch" });
-    expect(stored()).toEqual({ reviews: { a1: { paneOpen: true } } });
+    expect(stored()).toEqual({ reviews: { a1: { paneOpen: true, tab: "files" } } });
 
     await reload();
     expect(useReviewStore.getState().reviews).toEqual({
-      a1: { ...DEFAULT_REVIEW, paneOpen: true },
+      a1: { ...DEFAULT_REVIEW, paneOpen: true, tab: "files" },
     });
 
     useReviewStore.getState().togglePane("a1");
     expect(stored()).toEqual({ reviews: {} });
     await reload();
     expect(useReviewStore.getState().reviews).toEqual({});
+  });
+
+  it("reads a stored pane without a tab, or with an unknown one, on Changes", async () => {
+    localStorage.setItem(
+      "pi-code:review",
+      JSON.stringify({
+        state: { reviews: { a1: { paneOpen: true }, a2: { paneOpen: true, tab: "terminal" } } },
+        version: 0,
+      }),
+    );
+    await useReviewStore.persist.rehydrate();
+    expect(useReviewStore.getState().reviews).toEqual({
+      a1: { ...DEFAULT_REVIEW, paneOpen: true },
+      a2: { ...DEFAULT_REVIEW, paneOpen: true },
+    });
   });
 });

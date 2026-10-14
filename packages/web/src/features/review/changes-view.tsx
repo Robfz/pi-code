@@ -1,16 +1,26 @@
 /**
  * The Changes tab (`docs/design/07-code-review.md`, "Changes tab"): the git diff of the agent's
- * project in uncommitted or branch mode, as a file list whose patches send line references to the
- * composer, versioned per "Version naming".
+ * project in uncommitted or branch mode, as a toolbar, a compact file list and every file's patch
+ * under a sticky header. Patch lines send references to the composer, versioned per "Version
+ * naming".
  */
 
 import type { CodeRef, GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRightIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
-import { type ReactNode, useId, useMemo, useState } from "react";
+import {
+  ChevronRightIcon,
+  CircleCheckIcon,
+  GitBranchIcon,
+  GitCompareIcon,
+  LoaderIcon,
+  RefreshCwIcon,
+} from "lucide-react";
+import { type ReactNode, useId, useMemo, useRef, useState } from "react";
 import { countPatchLines, type LineSelection } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   errorMessage,
   fetchOrigin,
@@ -20,18 +30,37 @@ import {
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
+import { BranchPicker } from "./branch-picker";
+import { splitPath } from "./files-view";
 import { LoadError, NotARepo, retryServerErrors } from "./query-states";
 import { type DiffMode, useReview, useReviewStore } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
 const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; className: string }> =
   {
-    added: { letter: "A", label: "Added", className: "text-diff-add" },
-    untracked: { letter: "U", label: "Untracked", className: "text-diff-add" },
-    modified: { letter: "M", label: "Modified", className: "text-status-input" },
-    deleted: { letter: "D", label: "Deleted", className: "text-diff-del" },
-    renamed: { letter: "R", label: "Renamed", className: "text-muted-foreground" },
+    added: { letter: "A", label: "Added", className: "bg-diff-add/12 text-diff-add" },
+    untracked: { letter: "U", label: "Untracked", className: "bg-diff-add/12 text-diff-add" },
+    modified: {
+      letter: "M",
+      label: "Modified",
+      className: "bg-status-input/12 text-status-input",
+    },
+    deleted: { letter: "D", label: "Deleted", className: "bg-diff-del/12 text-diff-del" },
+    renamed: { letter: "R", label: "Renamed", className: "bg-muted text-muted-foreground" },
   };
+
+/**
+ * Every expanded file mounts a diff view, so past these totals (files, or added plus deleted
+ * lines) the files start collapsed and open from the list or their header.
+ */
+export const EXPAND_MAX_FILES = 30;
+export const EXPAND_MAX_LINES = 3000;
+
+interface FileEntry {
+  key: string;
+  file: GitFileDiff;
+  counts?: { additions: number; deletions: number };
+}
 
 /**
  * The reference for lines of `file`: old-side lines name the old commit; new-side lines name
@@ -51,7 +80,60 @@ function changeReference(
   return ref;
 }
 
-function FileRow({
+function StatusBadge({ status }: { status: GitFileDiff["status"] }) {
+  const { letter, label, className } = STATUS[status] ?? STATUS.modified;
+  return (
+    <span
+      title={label}
+      className={cn(
+        "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] leading-none font-semibold",
+        className,
+      )}
+    >
+      <span aria-hidden>{letter}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** The directory muted and the basename in front; the basename is the last to truncate. */
+function FilePath({ file }: { file: GitFileDiff }) {
+  const { dir, name } = splitPath(file.path);
+  const renamed = file.oldPath !== undefined && file.oldPath !== file.path;
+  return (
+    <span
+      title={renamed ? `${file.oldPath} → ${file.path}` : file.path}
+      className="flex min-w-0 flex-1 font-mono text-xs"
+    >
+      {renamed && (
+        <>
+          <span className="min-w-0 truncate text-muted-foreground">{file.oldPath}</span>
+          <span aria-hidden className="shrink-0 px-1 text-faint-foreground">
+            →
+          </span>
+        </>
+      )}
+      {dir && <span className="min-w-0 truncate text-muted-foreground">{dir}/</span>}
+      <span className="max-w-full shrink-0 truncate">{name}</span>
+    </span>
+  );
+}
+
+function Counts({ entry: { file, counts } }: { entry: FileEntry }) {
+  if (file.binary) return <span className="shrink-0 text-xs text-muted-foreground">binary</span>;
+  if (file.tooLarge) {
+    return <span className="shrink-0 text-xs text-muted-foreground">too large</span>;
+  }
+  if (!counts) return null;
+  return (
+    <span className="shrink-0 font-mono text-xs tabular-nums">
+      <span className="text-diff-add">+{counts.additions}</span>{" "}
+      <span className="text-diff-del">−{counts.deletions}</span>
+    </span>
+  );
+}
+
+function FileBody({
   file,
   toReference,
   onAdded,
@@ -60,121 +142,292 @@ function FileRow({
   toReference(selection: LineSelection): CodeRef;
   onAdded?(): void;
 }) {
-  const [open, setOpen] = useState(false);
-  const counts = useMemo(
-    () => (file.patch ? countPatchLines(file.patch) : undefined),
-    [file.patch],
+  const message = (text: string) => (
+    <p className="px-3 py-2 text-xs text-muted-foreground">{text}</p>
   );
-  const status = STATUS[file.status] ?? STATUS.modified;
+  if (file.binary) return message("Binary file, no text diff.");
+  if (file.tooLarge) return message("This diff is too large to show here (over 1 MB).");
+  if (!file.patch) return message("No textual changes.");
   return (
-    <li data-testid="diff-file" data-path={file.path} className="rounded-lg border bg-card/40">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm"
-      >
-        <ChevronRightIcon
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-        <span
-          title={status.label}
-          className={cn(
-            "w-4 shrink-0 text-center font-mono text-xs font-semibold",
-            status.className,
-          )}
-        >
-          <span aria-hidden>{status.letter}</span>
-          <span className="sr-only">{status.label}</span>
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-          {file.oldPath && file.oldPath !== file.path && (
-            <span className="text-muted-foreground">{file.oldPath} → </span>
-          )}
-          {file.path}
-        </span>
-        {file.binary ? (
-          <span className="shrink-0 text-xs text-muted-foreground">binary</span>
-        ) : file.tooLarge ? (
-          <span className="shrink-0 text-xs text-muted-foreground">too large</span>
-        ) : (
-          counts && (
-            <span className="shrink-0 font-mono text-xs tabular-nums">
-              <span className="text-diff-add">+{counts.additions}</span>{" "}
-              <span className="text-diff-del">−{counts.deletions}</span>
-            </span>
-          )
-        )}
-      </button>
-      {open && (
-        <div className="border-t p-2">
-          {file.binary ? (
-            <p className="text-xs text-muted-foreground">Binary file, no text diff.</p>
-          ) : file.tooLarge ? (
-            <p className="text-xs text-muted-foreground">
-              This diff is too large to show here (over 1 MB).
-            </p>
-          ) : file.patch ? (
-            <SelectableDiff
-              patch={file.patch}
-              fileName={file.path}
-              toReference={toReference}
-              {...(onAdded && { onAdded })}
-            />
-          ) : (
-            <p className="text-xs text-muted-foreground">No textual changes.</p>
-          )}
-        </div>
-      )}
-    </li>
+    <SelectableDiff
+      patch={file.patch}
+      fileName={file.path}
+      flush
+      toReference={toReference}
+      {...(onAdded && { onAdded })}
+    />
   );
 }
 
-function Totals({ files }: { files: GitFileDiff[] }) {
-  const { additions, deletions } = useMemo(() => {
-    let additions = 0;
-    let deletions = 0;
-    for (const file of files) {
-      if (!file.patch) continue;
-      const counts = countPatchLines(file.patch);
-      additions += counts.additions;
-      deletions += counts.deletions;
+/** One file's patch under a header that sticks to the top of the panel's scroll area. */
+function FileSection({
+  entry,
+  open,
+  onOpenChange,
+  sectionRef,
+  toReference,
+  onAdded,
+}: {
+  entry: FileEntry;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  sectionRef(element: HTMLElement | null): void;
+  toReference(selection: LineSelection): CodeRef;
+  onAdded?(): void;
+}) {
+  const section = useRef<HTMLElement | null>(null);
+  const header = useRef<HTMLDivElement>(null);
+  const toggle = () => {
+    // Collapsing a file whose header is stuck would leave the view somewhere past it.
+    const top = section.current?.getBoundingClientRect().top;
+    const headerTop = header.current?.getBoundingClientRect().top;
+    if (open && top !== undefined && headerTop !== undefined && headerTop > top) {
+      section.current?.scrollIntoView({ block: "start" });
     }
-    return { additions, deletions };
-  }, [files]);
+    onOpenChange(!open);
+  };
   return (
-    <p className="px-1 text-xs text-muted-foreground">
-      {files.length} {files.length === 1 ? "file" : "files"} changed ·{" "}
-      <span className="text-diff-add">+{additions}</span>{" "}
-      <span className="text-diff-del">−{deletions}</span>
+    <section
+      ref={(element) => {
+        section.current = element;
+        sectionRef(element);
+      }}
+      data-testid="diff-file"
+      data-path={entry.file.path}
+      className="border-b"
+    >
+      <div
+        ref={header}
+        className={cn(
+          "sticky top-0 z-20 flex h-9 items-center gap-2 bg-background pr-3 pl-2",
+          open && "border-b",
+        )}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={toggle}
+          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ChevronRightIcon
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+          <StatusBadge status={entry.file.status} />
+          <FilePath file={entry.file} />
+        </button>
+        <Counts entry={entry} />
+      </div>
+      {open && (
+        <FileBody file={entry.file} toReference={toReference} {...(onAdded && { onAdded })} />
+      )}
+    </section>
+  );
+}
+
+/** The list of changed files above the patches; a click scrolls to the file's patch. */
+function FileList({ entries, onPick }: { entries: FileEntry[]; onPick(key: string): void }) {
+  return (
+    <nav aria-label="Changed files" className="border-b px-1.5 py-1.5">
+      <ul>
+        {entries.map((entry) => (
+          <li key={entry.key}>
+            <button
+              type="button"
+              onClick={() => onPick(entry.key)}
+              className="flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <StatusBadge status={entry.file.status} />
+              <FilePath file={entry.file} />
+              <Counts entry={entry} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+function FileStack({
+  entries,
+  response,
+  expand,
+  onAdded,
+}: {
+  entries: FileEntry[];
+  response: GitDiffResponse;
+  /** Whether files start expanded. */
+  expand: boolean;
+  onAdded?(): void;
+}) {
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const sections = useRef(new Map<string, HTMLElement>());
+  const isOpen = (key: string) => opened[key] ?? expand;
+  const setOpen = (key: string, open: boolean) =>
+    setOpened((current) => ({ ...current, [key]: open }));
+  return (
+    <>
+      {entries.length > 1 && (
+        <FileList
+          entries={entries}
+          onPick={(key) => {
+            setOpen(key, true);
+            sections.current.get(key)?.scrollIntoView({ block: "start" });
+          }}
+        />
+      )}
+      {entries.map((entry) => (
+        <FileSection
+          key={entry.key}
+          entry={entry}
+          open={isOpen(entry.key)}
+          onOpenChange={(open) => setOpen(entry.key, open)}
+          sectionRef={(element) => {
+            if (element) sections.current.set(entry.key, element);
+            else sections.current.delete(entry.key);
+          }}
+          toReference={(selection) => changeReference(entry.file, response, selection)}
+          {...(onAdded && { onAdded })}
+        />
+      ))}
+    </>
+  );
+}
+
+function Totals({ entries }: { entries: FileEntry[] }) {
+  const { additions, deletions } = sumCounts(entries);
+  return (
+    <p className="ml-auto flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums">
+      <span className="text-muted-foreground">
+        {entries.length} {entries.length === 1 ? "file" : "files"}
+      </span>
+      <span>
+        <span className="text-diff-add">+{additions}</span>{" "}
+        <span className="text-diff-del">−{deletions}</span>
+      </span>
     </p>
+  );
+}
+
+function sumCounts(entries: FileEntry[]) {
+  let additions = 0;
+  let deletions = 0;
+  for (const { counts } of entries) {
+    additions += counts?.additions ?? 0;
+    deletions += counts?.deletions ?? 0;
+  }
+  return { additions, deletions };
+}
+
+function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+      <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:size-5">
+        {icon}
+      </div>
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium">{title}</p>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      </div>
+      {action}
+    </div>
   );
 }
 
 function Loading() {
   return (
-    <div data-testid="diff-loading" className="flex flex-col gap-2">
-      <Skeleton className="h-9" />
-      <Skeleton className="h-9" />
-      <Skeleton className="h-9" />
+    <div data-testid="diff-loading" className="flex flex-col gap-2 p-3">
+      <Skeleton className="h-7" />
+      <Skeleton className="h-7" />
+      <Skeleton className="h-7" />
     </div>
+  );
+}
+
+function branchesQuery(agentId: string) {
+  return {
+    queryKey: queryKeys.gitBranches(agentId),
+    queryFn: () => getGitBranches(agentId),
+    refetchOnWindowFocus: false,
+    retry: retryServerErrors,
+  };
+}
+
+/** The clean tree's way into branch mode, naming the base it will compare with once known. */
+function CompareButton({
+  agentId,
+  base,
+  onClick,
+}: {
+  agentId: string;
+  base: string | undefined;
+  onClick(): void;
+}) {
+  const branches = useQuery(branchesQuery(agentId));
+  const target = base ?? branches.data?.defaultBranch;
+  return (
+    <Button size="sm" variant="outline" onClick={onClick}>
+      <GitCompareIcon />
+      {target ? `Compare with ${target}` : "Compare with branch"}
+    </Button>
+  );
+}
+
+const MODES = [
+  ["uncommitted", "Uncommitted"],
+  ["branch", "Branch"],
+] as const;
+
+/** Uncommitted / Branch as a segmented control: one item is always on. */
+function ModeControl({
+  value,
+  onChange,
+}: {
+  value: DiffMode["mode"];
+  onChange(mode: DiffMode["mode"]): void;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      aria-label="Diff mode"
+      value={value}
+      onValueChange={(next) => next && onChange(next as DiffMode["mode"])}
+      spacing={0.5}
+      className="rounded-lg bg-chip p-0.5"
+    >
+      {MODES.map(([mode, label]) => (
+        <ToggleGroupItem
+          key={mode}
+          value={mode}
+          className="h-6 min-w-0 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-popover data-[state=on]:text-foreground data-[state=on]:shadow-[0_0_0_1px_var(--input),0_1px_2px_oklch(0_0_0/0.2)] dark:data-[state=on]:bg-secondary"
+        >
+          {label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
 export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?(): void }) {
   const { diff: mode } = useReview(agentId);
   const branchMode = mode.mode === "branch";
-  const id = useId();
+  const switchId = useId();
 
   const branches = useQuery({
-    queryKey: queryKeys.gitBranches(agentId),
-    queryFn: () => getGitBranches(agentId),
+    ...branchesQuery(agentId),
     enabled: branchMode,
-    refetchOnWindowFocus: false,
-    retry: retryServerErrors,
   });
   const base = mode.base ?? branches.data?.defaultBranch ?? undefined;
   const diff = useQuery({
@@ -187,6 +440,18 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     refetchOnWindowFocus: false,
     retry: retryServerErrors,
   });
+
+  const entries = useMemo(
+    () =>
+      diff.data?.files.map(
+        (file): FileEntry => ({
+          key: `${file.oldPath ?? ""}:${file.path}`,
+          file,
+          ...(file.patch && { counts: countPatchLines(file.patch) }),
+        }),
+      ),
+    [diff.data],
+  );
 
   const queryClient = useQueryClient();
   const fetching = useMutation({
@@ -207,132 +472,109 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     return <NotARepo />;
   }
 
-  const options = branches.data?.branches ?? [];
-  const modeBar = (
-    <div className="flex flex-col gap-2 px-1 text-sm">
-      <div role="radiogroup" aria-label="Diff mode" className="flex items-center gap-4">
-        {(
-          [
-            ["uncommitted", "Uncommitted"],
-            ["branch", "Branch"],
-          ] as const
-        ).map(([value, label]) => (
-          <label key={value} className="flex items-center gap-1.5">
-            <input
-              type="radio"
-              name={`${id}-mode`}
-              value={value}
-              checked={mode.mode === value}
-              onChange={() => update({ mode: value })}
-              className="size-4 accent-primary"
-            />
-            {label}
-          </label>
-        ))}
-      </div>
+  const showDiff = !(branchMode && (branches.isError || base === undefined));
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
+      <ModeControl value={mode.mode} onChange={(next) => update({ mode: next })} />
       {branchMode && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <label className="flex items-center gap-2">
-            Base
-            <select
-              aria-label="Base branch"
-              value={base ?? ""}
-              disabled={branches.isPending}
-              onChange={(event) => update({ base: event.target.value })}
-              className="h-8 min-w-0 rounded-md border bg-background px-2 text-base text-foreground md:text-sm"
-            >
-              {base === undefined && (
-                <option value="" disabled>
-                  Pick a branch
-                </option>
-              )}
-              {base !== undefined && !options.includes(base) && (
-                <option value={base}>{base}</option>
-              )}
-              {options.map((branch) => (
-                <option key={branch} value={branch}>
-                  {branch}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
+        <>
+          <BranchPicker
+            value={base}
+            branches={branches.data?.branches ?? []}
+            disabled={branches.isPending}
+            onChange={(branch) => update({ base: branch })}
+          />
+          <div className="flex items-center gap-1.5">
+            <Switch
+              id={switchId}
+              size="sm"
               checked={mode.uncommitted}
-              onChange={(event) => update({ uncommitted: event.target.checked })}
-              className="size-4 accent-primary"
+              onCheckedChange={(checked) => update({ uncommitted: checked })}
             />
-            Include uncommitted
-          </label>
+            <label htmlFor={switchId} className="text-xs whitespace-nowrap text-muted-foreground">
+              Include uncommitted
+            </label>
+          </div>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={fetching.isPending}
             onClick={() => fetching.mutate()}
+            className="text-muted-foreground"
           >
             {fetching.isPending ? <LoaderIcon className="animate-spin" /> : <RefreshCwIcon />}
             Fetch
           </Button>
-        </div>
+        </>
       )}
-      {branchMode && fetching.isError && (
-        <p role="alert" className="text-xs text-destructive">
-          Couldn't fetch: {errorMessage(fetching.error)}
-        </p>
-      )}
+      {showDiff && entries && entries.length > 0 && <Totals entries={entries} />}
     </div>
   );
 
   let body: ReactNode;
   if (branchMode && branches.isError) {
     body = (
-      <LoadError
-        what="the branches"
-        error={branches.error}
-        onRetry={() => void branches.refetch()}
-      />
+      <div className="p-3">
+        <LoadError
+          what="the branches"
+          error={branches.error}
+          onRetry={() => void branches.refetch()}
+        />
+      </div>
     );
   } else if (branchMode && base === undefined) {
     body = branches.isPending ? (
       <Loading />
     ) : (
-      <p className="py-10 text-center text-sm text-muted-foreground">
-        Pick a base branch to compare with.
-      </p>
+      <EmptyState icon={<GitBranchIcon />} title="Pick a base branch to compare with." />
     );
   } else if (diff.isPending) {
     body = <Loading />;
   } else if (diff.isError) {
-    body = <LoadError what="the diff" error={diff.error} onRetry={() => void diff.refetch()} />;
-  } else if (diff.data.files.length === 0) {
     body = (
-      <p className="py-10 text-center text-sm text-muted-foreground">
-        {branchMode ? `No changes against ${base}.` : "No changes. The working tree is clean."}
-      </p>
+      <div className="p-3">
+        <LoadError what="the diff" error={diff.error} onRetry={() => void diff.refetch()} />
+      </div>
+    );
+  } else if (!entries || entries.length === 0) {
+    body = branchMode ? (
+      <EmptyState icon={<GitCompareIcon />} title={`No changes against ${base}`} />
+    ) : (
+      <EmptyState
+        icon={<CircleCheckIcon />}
+        title="No changes"
+        description="The working tree is clean."
+        action={
+          <CompareButton
+            agentId={agentId}
+            base={mode.base}
+            onClick={() => update({ mode: "branch" })}
+          />
+        }
+      />
     );
   } else {
-    const response = diff.data;
+    const { additions, deletions } = sumCounts(entries);
+    const expand = entries.length <= EXPAND_MAX_FILES && additions + deletions <= EXPAND_MAX_LINES;
     body = (
-      <div className="flex flex-col gap-2">
-        <Totals files={response.files} />
-        <ul className="flex flex-col gap-2">
-          {response.files.map((file) => (
-            <FileRow
-              key={`${file.oldPath ?? ""}:${file.path}`}
-              file={file}
-              toReference={(selection) => changeReference(file, response, selection)}
-              {...(onAdded && { onAdded })}
-            />
-          ))}
-        </ul>
-      </div>
+      <FileStack
+        key={`${mode.mode}:${base}:${mode.uncommitted}`}
+        entries={entries}
+        response={diff.data}
+        expand={expand}
+        {...(onAdded && { onAdded })}
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {modeBar}
+    <div className="flex flex-col">
+      {toolbar}
+      {branchMode && fetching.isError && (
+        <p role="alert" className="border-b px-3 py-1.5 text-xs text-destructive">
+          Couldn't fetch: {errorMessage(fetching.error)}
+        </p>
+      )}
       {body}
     </div>
   );

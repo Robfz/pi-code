@@ -42,6 +42,7 @@ Neutrals have zero chroma; there is no accent hue. Liveness and actions use the 
 | `--status-error` *new*, `--destructive` | Failed, errors | `oklch(0.58 0.21 25)` | `oklch(0.69 0.19 22)` |
 | `--status-done` *new* | Finished | `oklch(0.62 0.14 160)` | `oklch(0.76 0.15 160)` |
 | `--status-idle` *new* | Idle | `var(--faint-foreground)` | `var(--faint-foreground)` |
+| `--status-online` *new* | Connection live (the header's dot only) | `oklch(0.66 0.17 145)` | `oklch(0.74 0.17 145)` |
 | `--diff-add` *new* | Added lines, `+n` | `var(--status-done)` | `var(--status-done)` |
 | `--diff-del` *new* | Deleted lines, `−m` | `var(--status-error)` | `var(--status-error)` |
 
@@ -52,13 +53,13 @@ No component uses raw palette classes (`emerald-*`, `amber-*`, `red-*`, `green-*
 | Where | Token |
 |---|---|
 | Edit and review `+n −m`, diff viewer line backgrounds, review "A" | `diff-add` / `diff-del` |
-| Review "M", the status bar's dirty dot, the context bar from 60% | `status-input` (as in the mockup) |
+| Review "M", the status bar's and the activity rail's dirty dots, the context bar from 60% | `status-input` (as in the mockup) |
 | The context bar from 80% | `status-error` |
-| Review "R", the tree screen's user marker | `muted-foreground`, `foreground` |
+| Review "R", the tree's user marker | `muted-foreground`, `foreground` |
 | Subagent card "done" | `status-done` |
 | Line references (`CODE_REF_COLOR`), links in tool bodies | `link` |
 | Sidebar marks, Home badges, `/sessions` badges, attention | the status vocabulary (below) |
-| Connection indicator | live: `status-idle` dot; connecting, reconnecting: pulsing `status-idle` dot with its label; offline: `status-error` dot with its label |
+| Connection indicator | live: `status-online` dot; connecting, reconnecting: pulsing `status-idle` dot with its label; offline: `status-error` dot with its label |
 
 ## Typography
 
@@ -97,11 +98,25 @@ Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontso
 
 ## Layout
 
-The transcript and the composer area share one column: `mx-auto w-full max-w-[46rem]` (736px), with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. With the review pane open the column fits the space left beside it. The header spans the full width. Turns are 40px apart.
+The transcript and the composer area share one column: `mx-auto w-full max-w-[46rem]` (736px), with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. With the review pane open the column fits the space left beside it. The header spans the full width up to the activity rail. Turns are 40px apart.
+
+On desktop the activity rail is a 44px column at the right edge (`border-l` hairline on `--background`): an empty cell the height of the header row, then 32px ghost icon buttons (Changes, Files, Tree) in `muted-foreground`; the one whose tab the review pane shows sits on `--sidebar-accent` in `foreground`, like the active sidebar row. Tooltips open to the left. Details in [`07-code-review.md`](07-code-review.md), "Desktop pane".
+
+### Conversation outline
+
+On desktop, `ConversationOutline` (`features/conversation/conversation-outline.tsx`) lists the conversation's prompts in the transcript's right margin, like a docs site's "On this page":
+
+- **Items:** one button per prompt of the active branch, the pending one last: the first non-blank line of its text after attached `<file>` blocks (`promptTitle`), 12px `muted-foreground`, truncated with the line as `title`. Prompts without text (images only) are left out; with fewer than two items there is no outline. No heading.
+- **Look:** 14rem wide, 1rem past the column's outer edge, behind a left `--border` hairline. The current item is `foreground` with a `foreground` accent on the hairline; the others turn `foreground` on hover.
+- **Placement:** absolutely positioned beside the transcript column, inside the scroller, so the wheel over it scrolls the transcript. It sticks 2rem below the scroller's top and is at most the scroller's height less 4rem (`100cqh`), scrolling on its own past that and keeping the current item in view.
+- **When:** the scroller is a size container on desktop (`@container-size`) and the outline shows from 78rem of its width (`@min-[78rem]`), where the margin holds it beside the 46rem column; so the review pane, by narrowing the transcript, hides it. Not rendered on phone: containment would make the scroller the containing block of the phone's fixed selection bar.
+- **Current:** the last prompt whose top is above a third of the scroller's height; once scrolled to the end, the last one whose top is in view. A passive scroll listener and a `ResizeObserver` on the scroller measure in an animation frame, skipped while the outline is hidden (`checkVisibility()`), binary-searching the prompts' tops (`data-prompt-id` on each user message).
+- **Jump:** a click smooth-scrolls (instantly under reduced motion) so the prompt's top sits 16px below the scroller's top, through `useStickToBottom`'s `scrollTo`: an upward jump stops following live at once, as a scroll up does; a jump that stays at the bottom keeps following.
+- **Accessibility:** `<nav aria-label="Conversation outline">` holding a list of buttons; the current one has `aria-current="true"`.
 
 ## Status vocabulary
 
-One word and one colour per state, everywhere. `agentStatus(agent, pending)` (`lib/agent-status.ts`) takes the first match:
+One word and one colour per state, everywhere. Among agent states green is only Finished (`status-done`); the connection's own green, `status-online` (a purer, yellower hue), marks the header's live dot and nothing else. `agentStatus(agent, pending)` (`lib/agent-status.ts`) takes the first match:
 
 | Status | When | Colour | Sidebar mark | Home badge icon |
 |---|---|---|---|---|
@@ -116,7 +131,8 @@ One word and one colour per state, everywhere. `agentStatus(agent, pending)` (`l
 
 - **`StatusMark`** (sidebar, dense): the spinner or a 7px dot, labelled with the word (`aria-label` and `title`); it is the row's only status or attention mark. A collapsed sidebar group's header shows its hidden rows' marks ([`05-desktop.md`](05-desktop.md), "Sidebar").
 - **`StatusBadge`** (Home, roomy): icon plus the word. Home's agent rows show one badge; recent-session rows on Home and `/sessions` held by an agent show that agent's badge.
-- **Status bar**: "Working" with a spinner while the run is active, compacting or retrying; nothing otherwise.
+- **Status bar** (below 640px): "Working" with a spinner while the run is active, compacting or retrying; nothing otherwise.
+- **Conversation header** (from 640px): "Working · 2m 13s" in `shimmer` beside the connection dot in the same cases, timed from the run's `agent_start` (`selectWorking`, `selectRunStartedAt`).
 
 ## Transcript
 
@@ -332,7 +348,7 @@ interface LiveState {
 
 ## Tests
 
-Reducer tests for the timing fields, the `thinkingMs` cap and the reconnect invariant over every fixture; unit tests for the status vocabulary, the duration formats, turns (and their identity across commits), grouping (no step lost or repeated over every fixture) and the density migration; an end-to-end test from a fixture's events through the store to "Thought for Ns"; component tests for every row, the turn views per density, the live-status row, the footer, the header dropdown, Settings, the composer and the picker. Coverage per task in [`../plan/09-ui-overhaul.md`](../plan/09-ui-overhaul.md).
+Reducer tests for the timing fields, the `thinkingMs` cap and the reconnect invariant over every fixture; unit tests for the status vocabulary, the duration formats, turns (and their identity across commits), grouping (no step lost or repeated over every fixture) and the density migration; an end-to-end test from a fixture's events through the store to "Thought for Ns"; component tests for every row, the turn views per density, the live-status row, the footer, the header dropdown, Settings, the composer, the picker and the conversation outline (items, current prompt, jumps and following live). Coverage per task in [`../plan/09-ui-overhaul.md`](../plan/09-ui-overhaul.md).
 
 ## Limitations
 
@@ -340,3 +356,4 @@ Reducer tests for the timing fields, the `thinkingMs` cap and the reconnect inva
 - The files chip opens the working tree's review, not a diff of that turn; its counts are the turn's.
 - Messages from pi before 1.1.0 have no `durationMs`: their tool rows show no duration, and a turn's duration ends where its last assistant message started.
 - Elapsed timers assume the device's clock agrees with the server's.
+- Turns off screen keep a placeholder height until rendered (`content-visibility: auto`), so an outline jump far from turns never rendered can land slightly off its prompt.

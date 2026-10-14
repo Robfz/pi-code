@@ -30,6 +30,7 @@
   --color-status-error: var(--status-error);
   --color-status-done: var(--status-done);
   --color-status-idle: var(--status-idle);
+  --color-status-online: var(--status-online);
   --color-ultraspawn: var(--ultraspawn);
   --color-diff-add: var(--diff-add);
   --color-diff-del: var(--diff-del);
@@ -75,6 +76,8 @@
 
 :root {
   --radius: 0.625rem;
+  /* The desktop activity rail's width (`review-rail.tsx`). */
+  --rail-width: 2.75rem;
   --background: oklch(0.992 0 0);
   --foreground: oklch(0.21 0 0);
   --card: oklch(0.972 0 0);
@@ -114,6 +117,7 @@
   --status-input: oklch(0.72 0.16 65);
   --status-error: var(--destructive);
   --status-done: oklch(0.62 0.14 160);
+  --status-online: oklch(0.66 0.17 145);
   --ultraspawn: oklch(0.56 0.2 300);
   /* The references below resolve on <html>, where next-themes puts `.dark`. */
   --status-working: var(--foreground);
@@ -157,6 +161,7 @@
   --link: oklch(0.7 0.1125 250);
   --status-input: oklch(0.8 0.15 75);
   --status-done: oklch(0.76 0.15 160);
+  --status-online: oklch(0.74 0.17 145);
   --ultraspawn: oklch(0.72 0.16 300);
   --scrollbar-thumb: oklch(0.96 0 0 / 0.14);
 }
@@ -225,6 +230,39 @@
   }
   [data-slot="collapsible-content"] {
     animation: none;
+  }
+}
+
+/*
+ * Window Controls Overlay (the installed app with its title bar hidden): each surface's top row,
+ * marked `titlebar`, takes the title bar's height, drags the window, and pads clear of the window
+ * controls where it reaches them. A row's distance from the window's left and right edges comes
+ * from `--titlebar-left` / `--titlebar-right` (set beside the sidebar and the review pane; 0 by
+ * default), its usual inline padding from `--titlebar-pad`. Unlayered, so it overrides utilities.
+ */
+@media (display-mode: window-controls-overlay) {
+  .titlebar {
+    box-sizing: border-box;
+    height: env(titlebar-area-height, 3rem);
+    padding-top: 0;
+    padding-left: max(
+      var(--titlebar-pad, 0.5rem),
+      env(titlebar-area-x, 0px) -
+      var(--titlebar-left, 0px)
+    );
+    padding-right: max(
+      var(--titlebar-pad, 0.5rem),
+      100vw -
+      env(titlebar-area-x, 0px) -
+      env(titlebar-area-width, 100vw) -
+      var(--titlebar-right, 0px)
+    );
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .titlebar :is(a, button, input, select, textarea, [role="button"], [role="tab"]) {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
   }
 }
 

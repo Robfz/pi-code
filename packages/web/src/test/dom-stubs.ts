@@ -16,6 +16,18 @@ export function stubMatchMedia(matches: (query: string) => boolean): void {
   }));
 }
 
+/** A `ResizeObserver` that never reports (cmdk lists, Radix poppers). */
+export function stubResizeObserver(): void {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+}
+
 /**
  * Give every element a rendered width of `width` px and install a `ResizeObserver` whose
  * `resize(width)` changes that width and notifies every observer. Undo with `vi.unstubAllGlobals`
