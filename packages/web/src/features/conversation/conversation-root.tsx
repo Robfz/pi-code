@@ -1,23 +1,55 @@
-import { PlusIcon } from "lucide-react";
+import { LoaderIcon, MessageSquareOffIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useStore } from "zustand";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { agentLayout, agentSession } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
+import { useOpenAgent } from "@/features/catalog/use-open-agent";
 import { PlaceholderScreen } from "@/routes/placeholder";
-import { ConversationStoreProvider, useLive, useLiveRegistry } from "@/store/context";
+import {
+  ConversationStoreProvider,
+  useConversation,
+  useLive,
+  useLiveRegistry,
+} from "@/store/context";
 
+/**
+ * Offers Reopen when the agent's session is still in the catalog with its folder on disk (an
+ * agent never seen, or closed before its first message, has none), and New conversation.
+ */
 function ConversationClosed() {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const open = useOpenAgent();
+  const sessionFile = useConversation((s) => s.agent.sessionFile);
+  const reopenable = useLive((s) => {
+    const session = s.sessions.find((x) => x.file === sessionFile);
+    return session !== undefined && !session.missing && !session.layout?.missing;
+  });
   return (
-    <PlaceholderScreen title="Conversation closed">
-      <div className="flex flex-col items-center gap-3 py-12 text-center">
-        <p>This conversation is closed.</p>
-        <Button onClick={() => setPickerOpen(true)}>
-          <PlusIcon /> New conversation
-        </Button>
-        <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} />
-      </div>
+    <PlaceholderScreen title="Conversation closed" centered>
+      <EmptyState
+        icon={<MessageSquareOffIcon />}
+        title="This conversation is no longer running"
+        description="It was stopped elsewhere, closed after being idle, or its worktree was removed."
+        action={
+          <div className="mt-2 flex flex-wrap justify-center gap-2">
+            {reopenable && sessionFile !== undefined && (
+              <Button disabled={open.isPending} onClick={() => open.mutate({ sessionFile })}>
+                {open.isPending ? <LoaderIcon className="animate-spin" /> : <RotateCcwIcon />}
+                Reopen
+              </Button>
+            )}
+            <Button
+              variant={reopenable ? "outline" : "default"}
+              onClick={() => setPickerOpen(true)}
+            >
+              <PlusIcon /> New conversation
+            </Button>
+          </div>
+        }
+      />
+      <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} />
     </PlaceholderScreen>
   );
 }

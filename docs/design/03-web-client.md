@@ -124,7 +124,7 @@ interface ConversationState {
 }
 ```
 
-`connection` mirrors the stream's state, or `connecting` / `reconnecting` / `offline` while the store's own snapshot is loading or being retried. A closed store makes the route show "Conversation closed" with a New conversation button.
+`connection` mirrors the stream's state, or `connecting` / `reconnecting` / `offline` while the store's own snapshot is loading or being retried. A closed store makes the route show "Conversation closed" with a New conversation button, plus Reopen (resume its session file) when the catalog still lists that session with its folder on disk.
 
 Components subscribe with selectors (`useConversation(s => s.live.streaming)`), so token deltas only re-render the live turn.
 

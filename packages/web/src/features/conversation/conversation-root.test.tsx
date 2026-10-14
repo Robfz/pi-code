@@ -1,3 +1,4 @@
+import type { StreamedSession } from "@pi-code/protocol";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -13,8 +14,16 @@ function renderAgent(snapshotStatus = 200) {
   const api = stubFetch((call) => {
     if (call.url === "/api/agents/a1/snapshot") {
       return snapshotStatus === 200
-        ? [200, makeSnapshot({ agent: makeAgent({ id: "a1", cwd: "/home/me/alpha" }) })]
+        ? [
+            200,
+            makeSnapshot({
+              agent: makeAgent({ id: "a1", cwd: "/home/me/alpha", sessionFile: "/s/a1.jsonl" }),
+            }),
+          ]
         : [snapshotStatus, { error: { code: "agent_not_found", message: "no agent" } }];
+    }
+    if (call.url === "/api/agents" && call.method === "POST") {
+      return [200, { agent: makeAgent({ id: "a2", cwd: "/home/me/alpha" }) }];
     }
     return undefined;
   });
@@ -23,7 +32,24 @@ function renderAgent(snapshotStatus = 200) {
   });
   render(<App router={router} queryClient={createQueryClient()} />);
   const acks = () => api.calls.filter((c) => c.method === "POST" && c.url === "/api/agents/a1/ack");
-  return { acks };
+  const opens = () =>
+    api.calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body);
+  return { router, acks, opens };
+}
+
+function catalog(patch: Partial<StreamedSession> = {}) {
+  sendFrame({
+    type: "catalog",
+    sessions: [
+      {
+        file: "/s/a1.jsonl",
+        id: "s1",
+        cwd: "/home/me/alpha",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        ...patch,
+      },
+    ],
+  });
 }
 
 afterEach(() => {
@@ -70,8 +96,30 @@ describe("ConversationRoot", () => {
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
     expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
 
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+
     await userEvent.setup().click(screen.getByRole("button", { name: "New conversation" }));
     expect(await screen.findByLabelText("Folder path")).toBeInTheDocument();
+  });
+
+  it("reopens a closed conversation's session", async () => {
+    const { router, opens } = renderAgent();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
+    catalog();
+    sendFrame({ type: "agent_closed", agentId: "a1" });
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Reopen" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
+    expect(opens()).toEqual([{ sessionFile: "/s/a1.jsonl" }]);
+  });
+
+  it("offers no Reopen when the session's folder is missing", async () => {
+    renderAgent();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
+    catalog({ missing: true });
+    sendFrame({ type: "agent_closed", agentId: "a1" });
+    expect(await screen.findByRole("heading", { name: "Conversation closed" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
   });
 
   it("shows an unknown conversation as closed", async () => {
