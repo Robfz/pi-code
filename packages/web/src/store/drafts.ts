@@ -1,7 +1,7 @@
 /**
  * Composer drafts, one per conversation, in memory for the tab's lifetime
  * (`docs/design/07-code-review.md`, "Draft store"). The composer's only text state, so a draft
- * survives navigating away from the conversation and back.
+ * survives navigating away from the conversation and back, also while browsing prompt history.
  */
 
 import { create } from "zustand";
@@ -19,6 +19,15 @@ export interface Draft {
   attachments: Attachment[];
   /** Bumped by changes made outside the composer; the composer then focuses and applies `selection`. */
   external: number;
+  /** Set while browsing prompt history. */
+  browse?: DraftBrowse;
+}
+
+export interface DraftBrowse {
+  /** The history entry shown (0 is the newest). */
+  index: number;
+  /** The draft from before browsing, restored when browsing past the newest entry. */
+  stash: { text: string; selection: DraftSelection };
 }
 
 interface Drafts {
@@ -26,11 +35,18 @@ interface Drafts {
   /** Typing and caret moves; a no-op when neither text nor selection changed. */
   edit(agentId: string, text: string, selection: DraftSelection): void;
   setAttachments(agentId: string, attachments: Attachment[]): void;
-  /** Fork, share, `set_editor_text`, Stop & edit: the caret goes to the end. */
+  /** Fork, share, `set_editor_text`, Stop & edit: the caret goes to the end; ends browsing. */
   replace(agentId: string, text: string): void;
+  /** Prompt history: shows `text` at `selection`, with `browse` (none ends browsing). */
+  recall(
+    agentId: string,
+    text: string,
+    selection: DraftSelection,
+    browse: DraftBrowse | undefined,
+  ): void;
   /** Replace the selection with `ref`, spaced from its neighbours; the caret goes after it. */
   insertReference(agentId: string, ref: string): void;
-  /** On send. */
+  /** On send; ends browsing. */
   clear(agentId: string): void;
 }
 
@@ -66,7 +82,10 @@ export const useDrafts = create<Drafts>()((set, get) => {
         text,
         selection: caretAt(text.length),
         external: draft.external + 1,
+        browse: undefined,
       })),
+    recall: (agentId, text, selection, browse) =>
+      update(agentId, (draft) => ({ text, selection, external: draft.external + 1, browse })),
     insertReference: (agentId, ref) =>
       update(agentId, (draft) => {
         const { text } = draft;
@@ -82,6 +101,11 @@ export const useDrafts = create<Drafts>()((set, get) => {
         };
       }),
     clear: (agentId) =>
-      update(agentId, () => ({ text: "", selection: caretAt(0), attachments: [] })),
+      update(agentId, () => ({
+        text: "",
+        selection: caretAt(0),
+        attachments: [],
+        browse: undefined,
+      })),
   };
 });

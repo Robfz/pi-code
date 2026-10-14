@@ -8,9 +8,11 @@ import {
   activeBranch,
   type LabelEntry,
   type SessionEntry,
+  splitFileBlocks,
   type ToolResultMessage,
   type Transcript,
 } from "@pi-code/protocol";
+import { contentText } from "@/lib/content";
 import { SPAWN_TOOL_NAME, subagentCost } from "@/lib/subagent-details";
 import type { ConversationState } from "./conversation-store";
 
@@ -51,6 +53,33 @@ const labelsOf = memoByIdentity((entries: SessionEntry[]) => {
 
 /** Entries from the root to the current leaf. */
 export const selectActiveBranch = (s: ConversationState): SessionEntry[] => branchOf(s.transcript);
+
+/**
+ * The composer's prompt history, newest first: user message text without its `<file>` blocks,
+ * and bash commands as `!cmd` (`!!cmd` when excluded from context). Blank entries are skipped
+ * and consecutive duplicates collapsed.
+ */
+export function promptHistory(branch: readonly SessionEntry[]): string[] {
+  const history: string[] = [];
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (entry?.type !== "message") continue;
+    const { message } = entry;
+    let text = "";
+    if (message.role === "user") text = splitFileBlocks(contentText(message.content)).body.trim();
+    else if (message.role === "bashExecution") {
+      text = `${message.excludeFromContext ? "!!" : "!"}${message.command}`;
+    }
+    if (text !== "" && text !== history.at(-1)) history.push(text);
+  }
+  return history;
+}
+
+const promptHistoryOf = memoByIdentity(promptHistory);
+
+/** `promptHistory` of the active branch. */
+export const selectPromptHistory = (s: ConversationState): string[] =>
+  promptHistoryOf(selectActiveBranch(s));
 
 /** Committed tool results by `toolCallId` (all branches). */
 export const selectToolResults = (s: ConversationState): Map<string, ToolResultMessage> =>

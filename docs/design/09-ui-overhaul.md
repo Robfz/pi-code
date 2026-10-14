@@ -296,6 +296,7 @@ One 12px `faint-foreground` line under each finished turn with an assistant mess
 - **Running, right:** the picker, then, while the draft has text or attachments, a small text "Queue" button (28px, `--input` hairline, 13px muted) and Steer (round, solid foreground, `ArrowUp`); Stop is always there, between them: round, `--secondary` with an inset `--input` hairline, a 10px square.
 - **Stop & edit** sits at the end of the queue display while the queue is non-empty.
 - Steer sends `prompt` with `streamingBehavior: "steer"`, Queue with `"followUp"`, Stop `abort`, Stop & edit `clear_queue` then `abort` (restoring the queued texts). Keys: Enter sends (steers while running), Alt+Enter queues, Shift+Enter is a newline, Enter is a newline on touch.
+- **Prompt history:** Up with the caret at the start of the text recalls the previous prompt of the active branch (`selectPromptHistory`: user text without `<file>` blocks, bash commands as `!cmd` / `!!cmd`, consecutive duplicates collapsed), caret at its start; Down with the caret at the end recalls the next one, caret at its end, and past the newest restores the draft from before browsing (`Draft.browse`). Elsewhere in the text the arrows move the caret natively first. Edits to a recalled prompt are dropped on the next step; the slash menu takes the arrows while open.
 
 ### Model picker
 
