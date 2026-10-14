@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useId, useMemo, useRef, useState } from "react";
 import { countPatchLines, type LineSelection } from "@/components/diff";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -319,31 +320,6 @@ function sumCounts(entries: FileEntry[]) {
     deletions += counts?.deletions ?? 0;
   }
   return { additions, deletions };
-}
-
-function EmptyState({
-  icon,
-  title,
-  description,
-  action,
-}: {
-  icon: ReactNode;
-  title: string;
-  description?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:size-5">
-        {icon}
-      </div>
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium">{title}</p>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </div>
-      {action}
-    </div>
-  );
 }
 
 function Loading() {
