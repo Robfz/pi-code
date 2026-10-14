@@ -61,14 +61,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               className={cn(
                 "sticky top-0 flex h-dvh shrink-0 flex-col border-r",
                 sidebarOpen
-                  ? "w-[280px] pt-[env(safe-area-inset-top)]"
-                  : "px-1 pt-[max(0.5rem,env(safe-area-inset-top))]",
+                  ? "w-[280px] pt-[env(safe-area-inset-top)] [--titlebar-right:calc(100vw-280px)]"
+                  : "w-10 items-center pt-[max(0.5rem,env(safe-area-inset-top),env(titlebar-area-height,0px))]",
               )}
             >
               {sidebarOpen ? <Sidebar action={toggle} /> : toggle}
             </aside>
           )}
-          <div className="min-w-0 flex-1">
+          <div
+            className={cn(
+              "min-w-0 flex-1",
+              desktop && (sidebarOpen ? "[--titlebar-left:280px]" : "[--titlebar-left:2.5rem]"),
+            )}
+          >
             <OfflineBanner />
             {children}
           </div>

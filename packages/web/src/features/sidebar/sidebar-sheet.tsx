@@ -22,7 +22,7 @@ export function SidebarSheet() {
         <SheetContent
           side="left"
           showCloseButton={false}
-          className="gap-0 pt-[env(safe-area-inset-top)] data-[side=left]:w-[min(85vw,20rem)]"
+          className="gap-0 pt-[env(safe-area-inset-top)] [--titlebar-right:calc(100vw-min(85vw,20rem))] data-[side=left]:w-[min(85vw,20rem)]"
         >
           <SheetTitle className="sr-only">Conversations</SheetTitle>
           <SheetDescription className="sr-only">

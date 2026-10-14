@@ -2,7 +2,7 @@ import { PlusIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { Button } from "@/components/ui/button";
-import { agentLayout } from "@/features/catalog/listing-groups";
+import { agentLayout, agentSession } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { PlaceholderScreen } from "@/routes/placeholder";
 import { ConversationStoreProvider, useLive, useLiveRegistry } from "@/store/context";
@@ -35,9 +35,7 @@ export function ConversationRoot({ agentId, children }: { agentId: string; child
   const cwd = useLive((s) => s.agents[agentId]?.cwd);
   const repo = useLive((s) => {
     const agent = s.agents[agentId];
-    const file = agent?.sessionFile;
-    const session = file === undefined ? undefined : s.sessions.find((x) => x.file === file);
-    return agent && agentLayout(agent, new Map(session ? [[session.file, session]] : []))?.repo;
+    return agent && agentLayout(agent, agentSession(agent, s.sessions))?.repo;
   });
   // Not rerun when the collapsed set changes, so its groups can be collapsed again while open.
   useEffect(() => {

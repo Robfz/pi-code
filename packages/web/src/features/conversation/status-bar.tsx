@@ -3,7 +3,7 @@ import { baseName } from "@/lib/content";
 import { formatCost } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
-import { selectSubagentSpend } from "@/store/selectors";
+import { selectSubagentSpend, selectWorking } from "@/store/selectors";
 import { useOpenSheet } from "./action-sheets";
 import { StatusChips } from "./extension-ui";
 
@@ -46,21 +46,17 @@ function ContextBar({ percent }: { percent: number | null | undefined }) {
   );
 }
 
-/** "Working" while the run is active, compacting or retrying. */
+/**
+ * "Working" while the run is active, compacting or retrying; below 640px only, where the header
+ * hides its own timed run state.
+ */
 export function RunIndicator() {
-  const working = useConversation(
-    (s) =>
-      s.live.run.active ||
-      s.live.run.retry !== undefined ||
-      s.live.run.compaction !== undefined ||
-      s.state?.isCompacting === true ||
-      s.state?.isStreaming === true,
-  );
+  const working = useConversation(selectWorking);
   if (!working) return null;
   return (
     <span
       data-testid="run-indicator"
-      className="flex shrink-0 items-center gap-1.5 text-foreground"
+      className="flex shrink-0 items-center gap-1.5 text-foreground sm:hidden"
     >
       <LoaderCircleIcon aria-hidden className="size-[11px] animate-spin text-muted-foreground" />{" "}
       Working
@@ -74,7 +70,8 @@ const itemButton =
 /**
  * One line under the composer (`docs/design/09-ui-overhaul.md`, "Status bar"): folder (from
  * 1024px), branch + dirty dot, then on the right the context bar (percentage from 1024px), the
- * cost (with `(sa $x)` subagent spend once the conversation has a `spawn` call) and Working;
+ * cost (with `(sa $x)` subagent spend once the conversation has a `spawn` call) and Working
+ * (below 640px);
  * extension `setStatus` chips below. The context bar and cost open the stats sheet.
  */
 export function StatusBar() {

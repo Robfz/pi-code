@@ -73,7 +73,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/new1"));
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ cwd: "/home/me/gamma" });
-    expect(await screen.findByRole("heading", { name: "gamma" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
+    expect(screen.getByTestId("breadcrumb-folder")).toHaveTextContent("gamma");
     expect(await screen.findByRole("textbox", { name: "Message" })).toBeEnabled();
   });
 
@@ -107,7 +108,7 @@ describe("App", () => {
         <App router={router} queryClient={createQueryClient()} />
       </StrictMode>,
     );
-    expect(await screen.findByRole("heading", { name: "alpha" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
     await waitFor(() => expect(FakeEventSource.latest().cursors).toBe("a1:0"));
     expect(FakeEventSource.instances.filter((es) => !es.closed)).toHaveLength(1);
     expect(calls.filter((c) => c.url === "/api/agents/a1/snapshot")).toHaveLength(1);

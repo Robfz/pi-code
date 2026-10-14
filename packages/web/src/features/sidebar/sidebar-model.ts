@@ -37,6 +37,14 @@ export interface SidebarRow {
 
 export type SidebarGroup = ListingGroup<SidebarRow>;
 
+/** A conversation's displayed title: its name, else its session's name or first prompt. */
+export function conversationTitle(
+  name: string | undefined,
+  session: Pick<StreamedSession, "name" | "firstMessage"> | undefined,
+): string {
+  return name ?? session?.name ?? session?.firstMessage ?? "New conversation";
+}
+
 /** Case-insensitive substring match on an agent row's displayed title and cwd path. */
 export function agentMatches(row: Pick<SidebarRow, "title" | "cwd">, query: string): boolean {
   const q = query.toLowerCase();
@@ -111,10 +119,10 @@ export function buildSidebarGroups({
 
   const agentRows: SidebarRow[] = agents.map((agent) => {
     const session = agent.sessionFile ? byFile.get(agent.sessionFile) : undefined;
-    const layout = agentLayout(agent, byFile);
+    const layout = agentLayout(agent, session);
     return {
       key: agent.id,
-      title: agent.sessionName ?? session?.name ?? session?.firstMessage ?? "New conversation",
+      title: conversationTitle(agent.sessionName, session),
       cwd: agent.cwd,
       ...(layout ? { layout } : {}),
       ...(session?.missing ? { missing: true } : {}),
@@ -128,7 +136,7 @@ export function buildSidebarGroups({
     if (held.has(session.file)) continue;
     rows.push({
       key: session.file,
-      title: session.name ?? session.firstMessage ?? "New conversation",
+      title: conversationTitle(undefined, session),
       cwd: session.cwd,
       ...(session.layout ? { layout: session.layout } : {}),
       ...(session.missing ? { missing: true } : {}),

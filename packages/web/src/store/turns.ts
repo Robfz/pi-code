@@ -59,6 +59,9 @@ export interface Turn {
   steps: Step[];
 }
 
+/** The id of the turn a pending user message starts. */
+export const PENDING_TURN_ID = "pending";
+
 /**
  * Key of a text or thinking block, shared by its streaming and committed forms: its `thinkingKey`
  * (a streaming message without a timestamp has `live:` keys).

@@ -24,7 +24,7 @@ export function ConnectionIndicator() {
       <span
         className={cn(
           "size-2 rounded-full",
-          connection === "live" && "bg-status-idle",
+          connection === "live" && "bg-status-online",
           (connection === "connecting" || connection === "reconnecting") &&
             "animate-pulse bg-status-idle",
           connection === "offline" && "bg-status-error",

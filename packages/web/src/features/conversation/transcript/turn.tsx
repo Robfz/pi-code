@@ -216,7 +216,7 @@ export const TurnView = memo(function TurnView({
       )}
     >
       {turn.user && (
-        <div className="mb-[18px]">
+        <div data-prompt-id={turn.id} className="mb-[18px]">
           {userLabel !== undefined && <EntryLabel entryId={turn.id} label={userLabel} />}
           <UserMessageView message={turn.user} pending={pending} />
         </div>

@@ -84,7 +84,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DiffScreen", () => {
-  it("lists files with status and counts; tapping a file shows its patch", async () => {
+  it("lists files with status and counts, every patch expanded", async () => {
     const { calls } = stubFetch(() => [
       200,
       {
@@ -105,17 +105,16 @@ describe("DiffScreen", () => {
       { url: "/api/agents/agent-7/git/diff", search: "", method: "GET", body: undefined },
     ]);
     expect(rows).toHaveLength(3);
-    expect(screen.getByText("3 files changed ·")).toBeInTheDocument();
+    expect(screen.getByText("3 files")).toBeInTheDocument();
     const [notes, added, renamed] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(within(notes).getByTitle("Modified")).toHaveTextContent("M");
     expect(notes).toHaveTextContent("+1 −1");
     expect(within(added).getByTitle("Untracked")).toHaveTextContent("U");
     expect(added).toHaveTextContent("+2 −0");
-    expect(renamed).toHaveTextContent("a.ts → b.ts");
+    expect(within(renamed).getByTitle("a.ts → b.ts")).toBeInTheDocument();
 
-    await userEvent.setup().click(within(notes).getByRole("button"));
+    // Every file starts expanded.
     expect(await loadedDiff(notes)).toHaveTextContent("I like banana bread.");
-    await userEvent.setup().click(within(renamed).getByRole("button"));
     expect(within(renamed).getByText("No textual changes.")).toBeInTheDocument();
   });
 
@@ -136,10 +135,7 @@ describe("DiffScreen", () => {
     ];
     expect(binary).toHaveTextContent("binary");
     expect(large).toHaveTextContent("too large");
-    const user = userEvent.setup();
-    await user.click(within(binary).getByRole("button"));
     expect(within(binary).getByText("Binary file, no text diff.")).toBeInTheDocument();
-    await user.click(within(large).getByRole("button"));
     expect(within(large).getByText(/too large to show here/)).toBeInTheDocument();
   });
 
@@ -157,7 +153,7 @@ describe("DiffScreen", () => {
     files = [file({ patch: gitPatch() })];
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByTestId("diff-file")).toBeInTheDocument();
-    expect(calls).toHaveLength(2);
+    expect(urls(calls).filter((url) => url.endsWith("/git/diff"))).toHaveLength(2);
   });
 
   it("refresh in branch mode refetches the branches and the diff", async () => {
@@ -168,7 +164,7 @@ describe("DiffScreen", () => {
         : [200, { files: [] }],
     );
     await renderScreen();
-    expect(await screen.findByText("No changes against main.")).toBeInTheDocument();
+    expect(await screen.findByText("No changes against main")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>
       expect(urls(calls).sort()).toEqual([

@@ -17,7 +17,7 @@ import { useReview, useReviewStore } from "./review-state";
 /** Delay before the search field queries `GET files`. */
 export const FILE_SEARCH_DEBOUNCE_MS = 250;
 
-function splitPath(path: string): { name: string; dir: string } {
+export function splitPath(path: string): { name: string; dir: string } {
   const slash = path.lastIndexOf("/");
   return slash < 0
     ? { name: path, dir: "" }

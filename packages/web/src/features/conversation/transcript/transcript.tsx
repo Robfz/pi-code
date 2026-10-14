@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConversation } from "@/store/context";
 import { selectLabels, selectPendingUser } from "@/store/selectors";
-import { selectTurns, type Turn } from "@/store/turns";
+import { PENDING_TURN_ID, selectTurns, type Turn } from "@/store/turns";
 import { TurnView } from "./turn";
 
 /** Hosts live state on a transcript with no turn yet. */
@@ -16,7 +16,7 @@ export function Transcript() {
   const labels = useConversation(selectLabels);
   const pendingUser = useConversation(selectPendingUser);
   const pendingTurn = useMemo<Turn | undefined>(
-    () => pendingUser && { id: "pending", user: pendingUser, entries: [], steps: [] },
+    () => pendingUser && { id: PENDING_TURN_ID, user: pendingUser, entries: [], steps: [] },
     [pendingUser],
   );
   const shown = pendingTurn ? [...turns, pendingTurn] : turns.length > 0 ? turns : [EMPTY_TURN];
