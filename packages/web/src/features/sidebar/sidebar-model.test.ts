@@ -1,8 +1,9 @@
-import type { SessionSummary } from "@pi-code/protocol";
+import type { AgentInfo, SessionSummary } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
 import { groupPath } from "@/features/catalog/listing-groups";
 import { makeAgent } from "@/test/fixtures";
 import {
+  activeRows,
   agentMatches,
   allRows,
   buildSidebarGroups,
@@ -344,5 +345,147 @@ describe("buildSidebarGroups with a query", () => {
       query: "phoenix",
     });
     expect(groups).toEqual([]);
+  });
+});
+
+describe("activeRows", () => {
+  const repo = "/home/me/pi-code";
+  const wt = (missing = false) => ({
+    repo,
+    role: "worktree" as const,
+    main: `${repo}/main`,
+    ...(missing ? { missing: true as const } : {}),
+  });
+  const active = (...args: Parameters<typeof buildSidebarGroups>) =>
+    activeRows(buildSidebarGroups(...args));
+
+  it("lists every live agent across groups, by last prompt, then the never-prompted by creation", () => {
+    const rows = active({
+      agents: [
+        makeAgent({ id: "idle", cwd: "/home/me/alpha", sessionFile: "f-idle" }),
+        makeAgent({ id: "fresh", cwd: "/home/me/beta", startedAt: at(9) }),
+        makeAgent({ id: "older-fresh", cwd: "/home/me/alpha", startedAt: at(8) }),
+        makeAgent({ id: "working", cwd: "/home/me/beta", sessionFile: "f-working" }),
+        makeAgent({ id: "starting", cwd: "/home/me/gamma", status: "starting", startedAt: at(7) }),
+        makeAgent({
+          id: "trust",
+          cwd: "/home/me/gamma",
+          status: "awaiting_trust",
+          startedAt: at(6),
+        }),
+        makeAgent({ id: "failed", cwd: "/home/me/gamma", attention: "failed", sessionFile: "f-f" }),
+        makeAgent({ id: "done", cwd: "/home/me/alpha", attention: "finished", sessionFile: "f-d" }),
+        makeAgent({ id: "exited", cwd: "/home/me/alpha", status: "exited", sessionFile: "f-x" }),
+      ],
+      sessions: [
+        session({ file: "f-idle", cwd: "/home/me/alpha", lastPromptAt: at(2) }),
+        session({ file: "f-working", cwd: "/home/me/beta", lastPromptAt: at(5) }),
+        session({ file: "f-f", cwd: "/home/me/gamma", lastPromptAt: at(3) }),
+        session({ file: "f-d", cwd: "/home/me/alpha", lastPromptAt: at(4) }),
+        session({ file: "f-x", cwd: "/home/me/alpha", lastPromptAt: at(10) }),
+        session({ file: "free", cwd: "/home/me/alpha", lastPromptAt: at(11) }),
+      ],
+    });
+    expect(rows.map((r) => r.key)).toEqual([
+      "working",
+      "done",
+      "failed",
+      "idle",
+      "fresh",
+      "older-fresh",
+      "starting",
+      "trust",
+    ]);
+  });
+
+  it("labels rows with their group, a checkout's as repo/checkout", () => {
+    const rows = active({
+      agents: [
+        makeAgent({ id: "plain", cwd: "/home/me/Kepi/phoenix", startedAt: at(5) }),
+        makeAgent({ id: "other", cwd: "/home/me/phoenix/phoenix", startedAt: at(4) }),
+        makeAgent({
+          id: "container",
+          cwd: repo,
+          startedAt: at(3),
+          layout: { repo, role: "container", main: `${repo}/main` },
+        }),
+        makeAgent({
+          id: "main",
+          cwd: `${repo}/main`,
+          startedAt: at(2),
+          layout: { repo, role: "main", main: `${repo}/main` },
+        }),
+        makeAgent({ id: "wt", cwd: `${repo}/spike`, startedAt: at(1), layout: wt() }),
+      ],
+      sessions: [],
+    });
+    expect(rows.map((r) => [r.key, r.project])).toEqual([
+      ["plain", "Kepi/phoenix"],
+      ["other", "phoenix/phoenix"],
+      ["container", "pi-code"],
+      ["main", "pi-code/main"],
+      ["wt", "pi-code/spike"],
+    ]);
+  });
+
+  it("titles rows like the groups and follows the search query", () => {
+    const agents = [
+      makeAgent({ id: "a1", sessionFile: "f1" }),
+      makeAgent({ id: "a2", sessionName: "Other" }),
+    ];
+    const known = [session({ file: "f1", firstMessage: "Fix the design" })];
+    expect(active({ agents, sessions: known }).map((r) => r.title)).toEqual([
+      "Fix the design",
+      "Other",
+    ]);
+    expect(active({ agents, sessions: [], known, query: "design" }).map((r) => r.key)).toEqual([
+      "a1",
+    ]);
+  });
+
+  it("is empty without a live agent", () => {
+    expect(
+      active({
+        agents: [makeAgent({ id: "x", status: "exited" })],
+        sessions: [session({ file: "free" })],
+      }),
+    ).toEqual([]);
+  });
+
+  describe("removal", () => {
+    // Each step is the registry after one frame of the server's sequence (`agent` replaces an
+    // agent, `agent_closed` removes it, `catalog` replaces the sessions).
+    const inWt = makeAgent({
+      id: "wt",
+      sessionFile: "f-wt",
+      cwd: `${repo}/spike`,
+      layout: wt(),
+    });
+    const other = makeAgent({ id: "other", sessionFile: "f-other" });
+    const sessions = [
+      session({ file: "f-wt", cwd: `${repo}/spike`, layout: wt(), lastPromptAt: at(2) }),
+      session({ file: "f-other", lastPromptAt: at(1) }),
+    ];
+    const exited = (agent: AgentInfo): AgentInfo => ({ ...agent, status: "exited" });
+    const keys = (agents: AgentInfo[], listed = sessions) =>
+      active({ agents, sessions: listed }).map((r) => r.key);
+    const without = (file: string) => sessions.filter((s) => s.file !== file);
+
+    it("drops an agent whose pi exits, until it restarts", () => {
+      expect(keys([inWt, other])).toEqual(["wt", "other"]);
+      expect(keys([inWt, exited(other)])).toEqual(["wt"]);
+      expect(keys([inWt, { ...other, status: "starting" }])).toEqual(["wt", "other"]);
+    });
+
+    it("drops the agents of a removed worktree: exited, closed, then their sessions gone", () => {
+      expect(keys([exited(inWt), other])).toEqual(["other"]);
+      expect(keys([other])).toEqual(["other"]);
+      expect(keys([other], without("f-wt"))).toEqual(["other"]);
+    });
+
+    it("keeps an agent whose worktree went missing outside pi-code: its pi still runs", () => {
+      const missing = sessions.map((s) => (s.file === "f-wt" ? { ...s, layout: wt(true) } : s));
+      expect(keys([inWt, other], missing)).toEqual(["wt", "other"]);
+    });
   });
 });

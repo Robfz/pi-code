@@ -96,10 +96,19 @@ function holdFetch(
 }
 
 const nav = () => screen.getByRole("navigation", { name: "Conversations" });
-const row = (name: RegExp | string) =>
-  within(nav())
+const active = () => within(nav()).getByRole("group", { name: "Active" });
+/** A row in the project groups (live rows also show under Active). */
+const row = (name: RegExp | string) => {
+  const live = within(nav()).queryByRole("group", { name: "Active" });
+  return within(nav())
     .getAllByTestId("sidebar-row")
-    .find((li) => within(li).queryByText(name) !== null) as HTMLElement;
+    .find((li) => !live?.contains(li) && within(li).queryByText(name) !== null) as HTMLElement;
+};
+/** Waits for `name`'s project-group row. */
+async function findRow(name: string): Promise<HTMLElement> {
+  await within(nav()).findAllByText(name);
+  return row(name);
+}
 const titles = (group: string) =>
   within(within(nav()).getByRole("group", { name: group }))
     .getAllByTestId("sidebar-row-title")
@@ -149,12 +158,12 @@ describe("Sidebar", () => {
       ],
       { "/home/me/pi-code": "main", "/home/me/phoenix/phoenix": "stale" },
     );
-    await within(nav()).findByText("Desktop design doc");
+    await within(nav()).findAllByText("Desktop design doc");
     const groups = within(nav())
       .getAllByRole("group")
       .map((g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent);
     // Kepi/phoenix holds only a never-prompted agent: it comes last.
-    expect(groups).toEqual(["pi-code", "phoenix/phoenix", "Kepi/phoenix"]);
+    expect(groups).toEqual(["Active", "pi-code", "phoenix/phoenix", "Kepi/phoenix"]);
     expect(titles("pi-code")).toEqual(["Desktop design doc", "Refactor catalog"]);
     expect(within(nav()).queryByText("Held")).toBeNull();
     const piCode = within(nav()).getByRole("group", { name: "pi-code" });
@@ -189,7 +198,7 @@ describe("Sidebar", () => {
       ],
       [session({ file: "free", name: "Disk one" })],
     );
-    await within(nav()).findByText("Ready one");
+    await within(nav()).findAllByText("Ready one");
     const mark = (name: string) =>
       within(row(name))
         .queryAllByRole("img")
@@ -238,7 +247,7 @@ describe("Sidebar", () => {
   it("navigates to a live row", async () => {
     const { router, calls } = await renderSidebar();
     baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
-    await userEvent.setup().click(await within(nav()).findByRole("link", { name: /Live one/ }));
+    await userEvent.setup().click(within(await findRow("Live one")).getByRole("link"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/agents")).toBe(false);
   });
@@ -341,10 +350,10 @@ describe("Sidebar", () => {
     ]);
     expect(await screen.findByTestId("dialog-confirm")).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(within(nav()).getByRole("link", { name: /Other one/ }));
+    await user.click(within(row("Other one")).getByRole("link"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
     expect(screen.queryByTestId("dialog-confirm")).toBeNull();
-    await user.click(within(nav()).getByRole("link", { name: /Asking one/ }));
+    await user.click(within(row("Asking one")).getByRole("link"));
     expect(await screen.findByTestId("dialog-confirm")).toBeInTheDocument();
     expect(calls.some((c) => c.url.endsWith("/ui-responses"))).toBe(false);
   });
@@ -372,7 +381,7 @@ describe("Sidebar", () => {
     );
     baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
     const user = userEvent.setup();
-    const button = await within(nav()).findByRole("button", {
+    const button = within(await findRow("Live one")).getByRole("button", {
       name: "Stop or delete Live one (project)",
     });
 
@@ -398,7 +407,9 @@ describe("Sidebar", () => {
     baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
     const user = userEvent.setup();
     await user.click(
-      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+      within(await findRow("Live one")).getByRole("button", {
+        name: "Stop or delete Live one (project)",
+      }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
     await user.click(within(dialog).getByRole("button", { name: "Stop" }));
@@ -413,7 +424,9 @@ describe("Sidebar", () => {
     baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/a1.jsonl" })]);
     const user = userEvent.setup();
     await user.click(
-      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+      within(await findRow("Live one")).getByRole("button", {
+        name: "Stop or delete Live one (project)",
+      }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
@@ -433,14 +446,16 @@ describe("Sidebar", () => {
     ]);
     const user = userEvent.setup();
     await user.click(
-      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+      within(await findRow("Live one")).getByRole("button", {
+        name: "Stop or delete Live one (project)",
+      }),
     );
     let dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
     await user.click(within(dialog).getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(drop).toHaveBeenCalledWith("a1"));
 
     await user.click(
-      within(nav()).getByRole("button", { name: "Stop or delete Third one (project)" }),
+      within(row("Third one")).getByRole("button", { name: "Stop or delete Third one (project)" }),
     );
     dialog = await screen.findByRole("dialog", { name: "Stop or delete Third one?" });
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
@@ -461,7 +476,9 @@ describe("Sidebar", () => {
     baseline([makeAgent({ id: "a1", sessionName: "Live one", sessionFile: "/s/old.jsonl" })]);
     const user = userEvent.setup();
     await user.click(
-      await within(nav()).findByRole("button", { name: "Stop or delete Live one (project)" }),
+      within(await findRow("Live one")).getByRole("button", {
+        name: "Stop or delete Live one (project)",
+      }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Stop or delete Live one?" });
     sendFrame({
@@ -481,7 +498,9 @@ describe("Sidebar", () => {
     baseline([makeAgent({ id: "a1", sessionName: "Fresh one" })]);
     const user = userEvent.setup();
     await user.click(
-      await within(nav()).findByRole("button", { name: "Stop or delete Fresh one (project)" }),
+      within(await findRow("Fresh one")).getByRole("button", {
+        name: "Stop or delete Fresh one (project)",
+      }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Stop or delete Fresh one?" });
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
@@ -604,15 +623,17 @@ describe("Sidebar", () => {
     await waitFor(() => expect(searches).toEqual(["phoe"]), { timeout: SEARCH_DEBOUNCE_MS * 5 });
 
     expect(await within(nav()).findByText("Ancient phoenix")).toBeInTheDocument();
-    expect(within(nav()).getByText("Phoenix agent")).toBeInTheDocument();
-    expect(within(nav()).getByText("Rise from phoenix")).toBeInTheDocument();
+    expect(row("Phoenix agent")).toBeDefined();
+    expect(row("Rise from phoenix")).toBeDefined();
+    // Active lists the same agents.
+    expect(titles("Active").sort()).toEqual(["Phoenix agent", "Rise from phoenix"]);
     expect(within(nav()).queryByText("Unrelated")).toBeNull();
     expect(within(nav()).queryByText("Recent window row")).toBeNull();
     expect(within(nav()).queryByText("Held by agent")).toBeNull();
 
     await user.clear(within(nav()).getByRole("searchbox"));
     expect(within(nav()).getByText("Recent window row")).toBeInTheDocument();
-    expect(within(nav()).getByText("Unrelated")).toBeInTheDocument();
+    expect(titles("Active")).toContain("Unrelated");
     expect(within(nav()).queryByText("Ancient phoenix")).toBeNull();
     expect(searches).toEqual(["phoe"]);
   });
@@ -624,7 +645,7 @@ describe("Sidebar", () => {
         : undefined,
     );
     baseline([makeAgent({ id: "a1", sessionName: "Unrelated", sessionFile: "held" })]);
-    await within(nav()).findByText("Unrelated");
+    await within(nav()).findAllByText("Unrelated");
     await userEvent.setup().type(within(nav()).getByRole("searchbox"), "phoenix");
     expect(await within(nav()).findByText("No matches.")).toBeInTheDocument();
     expect(within(nav()).queryByText("Phoenix notes")).toBeNull();
@@ -679,7 +700,7 @@ describe("Sidebar", () => {
       call.url === "/api/sessions" && call.search !== "" ? [200, { sessions: [] }] : undefined,
     );
     baseline([makeAgent({ id: "a1", sessionName: "Live one" })]);
-    await within(nav()).findByText("Live one");
+    await within(nav()).findAllByText("Live one");
     await userEvent.setup().type(within(nav()).getByRole("searchbox"), "zzz");
     expect(await within(nav()).findByText("No matches.")).toBeInTheDocument();
     expect(within(nav()).queryByText("Live one")).toBeNull();
@@ -696,6 +717,86 @@ describe("Sidebar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Sidebar Active section", () => {
+  const groupNames = () =>
+    within(nav())
+      .getAllByRole("group")
+      .map((g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent);
+
+  it("lists every live agent above the groups, with its project, by last prompt", async () => {
+    await renderSidebar("/agents/alpha");
+    baseline(
+      [
+        makeAgent({
+          id: "alpha",
+          cwd: "/home/me/alpha",
+          sessionName: "Alpha work",
+          sessionFile: "fa",
+        }),
+        makeAgent({
+          id: "beta",
+          cwd: "/home/me/beta",
+          sessionName: "Beta work",
+          sessionFile: "fb",
+        }),
+        makeAgent({ id: "gone", cwd: "/home/me/alpha", sessionName: "Exited", status: "exited" }),
+      ],
+      [
+        session({ file: "fa", cwd: "/home/me/alpha", lastPromptAt: recent(5) }),
+        session({ file: "fb", cwd: "/home/me/beta", lastPromptAt: recent(1) }),
+        session({ file: "free", cwd: "/home/me/alpha", name: "On disk", lastPromptAt: recent(0) }),
+      ],
+    );
+    await within(nav()).findByRole("group", { name: "Active" });
+    expect(groupNames()).toEqual(["Active", "alpha", "beta"]);
+    expect(titles("Active")).toEqual(["Beta work", "Alpha work"]);
+    const alpha = within(active())
+      .getAllByTestId("sidebar-row")
+      .find((li) => within(li).queryByText("Alpha work")) as HTMLElement;
+    expect(within(alpha).getByText("alpha")).toHaveClass("text-muted-foreground");
+    expect(within(alpha).getByRole("link")).toHaveAttribute("aria-current", "page");
+    // Neither collapsible nor pinnable: its only buttons are the rows' \u00d7.
+    expect(
+      within(active())
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Stop or delete Beta work (beta)", "Stop or delete Alpha work (alpha)"]);
+    // Still listed in their groups.
+    expect(titles("alpha")).toEqual(["On disk", "Alpha work", "Exited"]);
+  });
+
+  it("is hidden without a live agent", async () => {
+    await renderSidebar();
+    baseline(
+      [makeAgent({ id: "x", sessionName: "Exited", status: "exited" })],
+      [session({ file: "free", name: "On disk" })],
+    );
+    await within(nav()).findByText("On disk");
+    expect(within(nav()).queryByRole("group", { name: "Active" })).toBeNull();
+  });
+
+  it("drops a row when its pi exits or its agent closes, and hides once empty", async () => {
+    await renderSidebar();
+    const one = makeAgent({ id: "a1", sessionName: "One", startedAt: recent(1) });
+    const two = makeAgent({ id: "a2", sessionName: "Two", startedAt: recent(2) });
+    baseline([one, two]);
+    await within(nav()).findByRole("group", { name: "Active" });
+    expect(titles("Active")).toEqual(["One", "Two"]);
+
+    // Stop, Delete and worktree removal all end with these two frames per agent.
+    act(() => sendFrame({ type: "agent", agent: { ...one, status: "exited" } }));
+    expect(titles("Active")).toEqual(["Two"]);
+    expect(titles("project")).toEqual(["One", "Two"]);
+    act(() => sendFrame({ type: "agent", agent: { ...one, status: "starting" } }));
+    expect(titles("Active")).toEqual(["One", "Two"]);
+    act(() => sendFrame({ type: "agent_closed", agentId: "a1" }));
+    expect(titles("Active")).toEqual(["Two"]);
+    // Closed while disconnected: the next baseline leaves it out.
+    act(() => baseline([]));
+    expect(within(nav()).queryByRole("group", { name: "Active" })).toBeNull();
   });
 });
 
@@ -805,11 +906,11 @@ describe("Sidebar with layout repos", () => {
   it("nests checkouts in the repo group, the container's rows under its header", async () => {
     await renderSidebar();
     layoutBaseline();
-    await within(nav()).findByText("Release checklist");
+    await within(nav()).findAllByText("Release checklist");
     const topLevel = within(nav())
       .getAllByRole("group")
       .filter((g) => g.parentElement?.closest("[role=group]") === null);
-    expect(topLevel.map(groupName)).toEqual(["pi-code", "dotfiles"]);
+    expect(topLevel.map(groupName)).toEqual(["Active", "pi-code", "dotfiles"]);
     // The worktree without a prompt yet comes last.
     expect(within(repo()).getAllByRole("group").map(groupName)).toEqual([
       "main",
@@ -829,12 +930,22 @@ describe("Sidebar with layout repos", () => {
     expect(within(worktree("main")).getByTitle("Branch")).toHaveTextContent("main");
     expect(within(worktree("fresh")).getByTitle("Branch")).toHaveTextContent("fresh");
     expect(within(worktree("worktree-support")).queryByTitle("Branch")).toBeNull();
+    // Under Active, a checkout's row is labelled with its repo and checkout.
+    const stillRunning = within(active())
+      .getAllByTestId("sidebar-row")
+      .find((li) => within(li).queryByText("Still running")) as HTMLElement;
+    expect(within(stillRunning).getByText("pi-code/old-spike")).toBeInTheDocument();
+    expect(
+      within(stillRunning).getByRole("button", {
+        name: "Stop or delete Still running (pi-code/old-spike)",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("offers per-role header actions", async () => {
     await renderSidebar();
     layoutBaseline();
-    await within(nav()).findByText("Release checklist");
+    await within(nav()).findAllByText("Release checklist");
     const buttons = (group: HTMLElement) =>
       within(group)
         .getAllByRole("button")
@@ -1125,7 +1236,8 @@ describe("Sidebar with layout repos", () => {
       within(group)
         .queryAllByRole("img")
         .map((img) => img.getAttribute("aria-label"));
-    expect(within(nav()).queryByText("Release checklist")).toBeNull();
+    expect(within(repo()).queryByText("Release checklist")).toBeNull();
+    expect(titles("Active")).toContain("Release checklist");
     // "Still running" streams in old-spike; "Exited there" failed.
     expect(marks(repo())).toEqual(["Working", "Failed"]);
     expect(within(repo()).getByRole("img", { name: "Failed" })).toHaveClass(
@@ -1168,12 +1280,12 @@ describe("Sidebar with layout repos", () => {
   it("uncollapses the groups of the conversation it opens", async () => {
     const { calls } = await renderSidebar("/agents/main-agent");
     layoutBaseline({ pinned: [], collapsed: [R, "/home/me/dotfiles"] });
-    expect(await within(nav()).findByText("Release checklist")).toBeInTheDocument();
+    await waitFor(() => expect(within(repo()).getByText("Release checklist")).toBeInTheDocument());
     expect(patches(calls)).toEqual([{ collapsed: { [R]: false } }]);
     expect(within(nav()).queryByText("Dotfiles")).toBeNull();
     // Collapsing it again while it's open sticks.
     await userEvent.setup().click(toggle(repo()) as HTMLElement);
-    await waitFor(() => expect(within(nav()).queryByText("Release checklist")).toBeNull());
+    await waitFor(() => expect(within(repo()).queryByText("Release checklist")).toBeNull());
   });
 
   it("uncollapses the plain folder of the conversation it opens", async () => {
@@ -1185,7 +1297,11 @@ describe("Sidebar with layout repos", () => {
       {},
       { pinned: [], collapsed: [dotfiles] },
     );
-    expect(await within(nav()).findByText("Dotfiles")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(within(nav()).getByRole("group", { name: "dotfiles" })).getByText("Dotfiles"),
+      ).toBeInTheDocument(),
+    );
     expect(patches(calls)).toEqual([{ collapsed: { [dotfiles]: false } }]);
   });
 
@@ -1209,7 +1325,11 @@ describe("Sidebar with layout repos", () => {
       {},
       { pinned: [], collapsed: [R, wt] },
     );
-    expect(await within(nav()).findByText("Design worktrees")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(worktree("worktree-support")).getByText("Design worktrees"),
+      ).toBeInTheDocument(),
+    );
     expect(patches(calls)).toEqual([{ collapsed: { [wt]: false, [R]: false } }]);
   });
 
@@ -1263,7 +1383,7 @@ describe("Sidebar with layout repos", () => {
         : undefined,
     );
     layoutBaseline();
-    await within(nav()).findByText("Release checklist");
+    await within(nav()).findAllByText("Release checklist");
     await userEvent.setup().click(within(repo()).getByRole("button", { name: "Pin pi-code" }));
     expect(await screen.findByText("Disk full")).toBeInTheDocument();
     expect(within(repo()).getByRole("button", { name: "Pin pi-code" })).toHaveAttribute(

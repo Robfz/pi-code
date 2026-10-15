@@ -33,6 +33,9 @@ function renderApp(
 
 const sidebar = () => screen.queryByRole("navigation", { name: "Conversations" });
 const toggle = () => screen.getByRole("button", { name: "Toggle sidebar" });
+/** The sidebar's Active section (live rows also show in their project groups). */
+const active = (container: HTMLElement) =>
+  within(container).findByRole("group", { name: "Active" });
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -133,7 +136,7 @@ describe("desktop shell (≥1024px)", () => {
     sendBaseline([alpha]);
     const nav = await screen.findByRole("navigation", { name: "Conversations" });
     const user = userEvent.setup();
-    await user.click(await within(nav).findByRole("link", { name: /Alpha work/ }));
+    await user.click(await within(await active(nav)).findByRole("link", { name: /Alpha work/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
     await user.click(within(nav).getByRole("link", { name: "Settings" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings"));
@@ -159,7 +162,7 @@ describe("desktop shell (≥1024px)", () => {
     expect(prompt).not.toContainElement(document.activeElement as HTMLElement);
 
     const nav = await screen.findByRole("navigation", { name: "Conversations" });
-    await user.click(await within(nav).findByRole("link", { name: /Beta work/ }));
+    await user.click(await within(await active(nav)).findByRole("link", { name: /Beta work/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
     expect(await screen.findByRole("heading", { name: "Beta work" })).toBeInTheDocument();
     expect(screen.queryByTestId("trust-sheet")).toBeNull();
@@ -208,10 +211,10 @@ describe("phone shell (<1024px)", () => {
     const user = userEvent.setup();
     await user.click(within(header as HTMLElement).getByRole("button", { name: "Conversations" }));
     const sheet = await screen.findByRole("dialog", { name: "Conversations" });
-    const current = await within(sheet).findByRole("link", { name: /Alpha work/ });
+    const current = await within(await active(sheet)).findByRole("link", { name: /Alpha work/ });
     expect(current).toHaveAttribute("aria-current", "page");
 
-    await user.click(within(sheet).getByRole("link", { name: /Beta work/ }));
+    await user.click(within(await active(sheet)).getByRole("link", { name: /Beta work/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a2"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(await screen.findByRole("heading", { name: "Beta work" })).toBeInTheDocument();
