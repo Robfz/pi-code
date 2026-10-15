@@ -70,15 +70,7 @@ function stubRpc() {
 
 beforeEach(() => {
   useConversationUi.getState().reset();
-  // cmdk's list measures itself and scrolls to the selected item; jsdom has neither.
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
+  // cmdk scrolls to the selected item; jsdom lacks scrollIntoView.
   Element.prototype.scrollIntoView = () => {};
 });
 

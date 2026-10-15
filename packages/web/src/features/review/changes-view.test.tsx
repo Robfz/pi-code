@@ -12,16 +12,8 @@ import { useReviewStore } from "./review-state";
 
 beforeAll(stubCanvas);
 beforeEach(() => {
-  // jsdom has neither; cmdk scrolls its selected item into view and measures its list.
+  // jsdom lacks it; cmdk scrolls its selected item into view.
   Element.prototype.scrollIntoView = () => {};
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
 });
 afterEach(() => {
   vi.unstubAllGlobals();
