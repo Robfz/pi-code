@@ -138,11 +138,15 @@ describe("Markdown styles", () => {
 });
 
 describe("code highlighting", () => {
-  it("highlights fenced code with Shiki once the plugin has loaded", async () => {
+  it("highlights fenced code in the palette's syntax colours once the plugin has loaded", async () => {
     const { container } = render(<Markdown text={"```ts\nconst answer: number = 42;\n```"} />);
     expect(container).toHaveTextContent("const answer: number = 42;");
     await waitFor(
-      () => expect(container.querySelector("code [style*='--shiki-dark: #']")).not.toBeNull(),
+      () =>
+        expect(within(container).getByText("const")).toHaveStyle({
+          "--sdm-c": "var(--syntax-keyword)",
+          "--shiki-dark": "var(--syntax-keyword)",
+        }),
       { timeout: 5_000 },
     );
     expect(container).toHaveTextContent("const answer: number = 42;");

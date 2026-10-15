@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { Palette } from "@/lib/palettes";
 
 /** How much of each turn the transcript shows (`docs/design/09-ui-overhaul.md`, "Density"). */
 export type Density = "compact" | "balanced" | "detailed";
@@ -16,6 +17,8 @@ export const DENSITY_LABEL: Record<Density, { name: string; description: string 
 interface UiPrefs {
   density: Density;
   setDensity(density: Density): void;
+  palette: Palette;
+  setPalette(palette: Palette): void;
 }
 
 export const useUiPrefs = create<UiPrefs>()(
@@ -23,6 +26,8 @@ export const useUiPrefs = create<UiPrefs>()(
     (set) => ({
       density: "balanced",
       setDensity: (density) => set({ density }),
+      palette: "neutral",
+      setPalette: (palette) => set({ palette }),
     }),
     {
       name: "pi-code:ui-prefs",

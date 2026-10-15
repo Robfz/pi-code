@@ -6,9 +6,9 @@ The approved reference is the mockup [`mockups/ui-overhaul.html`](mockups/ui-ove
 
 ## Tokens
 
-Neutrals have zero chroma; there is no accent hue. Liveness and actions use the foreground itself: the send button is solid foreground, the shimmer sweeps from muted to foreground, focus rings and the active sidebar row are neutral. The only hue in the chrome is `--link`; every other colour is status or diff.
+The default palette, neutral, is the mockup's: neutrals have zero chroma and there is no accent hue. Liveness and actions use the foreground itself: the send button is solid foreground, the shimmer sweeps from muted to foreground, focus rings and the active sidebar row are neutral. The only hue in the chrome is `--link`; every other colour is status or diff. The other palettes ([Palettes](#palettes)) recolour the same tokens.
 
-`src/index.css` sets shadcn's variables to the mockup's values and adds the variables shadcn lacks (marked *new*), each exposed to Tailwind through `@theme inline` (`--color-<name>: var(--<name>)`).
+`src/index.css` sets shadcn's variables to the mockup's values and adds the variables shadcn lacks (marked *new*), each exposed to Tailwind through `@theme inline` (`--color-<name>: var(--<name>)`). The tables below are neutral's values.
 
 ### Neutrals
 
@@ -61,6 +61,27 @@ No component uses raw palette classes (`emerald-*`, `amber-*`, `red-*`, `green-*
 | Sidebar marks, Home badges, `/sessions` badges, attention | the status vocabulary (below) |
 | Connection indicator | live: `status-online` dot; connecting, reconnecting: pulsing `status-idle` dot with its label; offline: `status-error` dot with its label |
 
+### Syntax
+
+Code blocks and the diff viewer share ten tokens: `--syntax-fg`, `-keyword`, `-string`, `-function`, `-comment`, `-number`, `-property`, `-variable`, `-type`, `-punctuation`. Neutral's are Vitesse Light / Dark.
+
+### Palettes
+
+Two independent choices, both in Settings: the theme (System, Dark, Light; next-themes puts `.dark` on `<html>`) and the palette, persisted as `palette` in `store/ui-prefs.ts` (`lib/palettes.ts`). Every palette has a light and a dark variant, so System keeps working.
+
+| Palette | Light / dark | Primary, ring | Ultraspawn |
+|---|---|---|---|
+| Neutral (default) | the tables above | foreground | purple |
+| Catppuccin | Latte / Mocha | mauve | pink |
+| Rosé Pine | Dawn / Main | iris | iris |
+| Nord | Snow Storm / Polar Night | frost (nord10 / nord8) | nord15 |
+
+- **Where.** `data-palette` on `<html>`, set by the app and, before first paint, by an inline script in `index.html` reading the saved preference. Palettes other than neutral live in `src/palettes.css`, imported after `index.css`. Selectors match `<html>` or any element inside it, so the Settings swatches (dots in `primary`, `link`, `status-done`, `ultraspawn` inside their own `data-palette`) show each palette's colours without repeating them. A palette's dark block sets every token its light block does: the light block ties with neutral's `.dark` in specificity and wins by order.
+- **Surfaces** keep neutral's elevation: the sidebar sits below the page in dark and just under it in light, cards one step off the page, popovers above it; hover, hairlines, inputs, chips and the scrollbar are the palette's text colour at neutral's opacities.
+- **Accents.** Neutral stays monochrome. The others tint `--primary`, `--ring` and `--sidebar-primary` with their signature colour, with `--primary-foreground` from the palette's base. Semantics hold across palettes: needs input is yellow, errors red, done and online green (teal or pine where the palette has no green), links blue, ultraspawn purple or pink.
+- **Syntax** follows each palette's own editor theme (Catppuccin: mauve keywords, green strings, blue functions; Rosé Pine: pine keywords, gold strings, rose functions; Nord: nord9 keywords, nord14 strings, nord8 functions).
+- **Contrast.** Values start from each palette's official colours; lightness moves where needed so that text, muted and subtle text, links, errors and syntax reach 4.5:1 on the page and on cards (comments 3:1), and faint text matches neutral's ratio (about 3.4:1 light, 3.2:1 dark).
+
 ## Typography
 
 Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontsource-variable/geist-mono`) for code, commands and search patterns. File paths in tool rows are sans. Text renders with grayscale antialiasing (`antialiased` on `body`). Both are bundled and precached by the service worker (the `woff2` precache glob), so text looks the same on every device and offline.
@@ -90,7 +111,7 @@ Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontso
 
 ## Code and links
 
-- Shiki themes are `vitesse-light` / `vitesse-dark` (`lib/code-highlighter.ts`). The diff viewer (`components/diff/diff-theme.css`) uses the same Vitesse colours for its highlighting, `--card` rows, hairline borders and `diff-add` / `diff-del` tints; wrapped diff lines break between words where they can.
+- Shiki highlights with one theme for light and dark (`lib/code-highlighter.ts`) whose colours are the `--syntax-*` tokens as `var()` strings, its scopes following Vitesse's; switching palette or theme restyles code without highlighting again. The diff viewer (`components/diff/diff-theme.css`) maps highlight.js classes onto the same tokens, on `--card` rows with hairline borders and `diff-add` / `diff-del` tints; wrapped diff lines break between words where they can.
 - Code blocks (Streamdown's `[data-streamdown="code-block"]`) sit on `--card` with a hairline border and 8px radius, under a 32px header holding the language (12px muted) and a copy button; the body is 13px mono, line height 1.6, scrolling horizontally.
 - Inline code is a mono chip: 0.875em on `--chip`, 5px radius.
 - Links are `text-link`, underlined on hover.

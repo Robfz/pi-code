@@ -10,7 +10,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | Live state | `LiveRegistry`: one `GET /api/stream` EventSource per tab feeding a Zustand overview and one Zustand store per opened conversation, through the shared reducer |
 | Client state | Zustand: composer drafts per conversation (`store/drafts.ts`), review state per conversation (`features/review/review-state.ts`), UI preferences |
 | UI | Tailwind v4 + shadcn/ui on the tokens of [`09-ui-overhaul.md`](09-ui-overhaul.md); Geist Sans and Geist Mono, bundled and precached |
-| Markdown / code | Streamdown + `@streamdown/code` (Shiki with the Vitesse themes, loaded on demand; grammars and themes are lazy chunks outside the precache) |
+| Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand, with a theme on the palette's `--syntax-*` tokens; grammars are lazy chunks outside the precache) |
 | Diffs | `@git-diff-view/react` (split when the viewer is ≥1024px wide, unified otherwise) |
 | PWA | `vite-plugin-pwa`, `injectManifest` strategy (custom service worker) |
 | API client | Typed `fetch` wrapper per route (`src/lib/api.ts`, types from `@pi-code/protocol`) + `EventSource` |
@@ -25,7 +25,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/agents/$agentId/tree` | Session tree (phone). On desktop it opens the review pane on its Tree tab and replaces itself with `/agents/$agentId` |
 | `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
-| `/settings` | Notifications permission, transcript density, about |
+| `/settings` | Notifications permission, transcript density, theme, palette, about |
 
 "New conversation" opens the **project picker**: recent projects (`GET /api/projects`, in listing groups) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
 
@@ -160,7 +160,7 @@ Specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Transcript"; in short:
 - **Rows.** `CollapsibleRow` (`components/collapsible-row.tsx`, on Radix Collapsible) is the only disclosure: a borderless 28px row (14px icon, label, and a tail with duration and chevron shown on hover, on focus and while open) whose body opens with a 150ms height animation. Tool calls are `ToolRow`s (Tool renderers, below).
 - **Thinking:** a `Brain` row. Live: "Thinking" with a shimmer and, while collapsed, a one-line preview of the latest line. Done: "Thought for 12s" (from the block's `startedAt` / `endedAt`, else `live.thinkingMs`), "Thought" when the duration is unknown, "Thought (redacted)" without a body. The body is 13px muted text behind a left hairline.
 - **Exploration groups** (Balanced and Compact): two or more consecutive `read`, `grep`, `find`, `ls`, `web_search`, `fetch_content`, `source_check` and `get_search_content` calls, with the thinking between them, fold into one row (`groupSteps`, `transcript/grouping.ts`): "Explored 3 files, 2 searches", or "Exploring · Reading foo.ts" with a shimmer while a child runs. A failed call stays its own row.
-- **Density:** one persisted preference, `density` (`store/ui-prefs.ts`), chosen from the header's density dropdown and in Settings:
+- **Density:** a persisted preference, `density` (`store/ui-prefs.ts`), chosen from the header's density dropdown and in Settings:
   - **Compact:** a finished turn folds its thinking, tool calls and intermediate text into one "Worked for 2m 14s" row, followed by the final text; a live turn shows only its streaming text and the live-status row.
   - **Balanced** (default): every step, exploration grouped, every row collapsed; running `bash` and fallback-renderer rows are expanded while they run.
   - **Detailed:** every step, no grouping, every row expanded, thinking included.
