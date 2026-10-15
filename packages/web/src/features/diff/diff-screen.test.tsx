@@ -71,15 +71,6 @@ const urls = (calls: FetchCall[]) => calls.map((call) => call.url);
 beforeAll(stubCanvas);
 beforeEach(() => {
   stubMatchMedia(() => false);
-  // cmdk's list measures itself; jsdom has no ResizeObserver.
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
 });
 afterEach(() => vi.unstubAllGlobals());
 

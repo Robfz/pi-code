@@ -9,7 +9,7 @@ import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { createAppRouter } from "@/router";
 import { useDrafts } from "@/store/drafts";
-import { stubMatchMedia, stubResizeObserver } from "@/test/dom-stubs";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendBaseline } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
@@ -28,8 +28,6 @@ async function renderApp(
   { desktop, snapshot }: { desktop: boolean; snapshot?: Partial<Snapshot> },
 ) {
   stubMatchMedia((query) => desktop && query === DESKTOP_QUERY);
-  // cmdk's list and the rail's tooltips measure themselves.
-  stubResizeObserver();
   const { calls } = stubFetch((call) => {
     if (call.url === "/api/agents/a1/snapshot")
       return [200, makeSnapshot({ agent: makeAgent({ id: "a1" }), ...snapshot })];

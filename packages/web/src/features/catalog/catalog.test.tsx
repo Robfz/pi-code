@@ -26,13 +26,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * One clock for every default timestamp: sessions built a millisecond apart would otherwise sort
+ * newest first (`compareRecency`) instead of keeping the order a test lists them in.
+ */
+const NOW = Date.now();
+
 function session(patch: Partial<SessionSummary> & { file: string }): SessionSummary {
   return {
     id: patch.file,
     cwd: "/home/me/alpha",
     createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
-    lastPromptAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    updatedAt: new Date(NOW - 4 * 60_000).toISOString(),
+    lastPromptAt: new Date(NOW - 5 * 60_000).toISOString(),
     ...patch,
   };
 }

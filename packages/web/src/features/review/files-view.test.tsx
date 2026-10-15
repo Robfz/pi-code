@@ -21,15 +21,6 @@ beforeAll(stubCanvas);
 let scrolled: Element[];
 beforeEach(() => {
   stubMatchMedia((query) => query === DESKTOP_QUERY);
-  // cmdk's list measures itself; jsdom has no ResizeObserver.
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
   scrolled = [];
   Element.prototype.scrollIntoView = function (this: Element) {
     scrolled.push(this);

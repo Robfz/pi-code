@@ -7,7 +7,7 @@ import { App } from "@/App";
 import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { createAppRouter } from "@/router";
-import { stubMatchMedia, stubResizeObserver } from "@/test/dom-stubs";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendBaseline } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
@@ -151,8 +151,6 @@ describe("desktop shell (≥1024px)", () => {
       .closest("header")?.parentElement;
     expect(column).toContainElement(prompt);
 
-    // Tab lands on the review rail, whose tooltip measures itself.
-    stubResizeObserver();
     const user = userEvent.setup();
     within(prompt).getByRole("button", { name: "Trust" }).focus();
     await user.tab();

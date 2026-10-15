@@ -26,6 +26,14 @@ Element.prototype.setPointerCapture ??= () => {};
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.scrollTo = () => {};
+// jsdom has no ResizeObserver; cmdk lists and Radix poppers measure themselves with one, and a
+// tooltip opens whenever its timer fires between a click's hover and press. This one never
+// reports; tests that need resize notifications stub their own (see `stubElementWidth`).
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 // jsdom has no EventSource; the live registry's streams become scriptable fakes.
 globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 

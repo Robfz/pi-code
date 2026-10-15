@@ -1,6 +1,6 @@
 /**
- * The real entry point (`src/main.ts` under tsx) with two fake-pi agents mid-run: SIGINT /
- * SIGTERM must close both listeners, stop every pi process, and exit 0.
+ * The real entry point (`src/main.ts` under tsx's loader) with two fake-pi agents mid-run:
+ * SIGINT / SIGTERM must close both listeners, stop every pi process, and exit 0.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import {
@@ -24,7 +24,10 @@ import { isAlive } from "./testing/stub-process.ts";
 
 const SERVER_DIR = fileURLToPath(new URL("..", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const TSX = join(SERVER_DIR, "node_modules", ".bin", "tsx");
+// tsx's loader in the server's own process, not the `tsx` CLI: the CLI relays a signal sent to it
+// alone and SIGKILLs its child unless the child acknowledges within 30 ms, which a loaded machine
+// misses (exit 130 / 143, pi processes left behind).
+const TSX_LOADER = import.meta.resolve("tsx");
 const MAIN = join(SERVER_DIR, "src", "main.ts");
 
 function freePort(): Promise<number> {
@@ -75,7 +78,7 @@ async function run(signal: NodeJS.Signals, speed: number): Promise<void> {
   const curatorPort = await freePort();
 
   let output = "";
-  server = spawn(TSX, [MAIN], {
+  server = spawn(process.execPath, ["--import", TSX_LOADER, MAIN], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
