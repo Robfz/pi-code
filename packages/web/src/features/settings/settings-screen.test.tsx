@@ -177,6 +177,26 @@ describe("Settings · theme", () => {
   });
 });
 
+describe("Settings · palette", () => {
+  it("applies the chosen palette to the page", async () => {
+    stubPushApi();
+    useUiPrefs.setState({ palette: "neutral" });
+    renderSettings();
+    const user = userEvent.setup();
+    const neutral = await screen.findByRole("button", { name: "Neutral" });
+    expect(neutral).toHaveAttribute("aria-pressed", "true");
+    expect(document.documentElement.dataset.palette).toBe("neutral");
+    const nord = screen.getByRole("button", { name: "Nord" });
+    await user.click(nord);
+    expect(nord).toHaveAttribute("aria-pressed", "true");
+    expect(neutral).toHaveAttribute("aria-pressed", "false");
+    expect(useUiPrefs.getState().palette).toBe("nord");
+    expect(document.documentElement.dataset.palette).toBe("nord");
+    // Each swatch reads its colours from its own palette's scope.
+    expect(nord.querySelector('[data-palette="nord"]')).not.toBeNull();
+  });
+});
+
 describe("Settings · transcript density", () => {
   it("offers the three densities, the current one pressed", async () => {
     stubPushApi();

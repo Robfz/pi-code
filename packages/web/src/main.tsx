@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { registerServiceWorker } from "./features/pwa/register-sw.ts";
 import "./index.css";
+import "./palettes.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root not found");

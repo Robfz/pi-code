@@ -78,6 +78,11 @@
   --radius: 0.625rem;
   /* The desktop activity rail's width (`review-rail.tsx`). */
   --rail-width: 2.75rem;
+}
+
+/* The neutral palette; `palettes.css` holds the others. */
+:root,
+[data-palette="neutral"] {
   --background: oklch(0.992 0 0);
   --foreground: oklch(0.21 0 0);
   --card: oklch(0.972 0 0);
@@ -115,19 +120,38 @@
   --faint-foreground: oklch(0.63 0 0);
   --link: oklch(0.55 0.15 250);
   --status-input: oklch(0.72 0.16 65);
-  --status-error: var(--destructive);
   --status-done: oklch(0.62 0.14 160);
   --status-online: oklch(0.66 0.17 145);
   --ultraspawn: oklch(0.56 0.2 300);
-  /* The references below resolve on <html>, where next-themes puts `.dark`. */
+  --scrollbar-thumb: oklch(0.3 0 0 / 0.18);
+  /* Vitesse Light, for code blocks and diffs. */
+  --syntax-fg: #393a34;
+  --syntax-keyword: #1e754f;
+  --syntax-string: #b56959;
+  --syntax-function: #59873a;
+  --syntax-comment: #a0ada0;
+  --syntax-number: #2f798a;
+  --syntax-property: #998418;
+  --syntax-variable: #b07d48;
+  --syntax-type: #2e8f82;
+  --syntax-punctuation: #999999;
+}
+
+/*
+ * References resolve where they're declared: on <html>, where next-themes puts `.dark`, and in
+ * each nested palette scope, so a swatch's references follow its own palette.
+ */
+:root,
+[data-palette] {
+  --status-error: var(--destructive);
   --status-working: var(--foreground);
   --status-idle: var(--faint-foreground);
   --diff-add: var(--status-done);
   --diff-del: var(--status-error);
-  --scrollbar-thumb: oklch(0.3 0 0 / 0.18);
 }
 
-.dark {
+.dark,
+.dark [data-palette="neutral"] {
   --background: oklch(0.16 0 0);
   --foreground: oklch(0.93 0 0);
   --card: oklch(0.188 0 0);
@@ -164,6 +188,17 @@
   --status-online: oklch(0.74 0.17 145);
   --ultraspawn: oklch(0.72 0.16 300);
   --scrollbar-thumb: oklch(0.96 0 0 / 0.14);
+  /* Vitesse Dark. */
+  --syntax-fg: #dbd7cacc;
+  --syntax-keyword: #4d9375;
+  --syntax-string: #c98a7d;
+  --syntax-function: #80a665;
+  --syntax-comment: #758575;
+  --syntax-number: #4c9a91;
+  --syntax-property: #b8a965;
+  --syntax-variable: #bd976a;
+  --syntax-type: #5da994;
+  --syntax-punctuation: #666f78;
 }
 
 @layer base {

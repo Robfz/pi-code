@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage, getHealth } from "@/lib/api";
+import { PALETTE_LABEL, PALETTES } from "@/lib/palettes";
 import {
   disablePush,
   enablePush,
@@ -14,6 +15,7 @@ import {
   readPushStatus,
 } from "@/lib/push";
 import { queryKeys } from "@/lib/query-client";
+import { cn } from "@/lib/utils";
 import { PlaceholderScreen } from "@/routes/placeholder";
 import { DENSITIES, DENSITY_LABEL, useUiPrefs } from "@/store/ui-prefs";
 
@@ -173,6 +175,41 @@ function ThemeSection() {
   );
 }
 
+/** Colour roles a palette's swatch shows, read from its own `data-palette` scope. */
+const SWATCH = ["bg-primary", "bg-link", "bg-status-done", "bg-ultraspawn"];
+
+function PaletteSection() {
+  const palette = useUiPrefs((s) => s.palette);
+  const setPalette = useUiPrefs((s) => s.setPalette);
+  return (
+    <Section title="Palette">
+      <div className="flex flex-wrap gap-2">
+        {PALETTES.map((option) => (
+          <Button
+            key={option}
+            size="sm"
+            variant={palette === option ? "default" : "outline"}
+            aria-pressed={palette === option}
+            onClick={() => setPalette(option)}
+          >
+            <span
+              data-palette={option}
+              data-icon="inline-start"
+              aria-hidden
+              className="flex gap-0.5 rounded-full bg-background p-1 ring-1 ring-border"
+            >
+              {SWATCH.map((color) => (
+                <span key={color} className={cn("size-1.5 rounded-full", color)} />
+              ))}
+            </span>
+            {PALETTE_LABEL[option]}
+          </Button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function AboutSection() {
   const health = useQuery({ queryKey: queryKeys.health, queryFn: getHealth, retry: false });
   return (
@@ -197,6 +234,7 @@ export function SettingsScreen() {
         <NotificationsSection />
         <DensitySection />
         <ThemeSection />
+        <PaletteSection />
         <AboutSection />
       </div>
     </PlaceholderScreen>

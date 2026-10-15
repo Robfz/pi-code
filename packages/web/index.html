@@ -13,6 +13,13 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>pi-code</title>
+    <script>
+      // The saved palette (`src/lib/palettes.ts`) before first paint; the app keeps it in sync.
+      try {
+        const palette = JSON.parse(localStorage.getItem("pi-code:ui-prefs")).state.palette;
+        if (palette) document.documentElement.dataset.palette = palette;
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
