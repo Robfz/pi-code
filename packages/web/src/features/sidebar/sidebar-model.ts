@@ -5,6 +5,7 @@
 
 import {
   type AgentInfo,
+  compareRecency,
   type Recency,
   type RepoLayout,
   recencyOf,
@@ -77,11 +78,52 @@ export function hiddenMarks(rows: readonly SidebarRow[]): AgentStatusKind[] {
   return [...(agents.some(isWorking) ? (["working"] as const) : []), ...(urgent ? [urgent] : [])];
 }
 
+/** A checkout sub-group's full label: `repo/checkout`. */
+export function checkoutLabel(repo: string, checkout: string): string {
+  return `${repo}/${checkout}`;
+}
+
+/** A group's row lists with their labels: its own, then each checkout's (`checkoutLabel`). */
+function labelledRows(group: SidebarGroup): { label: string; rows: SidebarRow[] }[] {
+  const own = { label: group.label, rows: group.items };
+  return group.kind === "folder"
+    ? [own]
+    : [
+        own,
+        ...group.worktrees.map((worktree) => ({
+          label: checkoutLabel(group.label, worktree.label),
+          rows: worktree.items,
+        })),
+      ];
+}
+
 /** Every row of a group, its checkouts' included. */
 export function allRows(group: SidebarGroup): SidebarRow[] {
-  return group.kind === "folder"
-    ? group.items
-    : [...group.items, ...group.worktrees.flatMap((worktree) => worktree.items)];
+  return labelledRows(group).flatMap(({ rows }) => rows);
+}
+
+/** A live agent's row in the Active section, with the label of the group it sits in. */
+export interface ActiveRow extends SidebarRow {
+  agent: AgentInfo;
+  /** The group label, `repo/checkout` for a checkout's rows. */
+  project: string;
+}
+
+/**
+ * The Active section: every live agent row of `groups` (so search filters it as it does them),
+ * in row order (`compareRecency`).
+ */
+export function activeRows(groups: readonly SidebarGroup[]): ActiveRow[] {
+  return groups
+    .flatMap(labelledRows)
+    .flatMap(({ label, rows }) =>
+      rows.flatMap((row) =>
+        row.agent !== undefined && isLive(row.agent)
+          ? [{ ...row, agent: row.agent, project: label }]
+          : [],
+      ),
+    )
+    .sort((a, b) => compareRecency(a.recency, b.recency));
 }
 
 const byLabel = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });

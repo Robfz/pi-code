@@ -2,6 +2,7 @@ import type { AgentInfo, SidebarPatch } from "@pi-code/protocol";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
+  ActivityIcon,
   ChevronRightIcon,
   GitBranchIcon,
   LoaderIcon,
@@ -38,8 +39,10 @@ import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { useLive, useLiveRegistry } from "@/store/context";
 import {
+  activeRows,
   allRows,
   buildSidebarGroups,
+  checkoutLabel,
   hiddenMarks,
   liveBranch,
   type SidebarRow,
@@ -67,6 +70,7 @@ const rowClass =
 function Row({
   row,
   folder,
+  project,
   now,
   current,
   pending,
@@ -78,6 +82,8 @@ function Row({
   row: SidebarRow;
   /** The group's label, to tell apart same-titled rows in the `×`'s label. */
   folder: string;
+  /** Shown after the title (Active rows). */
+  project?: string | undefined;
   now: number;
   current: boolean;
   pending: boolean;
@@ -96,6 +102,14 @@ function Row({
       <span data-testid="sidebar-row-title" className="min-w-0 flex-1 truncate">
         {row.title}
       </span>
+      {project !== undefined && (
+        <span
+          className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"
+          title={project}
+        >
+          {project}
+        </span>
+      )}
       <time
         dateTime={new Date(row.recency.at).toISOString()}
         className="shrink-0 text-xs text-muted-foreground"
@@ -266,12 +280,12 @@ function Group({
 }
 
 /**
- * Conversations grouped by folder or repo (`groupListing`), with New conversation, search,
- * per-folder `+`, Pin and New worktree on repo groups, Remove worktree on linked ones, Stop or
- * Delete on every row (`×`) and settings in the footer. Group headers collapse, except the main
- * checkout's; pins and collapsed groups are the server's `sidebar` state. `action` goes before
- * New conversation (the shell's toggle, the sheet's close); `onSelect` runs whenever a row, `+`
- * or a new conversation is picked.
+ * Every live agent under Active (`activeRows`), then conversations grouped by folder or repo
+ * (`groupListing`), with New conversation, search, per-folder `+`, Pin and New worktree on repo
+ * groups, Remove worktree on linked ones, Stop or Delete on every row (`×`) and settings in the
+ * footer. Group headers collapse, except the main checkout's; pins and collapsed groups are the
+ * server's `sidebar` state. `action` goes before New conversation (the shell's toggle, the
+ * sheet's close); `onSelect` runs whenever a row, `+` or a new conversation is picked.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
   const { loaded, agents, sessions, branches, sidebar } = useLive(
@@ -328,6 +342,8 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
       pinned,
     });
   }, [agents, sessions, sidebar, searching, query, search.data]);
+  const active = useMemo(() => activeRows(groups), [groups]);
+  const activeLabelId = useId();
 
   const setSidebar = (patch: SidebarPatch) => {
     registry.setSidebar(patch).catch((error: unknown) => {
@@ -379,30 +395,32 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
     </Button>
   );
 
-  /** Rows of one folder; in a `missing` one only live agents open, but every row deletes. */
+  /** One row; `disabled` blocks opening only (a `missing` folder's), every row deletes. */
+  const rowItem = (row: SidebarRow, folder: string, disabled: boolean, project?: string) => (
+    <Row
+      key={row.key}
+      row={row}
+      folder={folder}
+      project={project}
+      now={now}
+      current={row.agent !== undefined && row.agent.id === currentId}
+      pending={
+        row.agent !== undefined
+          ? restart.isPending && restart.variables === row.agent.id
+          : pending !== undefined &&
+            "sessionFile" in pending &&
+            pending.sessionFile === row.sessionFile
+      }
+      disabled={busy || disabled}
+      onOpen={(sessionFile) => open.mutate({ sessionFile })}
+      onRestart={(agent) => restart.mutate(agent.id)}
+      onSelect={select}
+    />
+  );
+
+  /** Rows of one folder; in a `missing` one only live agents open. */
   const rowList = (rows: SidebarRow[], folder: string, missing: boolean) => (
-    <ul className="flex flex-col gap-0.5">
-      {rows.map((row) => (
-        <Row
-          key={row.key}
-          row={row}
-          folder={folder}
-          now={now}
-          current={row.agent !== undefined && row.agent.id === currentId}
-          pending={
-            row.agent !== undefined
-              ? restart.isPending && restart.variables === row.agent.id
-              : pending !== undefined &&
-                "sessionFile" in pending &&
-                pending.sessionFile === row.sessionFile
-          }
-          disabled={busy || missing}
-          onOpen={(sessionFile) => open.mutate({ sessionFile })}
-          onRestart={(agent) => restart.mutate(agent.id)}
-          onSelect={select}
-        />
-      ))}
-    </ul>
+    <ul className="flex flex-col gap-0.5">{rows.map((row) => rowItem(row, folder, missing))}</ul>
   );
 
   return (
@@ -470,6 +488,22 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             {searching ? "No matches." : "No conversations yet."}
           </p>
         )}
+        {active.length > 0 && (
+          // biome-ignore lint/a11y/useSemanticElements: a list of rows, not a form <fieldset>
+          <div role="group" aria-labelledby={activeLabelId} className="flex flex-col gap-0.5">
+            <div className="pt-3 pr-1 pb-0.5 pl-2 text-xs text-muted-foreground">
+              <h2 className="flex min-h-6 items-center gap-2">
+                <ActivityIcon aria-hidden className="size-3.5 shrink-0" />
+                <span id={activeLabelId} className="font-medium text-foreground/80">
+                  Active
+                </span>
+              </h2>
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {active.map((row) => rowItem(row, row.project, false, row.project))}
+            </ul>
+          </div>
+        )}
         {groups.map((group) =>
           group.kind === "folder" ? (
             <Group
@@ -507,7 +541,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
               {group.worktrees.length > 0 && (
                 <div className={cn(worktreeSubgroupGuideClass, "gap-0.5")}>
                   {group.worktrees.map((worktree) => {
-                    const name = `${group.label}/${worktree.label}`;
+                    const name = checkoutLabel(group.label, worktree.label);
                     return (
                       <Group
                         key={worktree.cwd}
