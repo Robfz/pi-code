@@ -3,7 +3,16 @@
  * theme. Their tokens live in `index.css` (neutral) and `palettes.css`, keyed by `data-palette`;
  * `index.html` sets the saved one on <html> before first paint.
  */
-export type Palette = "neutral" | "macos" | "catppuccin" | "nord" | "tokyo-night";
+export type Palette =
+  | "neutral"
+  | "macos"
+  | "catppuccin"
+  | "nord"
+  | "tokyo-night"
+  | "abyss"
+  | "aurora"
+  | "sumi"
+  | "sakura";
 
 export const PALETTES: readonly Palette[] = [
   "neutral",
@@ -11,6 +20,10 @@ export const PALETTES: readonly Palette[] = [
   "catppuccin",
   "nord",
   "tokyo-night",
+  "abyss",
+  "aurora",
+  "sumi",
+  "sakura",
 ];
 
 export const PALETTE_LABEL: Record<Palette, string> = {
@@ -19,4 +32,8 @@ export const PALETTE_LABEL: Record<Palette, string> = {
   catppuccin: "Catppuccin",
   nord: "Nord",
   "tokyo-night": "Tokyo Night",
+  abyss: "Abyss",
+  aurora: "Aurora",
+  sumi: "Sumi",
+  sakura: "Sakura",
 };
