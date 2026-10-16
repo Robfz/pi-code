@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { registerServiceWorker } from "./features/pwa/register-sw.ts";
+import { syncThemeColor } from "./lib/theme-color.ts";
 import "./index.css";
 import "./palettes.css";
 
@@ -14,4 +15,5 @@ createRoot(root).render(
   </StrictMode>,
 );
 
+syncThemeColor();
 registerServiceWorker();
