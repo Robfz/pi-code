@@ -44,7 +44,7 @@ export function LinkifiedText({ text, className }: { text: string; className?: s
               href={part.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="break-all text-primary underline underline-offset-2"
+              className="break-all text-link underline underline-offset-2"
             >
               {part.url}
             </a>
