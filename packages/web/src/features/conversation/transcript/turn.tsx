@@ -10,7 +10,13 @@ import { useRowOpen, useUiPrefs } from "@/store/ui-prefs";
 import { AssistantText, StopReasonNotice } from "./assistant-message";
 import { renderEntry } from "./entry";
 import { ExplorationGroupRow } from "./exploration-group";
-import { failedToolCalls, foldSteps, groupSteps, type Item } from "./grouping";
+import {
+  type ExplorationGroup,
+  failedToolCalls,
+  foldSteps,
+  groupSteps,
+  type Item,
+} from "./grouping";
 import { useLiveSteps } from "./live-steps";
 import { Thinking } from "./thinking";
 import { ToolCallSlot } from "./tool-call-slot";
@@ -72,7 +78,7 @@ function EntryLabel({ entryId, label }: { entryId: string; label: string }) {
 /** Labels by the key of the first step of each labelled entry. */
 const StepLabels = createContext<ReadonlyMap<string, string>>(new Map());
 
-function StepItem({ step }: { step: Step }) {
+const StepItem = memo(function StepItem({ step }: { step: Step }) {
   const label = useContext(StepLabels).get(step.key);
   return (
     <>
@@ -82,16 +88,34 @@ function StepItem({ step }: { step: Step }) {
       <StepView step={step} />
     </>
   );
+});
+
+/**
+ * `groupSteps` builds new groups on every delta of the live turn; a group whose steps are the
+ * same objects renders the same, so it skips re-rendering.
+ */
+function sameGroup(a: { group: ExplorationGroup }, b: { group: ExplorationGroup }): boolean {
+  return (
+    a.group.key === b.group.key &&
+    a.group.steps.length === b.group.steps.length &&
+    a.group.steps.every((step, index) => step === b.group.steps[index])
+  );
 }
+
+const GroupItem = memo(function GroupItem({ group }: { group: ExplorationGroup }) {
+  return (
+    <ExplorationGroupRow group={group}>
+      {group.steps.map((step) => (
+        <StepItem key={step.key} step={step} />
+      ))}
+    </ExplorationGroupRow>
+  );
+}, sameGroup);
 
 function Items({ items }: { items: readonly Item[] }) {
   return items.map((item) =>
     item.kind === "group" ? (
-      <ExplorationGroupRow key={item.key} group={item}>
-        {item.steps.map((step) => (
-          <StepItem key={step.key} step={step} />
-        ))}
-      </ExplorationGroupRow>
+      <GroupItem key={item.key} group={item} />
     ) : (
       <StepItem key={item.key} step={item} />
     ),
@@ -190,17 +214,19 @@ export const TurnView = memo(function TurnView({
       live.failed.size === 0 ? committedFailures : new Set([...committedFailures, ...live.failed]),
     [committedFailures, live.failed],
   );
+  // From the committed steps alone (live steps have no entry), so token deltas keep the map and
+  // the memoised rows don't re-render through the context.
   const stepLabels = useMemo(() => {
     const byStep = new Map<string, string>();
     const seen = new Set<string>();
-    for (const step of steps) {
+    for (const step of turn.steps) {
       if (step.entryId === undefined || seen.has(step.entryId)) continue;
       seen.add(step.entryId);
       const label = labels.get(step.entryId);
       if (label !== undefined) byStep.set(step.key, label);
     }
     return byStep;
-  }, [steps, labels]);
+  }, [turn.steps, labels]);
 
   if (!turn.user && steps.length === 0) return null;
   const finished = !live.active && !pending && turn.entries.some(isAssistantEntry);

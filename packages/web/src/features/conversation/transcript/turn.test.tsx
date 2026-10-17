@@ -1,7 +1,7 @@
-import { initialLiveState, type LiveState } from "@pi-code/protocol";
+import { initialLiveState, type LiveState, type SessionEntry } from "@pi-code/protocol";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatCost, formatSeconds } from "@/lib/time";
 import type { ConversationStore } from "@/store/conversation-store";
 import { selectTurns, turnStats } from "@/store/turns";
@@ -10,6 +10,18 @@ import { fixtureTranscript } from "@/test/fixtures";
 import { hydratedStore, renderWithStore } from "@/test/render";
 import { rowBody, rowParts } from "@/tools/testing";
 import { Transcript } from "./transcript";
+
+const groupRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./exploration-group", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./exploration-group")>();
+  return {
+    ...actual,
+    ExplorationGroupRow: (props: Parameters<typeof actual.ExplorationGroupRow>[0]) => {
+      groupRenders.count++;
+      return actual.ExplorationGroupRow(props);
+    },
+  };
+});
 
 async function renderFixture(name: string, density: Density, live: Partial<LiveState> = {}) {
   useUiPrefs.setState({ density });
@@ -193,5 +205,176 @@ describe("local overrides", () => {
     act(() => useUiPrefs.getState().setDensity("detailed"));
     act(() => useUiPrefs.getState().setDensity("balanced"));
     expect(expanded(edit())).toBe("false");
+  });
+});
+
+describe("TurnView's live steps", () => {
+  const entry = (id: string, parentId: string | null, message: unknown) =>
+    ({
+      type: "message",
+      id,
+      parentId,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message,
+    }) as unknown as SessionEntry;
+  const read = (id: string, path: string) => ({
+    type: "toolCall" as const,
+    id,
+    name: "read",
+    arguments: { path },
+  });
+  const transcript = {
+    entries: [
+      entry("u1", null, { role: "user", content: "look", timestamp: 0 }),
+      entry("a1", "u1", {
+        role: "assistant",
+        content: [{ type: "text", text: "Reading first." }, read("r1", "src/a.ts")],
+        stopReason: "toolUse",
+        timestamp: 1,
+      }),
+      entry("t1", "a1", {
+        role: "toolResult",
+        toolCallId: "r1",
+        toolName: "read",
+        content: [{ type: "text", text: "a" }],
+        isError: false,
+        timestamp: 2,
+      }),
+    ],
+    leafId: "t1",
+  };
+
+  it("shows an entry committed in the same update as its live step once", async () => {
+    const store = hydratedStore({
+      transcript,
+      live: {
+        ...initialLiveState(),
+        run: { active: true },
+        // The committed message's blocks, still in the streaming state.
+        streaming: {
+          timestamp: 1,
+          blocks: {
+            0: { type: "text", text: "Reading first.", done: true },
+            1: {
+              type: "toolCall",
+              id: "r1",
+              name: "read",
+              argsText: "",
+              call: read("r1", "src/a.ts"),
+            },
+          },
+        },
+      },
+    });
+    useUiPrefs.setState({ density: "detailed" });
+    await renderWithStore(<Transcript />, store);
+    const turn = screen.getByTestId("live-turn");
+    expect(within(turn).getAllByTestId("assistant-text")).toHaveLength(1);
+    expect(within(turn).getAllByTestId("tool-call")).toHaveLength(1);
+  });
+
+  it("groups exploration calls across the committed steps and the live ones", async () => {
+    const store = hydratedStore({
+      transcript,
+      live: {
+        ...initialLiveState(),
+        run: { active: true },
+        streaming: {
+          timestamp: 3,
+          blocks: {
+            0: {
+              type: "toolCall",
+              id: "r2",
+              name: "read",
+              argsText: "",
+              call: read("r2", "src/b.ts"),
+            },
+          },
+        },
+      },
+    });
+    useUiPrefs.setState({ density: "balanced" });
+    await renderWithStore(<Transcript />, store);
+    const turn = screen.getByTestId("live-turn");
+    const groups = within(turn).getAllByTestId("exploration-group");
+    expect(groups).toHaveLength(1);
+    await userEvent.setup().click(trigger(groups[0] as HTMLElement));
+    const rows = within(rowBody(groups[0] as HTMLElement)).getAllByTestId("tool-call");
+    expect(rows.map((row) => rowParts(row).target)).toEqual(["a.tssrc", "b.tssrc"]);
+  });
+
+  it("re-renders only the streaming step on a delta, not the committed group", async () => {
+    const reads = {
+      entries: [
+        entry("u1", null, { role: "user", content: "look", timestamp: 0 }),
+        entry("a1", "u1", {
+          role: "assistant",
+          content: [read("r1", "src/a.ts"), read("r2", "src/b.ts")],
+          stopReason: "toolUse",
+          timestamp: 1,
+        }),
+      ],
+      leafId: "a1",
+    };
+    const text = (t: string) => ({ type: "text" as const, text: t, done: false });
+    const store = hydratedStore({
+      transcript: reads,
+      live: {
+        ...initialLiveState(),
+        run: { active: true },
+        streaming: { timestamp: 5, blocks: { 0: { ...text("Now"), done: true }, 1: text("A") } },
+      },
+    });
+    useUiPrefs.setState({ density: "balanced" });
+    await renderWithStore(<Transcript />, store);
+    const turn = screen.getByTestId("live-turn");
+    expect(within(turn).getByTestId("exploration-group")).toHaveTextContent("Exploring");
+    const renders = groupRenders.count;
+    for (const delta of ["AB", "ABC", "ABCD"]) {
+      act(() => {
+        store.setState((s) => {
+          const streaming = s.live.streaming;
+          if (!streaming) throw new Error("not streaming");
+          const blocks = { ...streaming.blocks, 1: text(delta) };
+          return { live: { ...s.live, streaming: { ...streaming, blocks } } };
+        });
+      });
+    }
+    expect(within(turn).getAllByTestId("assistant-text").at(-1)).toHaveTextContent("ABCD");
+    expect(groupRenders.count).toBe(renders);
+  });
+
+  it("keeps a streamed text's DOM through its end and its commit", async () => {
+    const body = "Look at @src/a.ts:3.\n\nThen more";
+    const streaming = (done: boolean) => ({
+      timestamp: 3,
+      blocks: { 0: { type: "text" as const, text: body, done } },
+    });
+    const store = hydratedStore({
+      transcript,
+      live: { ...initialLiveState(), run: { active: true }, streaming: streaming(false) },
+    });
+    await renderWithStore(<Transcript />, store);
+    const paragraph = () => within(screen.getByTestId("live-turn")).getByText(/^Look at/);
+    const first = paragraph();
+
+    act(() => store.setState((s) => ({ live: { ...s.live, streaming: streaming(true) } })));
+    expect(paragraph()).toBe(first);
+    expect(first.querySelector("[data-code-ref]")).toHaveTextContent("@src/a.ts:3");
+
+    const committed = entry("a2", "t1", {
+      role: "assistant",
+      content: [{ type: "text", text: body }],
+      stopReason: "stop",
+      timestamp: 3,
+    });
+    act(() =>
+      store.setState((s) => ({
+        transcript: { entries: [...transcript.entries, committed], leafId: "a2" },
+        live: { ...s.live, streaming: undefined },
+      })),
+    );
+    expect(paragraph()).toBe(first);
+    expect(within(screen.getByTestId("live-turn")).getAllByText(/^Look at/)).toHaveLength(1);
   });
 });

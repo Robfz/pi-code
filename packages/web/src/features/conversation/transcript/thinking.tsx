@@ -4,9 +4,16 @@ import { formatSeconds } from "@/lib/time";
 import { useConversation } from "@/store/context";
 import { useRowOpen } from "@/store/ui-prefs";
 
+/** The last non-blank line, trimmed; scans back from the end instead of splitting the text. */
 function lastLine(text: string): string {
-  const lines = text.split("\n").filter((line) => line.trim() !== "");
-  return lines.at(-1)?.trim() ?? "";
+  let end = text.length;
+  while (end > 0) {
+    const start = text.lastIndexOf("\n", end - 1) + 1;
+    const line = text.slice(start, end).trim();
+    if (line !== "") return line;
+    end = start - 1;
+  }
+  return "";
 }
 
 /**
