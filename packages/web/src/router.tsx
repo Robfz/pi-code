@@ -3,25 +3,36 @@
  *
  * `/agents/$agentId` is a layout providing the agent's store from the live registry; the
  * conversation, tree and diff screens are its children.
+ *
+ * Home and the conversation, the screens a cold start opens, are in the entry chunk; the other
+ * screens load on first visit (or on hovering a link to them, `defaultPreload: "intent"`).
  */
 
 import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   Outlet,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { SessionsScreen } from "@/features/catalog/sessions-screen";
+import { LoaderIcon } from "lucide-react";
 import { ConversationRoot } from "@/features/conversation/conversation-root";
 import { ConversationScreen } from "@/features/conversation/conversation-screen";
-import { DiffScreen } from "@/features/diff/diff-screen";
 import { AppShell } from "@/features/pwa/app-shell";
-import { SettingsScreen } from "@/features/settings/settings-screen";
-import { ShareScreen } from "@/features/share/share-screen";
-import { TreeScreen } from "@/features/tree/tree-screen";
 import { IndexScreen } from "@/routes/index";
 import { PlaceholderScreen } from "@/routes/placeholder";
+
+/** Shown in place of a screen whose chunk takes longer than the router's `pendingMs` to load. */
+function ScreenLoading() {
+  return (
+    <div className="flex min-h-dvh w-full items-center justify-center">
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <LoaderIcon className="size-4 animate-spin" /> Loading…
+      </p>
+    </div>
+  );
+}
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -45,10 +56,15 @@ const sessionsRoute = createRoute({
   path: "/sessions",
   validateSearch: (search: Record<string, unknown>): { cwd?: string } =>
     typeof search.cwd === "string" ? { cwd: search.cwd } : {},
-  component: function SessionsRoute() {
-    const { cwd } = sessionsRoute.useSearch();
-    return <SessionsScreen {...(cwd ? { cwd } : {})} />;
-  },
+  component: lazyRouteComponent(async () => {
+    const { SessionsScreen } = await import("@/features/catalog/sessions-screen");
+    return {
+      default: function SessionsRoute() {
+        const { cwd } = sessionsRoute.useSearch();
+        return <SessionsScreen {...(cwd ? { cwd } : {})} />;
+      },
+    };
+  }),
 });
 
 const agentRoute = createRoute({
@@ -73,26 +89,29 @@ const conversationRoute = createRoute({
 const treeRoute = createRoute({
   getParentRoute: () => agentRoute,
   path: "/tree",
-  component: TreeScreen,
+  component: lazyRouteComponent(() => import("@/features/tree/tree-screen"), "TreeScreen"),
 });
 
 const diffRoute = createRoute({
   getParentRoute: () => agentRoute,
   path: "/diff",
-  component: DiffScreen,
+  component: lazyRouteComponent(() => import("@/features/diff/diff-screen"), "DiffScreen"),
 });
 
 /** Share target (`?title&text&url`); the screen reads the raw query string itself. */
 const shareRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/share",
-  component: ShareScreen,
+  component: lazyRouteComponent(() => import("@/features/share/share-screen"), "ShareScreen"),
 });
 
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
-  component: SettingsScreen,
+  component: lazyRouteComponent(
+    () => import("@/features/settings/settings-screen"),
+    "SettingsScreen",
+  ),
 });
 
 export const routeTree = rootRoute.addChildren([
@@ -107,6 +126,7 @@ export function createAppRouter(options: { history?: RouterHistory } = {}) {
   return createRouter({
     routeTree,
     defaultPreload: "intent",
+    defaultPendingComponent: ScreenLoading,
     scrollRestoration: true,
     ...(options.history ? { history: options.history } : {}),
   });
