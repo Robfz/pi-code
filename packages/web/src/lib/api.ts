@@ -104,6 +104,33 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (text === "" ? undefined : JSON.parse(text)) as T;
 }
 
+/** A response of `getRevalidated` with its `ETag`, for revalidating it. */
+export type Revalidatable<T> = T & { etag?: string };
+
+/**
+ * GET of an API path, conditional on `previous`, the cached response to the same path: on a 304,
+ * `previous` itself, so react-query keeps its data without parsing or comparing a new copy. The
+ * ETag rides in the data rather than beside it: react-query's structural sharing replaces the
+ * object when anything changed, and the tag has to match whatever object the cache ends up with.
+ */
+async function getRevalidated<T extends object>(
+  path: string,
+  previous: Revalidatable<T> | undefined,
+): Promise<Revalidatable<T>> {
+  const headers: Record<string, string> = previous?.etag ? { "If-None-Match": previous.etag } : {};
+  const res = await fetch(new URL(path, origin()), { headers });
+  if (res.status === 304 && previous) {
+    // Chromium reports a request finished only once its body is read, even a 304's empty one;
+    // cancelling the body aborts the request instead.
+    await res.arrayBuffer();
+    return previous;
+  }
+  if (!res.ok) throw await toError(res);
+  const data = (await res.json()) as T;
+  const etag = res.headers.get("ETag");
+  return etag === null ? data : { ...data, etag };
+}
+
 const agentPath = (id: AgentId, suffix = "") => `/api/agents/${encodeURIComponent(id)}${suffix}`;
 
 // ---------------------------------------------------------------------------
@@ -157,19 +184,21 @@ export function ackAgent(id: AgentId): Promise<void> {
 /**
  * The agent's project diff: uncommitted changes against `HEAD`, or with `base` the branch's changes
  * since its merge-base with `origin/<base>`, else the local branch (`uncommitted` adds the working
- * tree and untracked files). `not_a_git_repo` outside a repository.
+ * tree and untracked files). `not_a_git_repo` outside a repository. `previous` (the cached diff
+ * of the same query) comes back as is when unchanged.
  */
 export function getGitDiff(
   id: AgentId,
   { base, uncommitted }: { base?: string; uncommitted?: boolean } = {},
-): Promise<GitDiffResponse> {
+  previous?: Revalidatable<GitDiffResponse>,
+): Promise<Revalidatable<GitDiffResponse>> {
   const params = new URLSearchParams();
   if (base !== undefined) {
     params.set("base", base);
     if (uncommitted) params.set("uncommitted", "1");
   }
   const query = params.toString();
-  return request<GitDiffResponse>("GET", agentPath(id, `/git/diff${query && `?${query}`}`));
+  return getRevalidated(agentPath(id, `/git/diff${query && `?${query}`}`), previous);
 }
 
 /** Local branches, most recent first, and the detected default branch. */
@@ -189,12 +218,16 @@ export async function searchFiles(id: AgentId, q: string): Promise<string[]> {
   ).files;
 }
 
-/** A project file's working-tree content (`file_not_found` when missing). */
-export function getFileContent(id: AgentId, path: string): Promise<FileContentResponse> {
-  return request<FileContentResponse>(
-    "GET",
-    agentPath(id, `/files/content?path=${encodeURIComponent(path)}`),
-  );
+/**
+ * A project file's working-tree content (`file_not_found` when missing). `previous` (the cached
+ * content of the same path) comes back as is when unchanged.
+ */
+export function getFileContent(
+  id: AgentId,
+  path: string,
+  previous?: Revalidatable<FileContentResponse>,
+): Promise<Revalidatable<FileContentResponse>> {
+  return getRevalidated(agentPath(id, `/files/content?path=${encodeURIComponent(path)}`), previous);
 }
 
 /** `GET /api/stream` URL opening each conversation in `cursors` (status and catalog only when empty). */

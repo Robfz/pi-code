@@ -16,8 +16,8 @@ export const MAX_PATCH_BYTES = 1024 * 1024;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
-/** Concurrent `git diff --no-index` runs for untracked files. */
-const UNTRACKED_CONCURRENCY = 8;
+/** Concurrent per-file `git diff` runs, for untracked files and for the per-file fallback. */
+export const FILE_DIFF_CONCURRENCY = 8;
 
 export class GitError extends Error {
   override name = "GitError";
@@ -285,22 +285,20 @@ async function trackedDiffs(cwd: string, from: string, to?: string): Promise<Git
       large.has(file.path) ? toDiff(file, undefined, true) : toDiff(file, chunks[i++], false),
     );
   }
-  return Promise.all(
-    listed.map(async (file) => {
-      if (large.has(file.path)) return toDiff(file, undefined, true);
-      const paths = file.oldPath === undefined ? [file.path] : [file.oldPath, file.path];
-      const { stdout } = await runGit(cwd, [
-        "--literal-pathspecs",
-        "diff",
-        ...DIFF_FLAGS,
-        "--patch",
-        ...revs,
-        "--",
-        ...paths,
-      ]);
-      return toDiff(file, stdout, false);
-    }),
-  );
+  return mapLimit(listed, FILE_DIFF_CONCURRENCY, async (file) => {
+    if (large.has(file.path)) return toDiff(file, undefined, true);
+    const paths = file.oldPath === undefined ? [file.path] : [file.oldPath, file.path];
+    const { stdout } = await runGit(cwd, [
+      "--literal-pathspecs",
+      "diff",
+      ...DIFF_FLAGS,
+      "--patch",
+      ...revs,
+      "--",
+      ...paths,
+    ]);
+    return toDiff(file, stdout, false);
+  });
 }
 
 async function untrackedDiff(cwd: string, path: string): Promise<GitFileDiff> {
@@ -337,7 +335,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 async function untrackedDiffs(cwd: string): Promise<GitFileDiff[]> {
   const { stdout } = await runGit(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
   const paths = stdout.split("\0").filter((p) => p !== "");
-  return mapLimit(paths, UNTRACKED_CONCURRENCY, (p) => untrackedDiff(cwd, p));
+  return mapLimit(paths, FILE_DIFF_CONCURRENCY, (p) => untrackedDiff(cwd, p));
 }
 
 async function shortRev(cwd: string, rev: string): Promise<string> {

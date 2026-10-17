@@ -1,8 +1,9 @@
 import type { GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubCanvas } from "@/components/diff/testing";
+import { queryKeys } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
@@ -70,6 +71,8 @@ async function fileRow(path: string) {
     (r) => r.dataset.path === path,
   ) as HTMLElement;
 }
+
+const paths = () => screen.queryAllByTestId("diff-file").map((row) => row.dataset.path);
 
 const basePicker = () => screen.getByRole("combobox", { name: "Base branch" });
 
@@ -235,6 +238,49 @@ describe("ChangesView", () => {
     expect(count("/git/branches")).toBe(2);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(calls.find((call) => call.url.endsWith("/git/fetch"))?.method).toBe("POST");
+  });
+
+  it("refetches the diff when the review queries are invalidated", async () => {
+    let files = [file("src/a.ts")];
+    serve(() => [200, { files }]);
+    const { queryClient } = await renderView();
+    await waitFor(() => expect(paths()).toEqual(["src/a.ts"]));
+    files = [file("src/a.ts"), file("src/b.ts")];
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.review("a1") }));
+    await waitFor(() => expect(paths()).toEqual(["src/a.ts", "src/b.ts"]));
+  });
+
+  it("revalidates the diff it has, keeping it as is when unchanged", async () => {
+    let version = 1;
+    let files = [file("src/a.ts")];
+    const conditions: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const condition = new Request(input, init).headers.get("if-none-match");
+        conditions.push(condition);
+        const etag = `"${version}"`;
+        if (condition === etag) return new Response(null, { status: 304, headers: { ETag: etag } });
+        return new Response(JSON.stringify({ files }), { status: 200, headers: { ETag: etag } });
+      }),
+    );
+    const { queryClient } = await renderView();
+    const key = queryKeys.gitDiff("a1", "uncommitted");
+    const invalidate = () =>
+      act(() => queryClient.invalidateQueries({ queryKey: queryKeys.review("a1") }));
+    const row = await fileRow("src/a.ts");
+    const data = queryClient.getQueryData(key);
+
+    await invalidate();
+    expect(conditions).toEqual([null, '"1"']);
+    expect(queryClient.getQueryData(key)).toBe(data);
+    expect(await fileRow("src/a.ts")).toBe(row);
+
+    version = 2;
+    files = [file("src/a.ts"), file("src/b.ts")];
+    await invalidate();
+    expect(conditions).toEqual([null, '"1"', '"1"']);
+    await waitFor(() => expect(paths()).toEqual(["src/a.ts", "src/b.ts"]));
   });
 
   it("says when the project isn't a git repository", async () => {

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubCanvas } from "@/components/diff/testing";
+import { queryKeys } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
@@ -188,6 +189,31 @@ describe("FilesView viewer", () => {
     await act(() => queryClient.refetchQueries());
     await lineNumber(6);
     expect(toast).toHaveBeenCalledTimes(1);
+  });
+
+  it("revalidates the open file, keeping it as is when unchanged", async () => {
+    const conditions: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const condition = new Request(input, init).headers.get("if-none-match");
+        conditions.push(condition);
+        if (condition === '"1"')
+          return new Response(null, { status: 304, headers: { ETag: '"1"' } });
+        return new Response(JSON.stringify(text("src/a.ts", lines(5).join("\n"))), {
+          headers: { ETag: '"1"' },
+        });
+      }),
+    );
+    useReviewStore.getState().openFile("a1", "src/a.ts");
+    const { queryClient } = await renderView();
+    const span = await lineNumber(5);
+    const key = queryKeys.fileContent("a1", "src/a.ts");
+    const data = queryClient.getQueryData(key);
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.review("a1") }));
+    expect(conditions).toEqual([null, '"1"']);
+    expect(queryClient.getQueryData(key)).toBe(data);
+    expect(await lineNumber(5)).toBe(span);
   });
 
   it.each<[string, [number, unknown]]>([

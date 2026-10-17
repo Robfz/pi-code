@@ -50,7 +50,7 @@ export function FileViewer({
 }) {
   const file = useQuery({
     queryKey: queryKeys.fileContent(agentId, path),
-    queryFn: () => getFileContent(agentId, path),
+    queryFn: ({ client, queryKey }) => getFileContent(agentId, path, client.getQueryData(queryKey)),
     staleTime: 0,
     refetchOnWindowFocus: false,
     retry: retryServerErrors,
