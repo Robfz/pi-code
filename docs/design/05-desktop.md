@@ -154,14 +154,15 @@ interface LiveRegistry {
 | Sidebar | Docked left (280px), shown on load, on every route. A single "Toggle sidebar" button sits at the top of the sidebar while it is shown and alone in a collapsed rail while it is hidden; not persisted | Left sheet (shadcn `Sheet side="left"`) opened from a button in the conversation header; closes on selection |
 | `/` | Empty content: "Pick a conversation or start a new one" with a New conversation button | Home: agents from `live`, recent sessions from `GET /api/sessions` |
 | Back chevron to Home | Hidden on the conversation header, settings, `/sessions`, "Conversation closed" and other placeholder screens | Shown |
-| Settings | Icon in the sidebar footer | Home header, sheet footer |
+| Settings | Icon beside the sidebar search | Home header, beside the sheet's search |
 
 Share, settings and `/sessions` are routes rendered in the content area on desktop; the sidebar lists every conversation. The review panel (Changes, Files) and the session tree are tabs of a pane beside the conversation instead of routes: `/agents/$agentId/diff` and `/agents/$agentId/tree` open the pane and replace themselves with `/agents/$agentId` ([`07-code-review.md`](07-code-review.md), "Desktop pane").
 
 ### Sidebar
 
 ```
-┌ [+ New conversation]  [search…]   ┐
+┌ [⊟]                               ┐  titlebar: toggle sidebar (the sheet's close)
+│ [search…                 ] [+] [⚙]│  search · New conversation (project picker) · Settings
 │ Active                            │  every live agent, any folder (hidden when none)
 │   ● Desktop design… pi-code 2m [×]│  live row · its group's label
 │   ◌ Fix flaky… pi-code/wt  now[×]│  a checkout's row: repo/checkout
@@ -170,8 +171,7 @@ Share, settings and `/sessions` are routes rendered in the content area on deskt
 │   ◌ Fix flaky test          now[×]│  working: a neutral spinner replaces the dot
 │     Refactor catalog        3d [×]│  closed (on-disk session, exited agent): no mark · delete
 │ Kepi/phoenix ◌ ● ›            [+] │  collapsed: hidden rows' marks · chevron
-│ phoenix/phoenix               [+] │
-└ ⚙                                 ┘
+└ phoenix/phoenix               [+] ┘
 ```
 
 - **Active** = every live agent (in `live.agents`, `status` not `exited`: Working, Needs input, Failed, Finished, Idle) in one flat list above the groups, ordered as rows are (see Ordering), each row followed by a muted project label: its group's label, `repo/checkout` for a checkout's rows (`activeRows`, taken from the displayed groups, so search filters it the same way). The rows look and act like the groups' (mark, title, time, `×`, highlight of the route's agent) and also stay in their groups. The section is hidden while no agent is live, and has no collapse or pin. A row goes when its agent exits (an `agent` frame with `exited`, e.g. pi crashed) or leaves the registry (`agent_closed`, or missing from a baseline): Stop, Delete (`DELETE /api/sessions` closes the agents holding the file) and Remove worktree (`DELETE /api/worktrees` closes the agents inside it) all close through `AgentManager.close`, which sends both. pi still running in a worktree deleted outside pi-code stays listed until stopped.

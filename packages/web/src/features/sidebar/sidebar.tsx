@@ -281,11 +281,11 @@ function Group({
 
 /**
  * Every live agent under Active (`activeRows`), then conversations grouped by folder or repo
- * (`groupListing`), with New conversation, search, per-folder `+`, Pin and New worktree on repo
- * groups, Remove worktree on linked ones, Stop or Delete on every row (`×`) and settings in the
- * footer. Group headers collapse, except the main checkout's; pins and collapsed groups are the
- * server's `sidebar` state. `action` goes before New conversation (the shell's toggle, the
- * sheet's close); `onSelect` runs whenever a row, `+` or a new conversation is picked.
+ * (`groupListing`), with search beside New conversation and Settings, per-folder `+`, Pin and New
+ * worktree on repo groups, Remove worktree on linked ones and Stop or Delete on every row (`×`).
+ * Group headers collapse, except the main checkout's; pins and collapsed groups are the server's
+ * `sidebar` state. `action` sits alone in the titlebar row (the shell's toggle, the sheet's
+ * close); `onSelect` runs whenever a row, `+`, Settings or a new conversation is picked.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
   const { loaded, agents, sessions, branches, sidebar } = useLive(
@@ -428,46 +428,59 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
       <div className="flex flex-col gap-3 border-b pb-4">
         <div className="titlebar flex items-center gap-1 px-4 pt-4 [--titlebar-pad:1rem]">
           {action}
-          <Button className="flex-1" onClick={() => setPickerOpen(true)}>
-            <PlusIcon /> New conversation
-          </Button>
         </div>
-        <div className="relative mx-4">
-          <SearchIcon
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            ref={searchRef}
-            type="search"
-            aria-label="Search conversations"
-            placeholder="Search…"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
-          />
-          {text !== "" && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
-              aria-label="Clear search"
-              onClick={() => {
-                setText("");
-                searchRef.current?.focus();
-              }}
-            >
-              <XIcon />
-            </Button>
-          )}
+        <div className="mx-4 flex items-center gap-1">
+          <div className="relative min-w-0 flex-1">
+            <SearchIcon
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              ref={searchRef}
+              type="search"
+              aria-label="Search conversations"
+              placeholder="Search…"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
+            />
+            {text !== "" && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
+                aria-label="Clear search"
+                onClick={() => {
+                  setText("");
+                  searchRef.current?.focus();
+                }}
+              >
+                <XIcon />
+              </Button>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="New conversation"
+            title="New conversation"
+            onClick={() => setPickerOpen(true)}
+          >
+            <PlusIcon />
+          </Button>
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/settings" aria-label="Settings" title="Settings" onClick={select}>
+              <SettingsIcon />
+            </Link>
+          </Button>
         </div>
       </div>
       <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} onOpened={select} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 [scrollbar-gutter:stable]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] [scrollbar-gutter:stable]">
         {!loaded && (
           <p className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
             <LoaderIcon className="size-4 animate-spin" /> Loading…
@@ -579,14 +592,6 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             </Group>
           ),
         )}
-      </div>
-
-      <div className="flex items-center border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/settings" aria-label="Settings" onClick={select}>
-            <SettingsIcon />
-          </Link>
-        </Button>
       </div>
     </nav>
   );
