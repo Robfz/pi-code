@@ -216,3 +216,18 @@ describe("Settings · transcript density", () => {
     expect(pressed()).toEqual(["false", "false", "true"]);
   });
 });
+
+describe("Settings · diff text size", () => {
+  it("offers the sizes, the current one pressed", async () => {
+    stubPushApi();
+    useUiPrefs.setState({ diffFontSize: 12 });
+    renderSettings();
+    const user = userEvent.setup();
+    expect(await screen.findByRole("heading", { name: "Diff text size" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "12px" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "16px" }));
+    expect(useUiPrefs.getState().diffFontSize).toBe(16);
+    expect(screen.getByRole("button", { name: "16px" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "12px" })).toHaveAttribute("aria-pressed", "false");
+  });
+});

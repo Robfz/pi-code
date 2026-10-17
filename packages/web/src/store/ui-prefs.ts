@@ -14,11 +14,18 @@ export const DENSITY_LABEL: Record<Density, { name: string; description: string 
   detailed: { name: "Detailed", description: "No grouping, everything expanded" },
 };
 
+/** Diff viewer font sizes (px), smallest first. */
+export const DIFF_FONT_SIZES = [11, 12, 13, 14, 16] as const;
+
+export type DiffFontSize = (typeof DIFF_FONT_SIZES)[number];
+
 interface UiPrefs {
   density: Density;
   setDensity(density: Density): void;
   palette: Palette;
   setPalette(palette: Palette): void;
+  diffFontSize: DiffFontSize;
+  setDiffFontSize(size: DiffFontSize): void;
 }
 
 export const useUiPrefs = create<UiPrefs>()(
@@ -28,6 +35,8 @@ export const useUiPrefs = create<UiPrefs>()(
       setDensity: (density) => set({ density }),
       palette: "neutral",
       setPalette: (palette) => set({ palette }),
+      diffFontSize: 12,
+      setDiffFontSize: (diffFontSize) => set({ diffFontSize }),
     }),
     {
       name: "pi-code:ui-prefs",

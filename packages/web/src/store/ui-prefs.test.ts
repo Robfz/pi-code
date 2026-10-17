@@ -27,19 +27,20 @@ describe("ui prefs", () => {
     expect(useUiPrefs.getState()).not.toHaveProperty("toolsExpanded");
   });
 
-  it("persists the density and palette as version 1", async () => {
+  it("persists the density, palette and diff font size as version 1", async () => {
     useUiPrefs.getState().setDensity("compact");
     useUiPrefs.getState().setPalette("deco");
+    useUiPrefs.getState().setDiffFontSize(14);
     expect(JSON.parse(localStorage.getItem(KEY) ?? "{}")).toEqual({
-      state: { density: "compact", palette: "deco" },
+      state: { density: "compact", palette: "deco", diffFontSize: 14 },
       version: 1,
     });
     expect(await rehydrateFrom({ state: { density: "compact" }, version: 1 })).toBe("compact");
   });
 
-  it("keeps the neutral palette for a stored state without one", async () => {
+  it("keeps the neutral palette and 12px diffs for a stored state without them", async () => {
     await rehydrateFrom({ state: { density: "detailed" }, version: 1 });
-    expect(useUiPrefs.getState().palette).toBe("neutral");
+    expect(useUiPrefs.getState()).toMatchObject({ palette: "neutral", diffFontSize: 12 });
     await rehydrateFrom({ state: { toolsExpanded: true }, version: 0 });
     expect(useUiPrefs.getState()).toMatchObject({ density: "detailed", palette: "neutral" });
   });

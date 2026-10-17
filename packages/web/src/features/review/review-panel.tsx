@@ -1,13 +1,14 @@
 /**
  * The review panel (`docs/design/07-code-review.md`, "Review panel"): the tabs (Changes and Files,
- * plus Tree in the desktop pane), a Refresh button for the Changes and Files tabs and the active
- * tab's view. The desktop pane and the phone page host it, each adding its own controls to the
+ * plus Tree in the desktop pane), diff text size and Refresh buttons for the Changes and Files
+ * tabs and the active tab's view. The desktop pane and the phone page host it, each adding its own controls to the
  * header.
  */
 
 import { type QueryKey, useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { DiffFontSizeControl } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { TreeView } from "@/features/tree/tree-view";
 import { queryKeys } from "@/lib/query-client";
@@ -79,6 +80,7 @@ export function ReviewPanel({
             </Button>
           ))}
         </div>
+        {tab !== "tree" && <DiffFontSizeControl />}
         {queries.length > 0 && (
           <Button
             variant="ghost"

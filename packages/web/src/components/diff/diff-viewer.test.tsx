@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { useUiPrefs } from "@/store/ui-prefs";
 import { stubElementWidth, stubMatchMedia } from "@/test/dom-stubs";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffViewer, type LineSelection } from "./diff-viewer";
@@ -72,6 +73,20 @@ describe("DiffViewer", () => {
     );
     await loadedDiff();
     expect(container.querySelector('[data-theme="dark"]')).not.toBeNull();
+  });
+
+  it("follows the diff font size pref", async () => {
+    stubMatchMedia(() => false);
+    useUiPrefs.setState({ diffFontSize: 12 });
+    const { container } = render(<DiffViewer patch={patch()} />);
+    await loadedDiff();
+    const sized = () =>
+      container
+        .querySelector<HTMLElement>(".diff-style-root")
+        ?.style.getPropertyValue("--diff-font-size--");
+    expect(sized()).toBe("12px");
+    act(() => useUiPrefs.getState().setDiffFontSize(16));
+    await waitFor(() => expect(sized()).toBe("16px"));
   });
 
   it("guards large patches behind 'Show anyway'", async () => {
