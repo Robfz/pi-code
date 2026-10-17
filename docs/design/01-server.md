@@ -92,7 +92,7 @@ All records from one agent flow through a single **sequential** async queue, so 
 
 ### Event log
 
-A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` is per-agent and monotonic for the agent's lifetime. Replay from a live-stream cursor (from `open=` or `Last-Event-ID`) succeeds if `seq + 1` is still in the buffer (or the cursor is caught up); otherwise that agent gets a `resync` frame. When the agent is removed, the log closes and its subscribers stop.
+A buffer of the last events per agent, each `{ seq, event }` with the event's JSON, serialised once for the size bound and every live-stream connection. It keeps at most 10,000 events and 32 MB of JSON, evicting the oldest, so a long bash run's output snapshots can't grow it without bound. `seq` is per-agent and monotonic for the agent's lifetime. Replay from a live-stream cursor (from `open=` or `Last-Event-ID`) succeeds if `seq + 1` is still in the buffer (or the cursor is caught up); otherwise that agent gets a `resync` frame. When the agent is removed, the log closes and its subscribers stop.
 
 ### Snapshot
 
@@ -102,7 +102,7 @@ A ring buffer of the last 10,000 events per agent, each `{ seq, event }`. `seq` 
 
 `GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, writes `retry:`, the baseline, then each opened agent's replay (or `resync`) as separate writes, and drains a per-connection frame queue of live frames to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the session list, the folder branch map and the sidebar state (pins and collapsed groups, `store/sidebar-state.ts`, persisted to `<dataDir>/sidebar.json`), kept in memory so a baseline needs no I/O.
 
-- **Session watcher** (`catalog/watcher.ts`): `fs.watch` on pi's sessions dir, recursive, TUI sessions included. Changes trigger a rescan (trailing throttle, 500 ms); the hub broadcasts `catalog` when the session list differs.
+- **Session watcher** (`catalog/watcher.ts`): `fs.watch` on pi's sessions dir, recursive, TUI sessions included. Changes that can affect the listing (project dirs, their `.jsonl` files) trigger a rescan (trailing throttle, 500 ms; one rescan at a time, changes during one coalescing into a single follow-up); the hub broadcasts `catalog` when the session list differs.
 - **Folder branches** (`git/branches.ts`): for each cwd with a live agent, the git dir is resolved once (worktree `.git` files included), watched non-recursively, and `HEAD` re-read on every event; changes go out as `branch` frames.
 - **Idle sweep** (`agents/idle-sweep.ts`): hourly, refreshes the catalog and closes every non-streaming agent, exited included, whose activity (the later of `startedAt` and its session's last entry) is at least 7 days old (`IDLE_AFTER_MS`), pending dialogs included.
 
@@ -123,7 +123,7 @@ Dialog answers go through `POST /api/agents/:id/ui-responses`, written to pi as 
 
 Read-only over `~/.pi/agent/sessions`, parsing the documented session format; session deletion and worktree removal are the only writes (see Session deletion and Worktrees).
 
-- **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached by `(path, mtime, size)`.
+- **Session summary** per file: header (`id`, `cwd`, `timestamp`, `parentSession`), latest `session_info` name, first user message text (truncated to 200 chars), last entry timestamp, file mtime, `ownedBy` (agentId if open in the web). Cached per file with the parse state at the bytes read: an unchanged `(inode, mtime, size)` is reused, a grown file whose last bytes read are still in place has only its appended bytes parsed (pi appends to session files), anything else is parsed again in full (shrunk, replaced, or rewritten in place, as pi's format migration does).
 - **Search** — `GET /api/sessions?q=`: case-insensitive substring match on the session's `cwd` path and name, over all sessions whatever their age.
 - **Projects** = distinct header `cwd`s, sorted by most recent session activity, with session counts. Directory names are not trusted (lossy); only header `cwd`s are used.
 - **Layout** (`catalog/layout.ts`, [`06-worktrees.md`](06-worktrees.md)): each scan classifies every distinct header `cwd` from files only (`layoutOf`: container, main checkout, linked or missing worktree of a `<repo>/main` layout) and sets `layout` on the session and project summaries.
@@ -180,7 +180,9 @@ The pi-web-access search curator starts a server on `127.0.0.1:<random port>` an
 
 ## Static SPA
 
-Serves `packages/web/dist` with long-cache hashed assets, `index.html` fallback for client routes, `no-cache` for `index.html`, `sw.js` and `manifest.webmanifest`.
+Serves `packages/web/dist` with long-cache hashed assets, `index.html` fallback for client routes, `no-cache` for `index.html`, `sw.js` and `manifest.webmanifest`. The web build writes brotli and gzip copies of its text files (`scripts/compress-dist.ts`); a client accepting one gets it (`Content-Encoding`, `Vary: Accept-Encoding`): the one with the highest `q`, brotli on a tie.
+
+JSON responses under `/api` are gzipped for clients that accept it; `GET /api/stream` (`text/event-stream`) never is, since a compressor would hold its frames back.
 
 ## Shutdown
 

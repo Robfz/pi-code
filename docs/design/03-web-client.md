@@ -9,8 +9,8 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | Server data | TanStack Query (catalog, session search, models, commands, git diff, branches, file search and content, health) |
 | Live state | `LiveRegistry`: one `GET /api/stream` EventSource per tab feeding a Zustand overview and one Zustand store per opened conversation, through the shared reducer |
 | Client state | Zustand: composer drafts per conversation (`store/drafts.ts`), review state per conversation (`features/review/review-state.ts`), UI preferences |
-| UI | Tailwind v4 + shadcn/ui on the tokens of [`09-ui-overhaul.md`](09-ui-overhaul.md); Geist Sans and Geist Mono, bundled and precached |
-| Markdown / code | Streamdown + `@streamdown/code` (Shiki, loaded on demand, with a theme on the palette's `--syntax-*` tokens; grammars are lazy chunks outside the precache) |
+| UI | Tailwind v4 + shadcn/ui on the tokens of [`09-ui-overhaul.md`](09-ui-overhaul.md); Geist Sans and Geist Mono, bundled; the Latin subsets precached, the others cached on first use |
+| Markdown / code | Streamdown + Shiki (`lib/code-highlighter.ts`: loaded on demand, with a theme on the palette's `--syntax-*` tokens, highlighting in slices that yield to the main thread; grammars are lazy chunks, cached on first use) |
 | Diffs | `@git-diff-view/react` (split when the viewer is ≥1024px wide, unified otherwise) |
 | PWA | `vite-plugin-pwa`, `injectManifest` strategy (custom service worker) |
 | API client | Typed `fetch` wrapper per route (`src/lib/api.ts`, types from `@pi-code/protocol`) + `EventSource` |
@@ -26,6 +26,8 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 | `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
 | `/settings` | Notifications permission, transcript density, theme, palette, about |
+
+Home and the conversation are in the entry chunk; the other screens are lazy route components (`lazyRouteComponent`), loaded on first visit or on hovering a link to them, with a "Loading…" fallback when that takes a while. Third-party code sits in vendor chunks (React, Radix, TanStack, Streamdown with unified/remark/rehype), so an app-only deploy keeps their hashes.
 
 "New conversation" opens the **project picker**: recent projects (`GET /api/projects`, in listing groups) plus a path field with autocomplete (`GET /api/fs/dirs`), then `POST /api/agents { cwd }`. Opening a session from a list calls `POST /api/agents { sessionFile }` and navigates to the agent (existing agent if already open).
 
@@ -86,16 +88,16 @@ class LiveRegistry {
   start(): void;                             // listeners on, stream opened
   stop(): void;                              // stream closed; opened stores stay
   open(agentId: AgentId): ConversationStore; // idempotent: created and loaded on first call
-  show(agentId: AgentId): () => void;        // marks the conversation on screen and acks it
+  show(agentId: AgentId): () => void;        // marks the conversation on screen (not evicted), acks it
   drop(agentId: AgentId): void;              // forgets the store and marks it closed
   setSidebar(patch: SidebarPatch): Promise<void>; // applied at once, then PATCH /api/sidebar
   expand(paths: string[]): void;             // uncollapses those of `paths` that are collapsed
 }
 ```
 
-- **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount, and `expand` with the agent's cwd and layout repo once the agent is known. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming until dropped or the tab reloads, so switching back costs nothing.
+- **Opening.** The `/agents/$agentId` layout (`ConversationRoot`, keyed by agent id) calls `open` and `show` on mount, and `expand` with the agent's cwd and layout repo once the agent is known. `open` fetches `GET /snapshot`, hydrates, then reconnects the stream with every hydrated store at its `seq` in `open=`. One EventSource at a time: a reconnect detaches and closes the current one first. Opened stores keep streaming, so switching back costs nothing, until dropped or evicted: when a hydrate reconnects the stream, released stores beyond the 3 most recently used leave it, without being marked closed (`05-desktop.md`, "Eviction").
 - **Refetch.** A `resync` frame, and an `agent_status` event turning the agent `ready`, refetch that store the same way. While its snapshot is in flight it ignores its frames and is left out of reconnect URLs.
-- **Frames.** `event` → that store's `apply`; `baseline` / `agent` / `catalog` / `branch` / `sidebar` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. Every `catalog` frame invalidates the `sessions` and `projects` queries; the server sends one only when the streamed list changes (`05-desktop.md`, "Session watcher").
+- **Frames.** `event` → buffered, then that store's `applyBatch` once per animation frame (`05-desktop.md`, "Frames"); `baseline` / `agent` / `catalog` / `branch` / `sidebar` → `live`; `agent_closed`, a `baseline` without a hydrated store's agent, and a snapshot answering `agent_not_found` drop the store. Every `catalog` frame invalidates the `sessions` and `projects` queries; the server sends one only when the streamed list changes (`05-desktop.md`, "Session watcher").
 - **Attention.** Snapshots don't clear attention. The registry acks (`POST /ack`) only the conversation on screen: on `show`, on `visibilitychange` to visible, on window `focus`, and when an `agent` frame raises its attention while the page is visible and focused. The ack leaves `input` while a dialog or the trust prompt is pending, so the badge stays until it is answered.
 - **Liveness.** EventSource reconnects by itself with `Last-Event-ID`. When it gives up (`CLOSED`), or a snapshot fetch fails, the registry retries with backoff (1, 2, 5, 10 s). On visible, window `focus` or `online`, a closed stream or one silent (no message, no `ping`) for 35 s is reopened. `offline` marks the connection offline.
 
@@ -120,6 +122,7 @@ interface ConversationState {
   closed: boolean;                                 // the agent is gone
   hydrate(snapshot: Snapshot): void;
   apply(event: ServerEvent, seq: number): void;    // reduceLive + committed caches; seq ≤ current ignored
+  applyBatch(events: SequencedEvent[], visit?: BatchVisitor): void; // the same in order, one update
   setConnection(connection: ConnectionState): void;
   markClosed(): void;
 }
@@ -315,6 +318,7 @@ Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tab
 **Service worker** (`src/sw.ts`, injectManifest):
 
 - Precaches the app shell; API requests always go to the network.
+- Leaves Shiki's chunks, the diff viewer's chunk and the non-Latin font subsets out of the precache (`src/sw/lazy-assets.ts`) and caches them on first use (cache-first, keeping the 200 most recently used), so they work offline once loaded.
 - `push`: parse `PushPayload`; `navigator.setAppBadge(badge)` (or `clearAppBadge` at 0); if a pi-code window is focused, don't show a notification; else `showNotification(title, { body, tag: agentId, renotify: true, data: { url }, icon, badge })`, without `icon` on macOS, which shows it as an attachment next to the app icon (pi-code's own with the browser's notification attribution).
 - `notificationclick`: focus an existing window and navigate it to `url`, else `openWindow(url)`.
 

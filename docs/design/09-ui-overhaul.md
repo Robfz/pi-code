@@ -91,7 +91,7 @@ Abyss, Aurora, Sumi and Sakura are our own designs; the others follow published 
 
 ## Typography
 
-Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontsource-variable/geist-mono`) for code, commands and search patterns. File paths in tool rows are sans. Text renders with grayscale antialiasing (`antialiased` on `body`). Both are bundled and precached by the service worker (the `woff2` precache glob), so text looks the same on every device and offline.
+Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontsource-variable/geist-mono`) for code, commands and search patterns. File paths in tool rows are sans. Text renders with grayscale antialiasing (`antialiased` on `body`). Both are bundled, so text looks the same on every device. The service worker precaches their Latin subsets and caches the others (Latin Extended, Cyrillic, Vietnamese, symbols) on first use; offline, a subset never loaded falls back to the system font.
 
 ```css
 --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
