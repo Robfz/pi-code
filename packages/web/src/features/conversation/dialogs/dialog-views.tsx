@@ -45,7 +45,7 @@ export function SelectDialogView({ request, expiresAt, busy, onAnswer }: ViewPro
         <SheetDescription className="sr-only">Choose an option</SheetDescription>
       </Header>
       <div
-        className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto px-4 [scrollbar-gutter:stable]"
+        className="flex max-h-[50dvh] flex-col gap-0.5 overflow-y-auto px-1.5 pb-3 [scrollbar-gutter:stable]"
         role="listbox"
       >
         {request.options.map((option) => (
@@ -53,20 +53,15 @@ export function SelectDialogView({ request, expiresAt, busy, onAnswer }: ViewPro
             key={option}
             role="option"
             aria-selected={false}
-            variant="outline"
+            variant="ghost"
             disabled={busy}
-            className="h-auto min-h-10 justify-start py-2 text-left whitespace-normal"
+            className="h-auto min-h-9 justify-start py-2 text-left whitespace-normal focus-visible:bg-muted focus-visible:ring-0 dark:focus-visible:bg-muted/50"
             onClick={() => onAnswer({ value: option })}
           >
             {option}
           </Button>
         ))}
       </div>
-      <SheetFooter>
-        <Button variant="ghost" disabled={busy} onClick={() => onAnswer({ cancelled: true })}>
-          Cancel
-        </Button>
-      </SheetFooter>
     </>
   );
 }

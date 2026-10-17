@@ -1,7 +1,7 @@
 import type { PendingDialog } from "@pi-code/protocol";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, sheetCenteredOnDesktop } from "@/components/ui/sheet";
 import { errorMessage, isApiRequestError, respondUi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/store/context";
@@ -117,7 +117,11 @@ function DialogSheet({
         className={cn(
           "pb-[env(safe-area-inset-bottom)]",
           container && "absolute",
-          editor ? (container ? "h-full" : "h-dvh") : "max-h-[85dvh] rounded-t-2xl",
+          editor
+            ? container
+              ? "h-full"
+              : "h-dvh"
+            : cn("max-h-[85dvh] rounded-t-2xl lg:max-w-lg", sheetCenteredOnDesktop),
         )}
       >
         {request.method === "select" && <SelectDialogView request={request} {...props} />}
