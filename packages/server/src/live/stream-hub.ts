@@ -48,11 +48,14 @@ export class StreamHub {
   private readonly sidebar: SidebarStateStore;
   private readonly unsubscribeSidebar: () => void;
   private sessions: StreamedSession[] = [];
+  /** `sessions` as JSON, to compare rescans against. */
+  private sessionsJson = "[]";
   private readonly branches: FolderBranches;
   private readonly listeners = new Set<(frame: HubFrame) => void>();
-  /** Rescans started, and the latest one whose list was applied. */
-  private scansStarted = 0;
-  private scanApplied = 0;
+  /** Whether `drainScans` is running. */
+  private scanning = false;
+  /** Callers waiting for a rescan that hasn't started yet; non-empty means another is due. */
+  private queued: (() => void)[] = [];
   private readonly onAgent = (agent: AgentInfo) => {
     this.broadcast({ type: "agent", agent });
     this.syncBranches();
@@ -89,27 +92,45 @@ export class StreamHub {
 
   /**
    * Rescans the sessions dir, broadcasting `catalog` when the list differs from the current one,
-   * and prunes the sidebar state of folders that are gone. Never rejects; a rescan finishing
-   * after a later one is dropped.
+   * and prunes the sidebar state of folders that are gone. Resolves once a rescan started after
+   * the call has finished; never rejects. One rescan runs at a time: calls made meanwhile share
+   * one follow-up rescan, so a burst of changes costs at most two.
    */
-  async refreshCatalog(): Promise<void> {
-    const scan = ++this.scansStarted;
+  refreshCatalog(): Promise<void> {
+    const done = new Promise<void>((resolve) => this.queued.push(resolve));
+    if (!this.scanning) void this.drainScans();
+    return done;
+  }
+
+  private async drainScans(): Promise<void> {
+    this.scanning = true;
+    while (this.queued.length > 0) {
+      const waiting = this.queued;
+      this.queued = [];
+      await this.rescan();
+      for (const resolve of waiting) resolve();
+    }
+    this.scanning = false;
+  }
+
+  /** One rescan; never rejects, so `drainScans` always serves every queued caller. */
+  private async rescan(): Promise<void> {
     void this.sidebar.prune().catch((e: unknown) => {
       console.warn(`[sidebar] prune failed: ${(e as Error).message}`);
     });
-    let sessions: StreamedSession[];
     try {
+      // The listing may predate the change that asked for this rescan.
       this.catalog.invalidate();
-      sessions = await catalogListing(this.catalog);
+      const sessions = await catalogListing(this.catalog);
+      // One stringify per rescan, cheap next to the scan's stat of every session file.
+      const json = JSON.stringify(sessions);
+      if (json === this.sessionsJson) return;
+      this.sessions = sessions;
+      this.sessionsJson = json;
+      this.broadcast({ type: "catalog", sessions });
     } catch (e) {
       console.warn(`[stream] catalog scan failed: ${(e as Error).message}`);
-      return;
     }
-    if (scan < this.scanApplied) return;
-    this.scanApplied = scan;
-    if (JSON.stringify(sessions) === JSON.stringify(this.sessions)) return;
-    this.sessions = sessions;
-    this.broadcast({ type: "catalog", sessions });
   }
 
   /** Listens to every hub frame; returns the unsubscribe function. */

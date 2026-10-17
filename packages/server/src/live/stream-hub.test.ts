@@ -171,6 +171,51 @@ describe("StreamHub catalog refresh", () => {
     hub.close();
   });
 
+  it("runs one rescan at a time; calls made meanwhile share one follow-up", async () => {
+    vi.setSystemTime("2026-01-10T00:00:00.000Z");
+    writeSession("a", "2026-01-09T00:00:00.000Z");
+    const manager = new AgentManager({
+      home: agentDir,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    const catalog = new SessionCatalog({ agentDir });
+    const hub = new StreamHub({ manager, catalog, sidebar: sidebarStore() });
+    await hub.ready;
+
+    const list = catalog.sessions.bind(catalog);
+    let running = 0;
+    let mostRunning = 0;
+    let scans = 0;
+    let duringFirst: (() => void) | undefined = () => {
+      // Lands after the first scan read the dir: only the follow-up can see it.
+      writeSession("b", "2026-01-09T12:00:00.000Z");
+      calls.push(hub.refreshCatalog(), hub.refreshCatalog(), hub.refreshCatalog());
+    };
+    vi.spyOn(catalog, "sessions").mockImplementation(async (filter) => {
+      scans += 1;
+      running += 1;
+      mostRunning = Math.max(mostRunning, running);
+      const sessions = await list(filter);
+      const during = duringFirst;
+      duringFirst = undefined;
+      during?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      running -= 1;
+      return sessions;
+    });
+    const calls: Promise<void>[] = [];
+    await hub.refreshCatalog();
+    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["a"]);
+    await Promise.all(calls);
+    expect(hub.baseline().sessions.map((s) => s.id)).toEqual(["b", "a"]);
+    expect(scans).toBe(2);
+    expect(mostRunning).toBe(1);
+
+    await hub.refreshCatalog();
+    expect(scans).toBe(3);
+    hub.close();
+  });
+
   it("broadcasts catalog when a worktree turns missing", async () => {
     vi.setSystemTime("2026-01-10T00:00:00.000Z");
     const root = realpathSync(agentDir);
