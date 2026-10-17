@@ -1,3 +1,4 @@
+export { DiffFontSizeControl } from "./diff-font-size-control";
 export {
   DiffViewer,
   type DiffViewerProps,

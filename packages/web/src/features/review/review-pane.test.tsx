@@ -111,6 +111,7 @@ describe("review pane on desktop", () => {
     ).toEqual(["Changes", "Files", "Tree"]);
     expect(await within(shown).findByTestId("diff-file")).toHaveTextContent("notes.txt");
     expect(pressed()).toEqual(["Changes panel"]);
+    expect(within(shown).getByRole("group", { name: /^Diff text size/ })).toBeInTheDocument();
     for (const column of ["transcript-column", "composer-column"]) {
       expect(screen.getByTestId(column)).toHaveClass("max-w-[46rem]", "lg:px-6");
     }
@@ -127,6 +128,7 @@ describe("review pane on desktop", () => {
     expect(selectedTab(tree)).toBe("Tree");
     expect(within(tree).getByText("No messages yet.")).toBeInTheDocument();
     expect(within(tree).queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(within(tree).queryByRole("group", { name: /^Diff text size/ })).toBeNull();
     // The pane's tabs and the rail agree.
     await user.click(within(tree).getByRole("tab", { name: "Changes" }));
     expect(pressed()).toEqual(["Changes panel"]);

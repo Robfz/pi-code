@@ -10,6 +10,7 @@ import { useTheme } from "next-themes";
 import { Component, lazy, memo, type ReactNode, Suspense, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useUiPrefs } from "@/store/ui-prefs";
 import { parsePatch } from "./parse-patch";
 import { useWidthAtLeast } from "./use-width-at-least";
 
@@ -38,8 +39,9 @@ class DiffErrorBoundary extends Component<
 }
 
 function PlainPatch({ patch }: { patch: string }) {
+  const fontSize = useUiPrefs((s) => s.diffFontSize);
   return (
-    <pre className="max-h-96 overflow-auto whitespace-pre font-mono text-xs">
+    <pre className="max-h-96 overflow-auto whitespace-pre font-mono" style={{ fontSize }}>
       {patch.split("\n").map((line, i) => (
         <span
           // biome-ignore lint/suspicious/noArrayIndexKey: static lines of a patch

@@ -17,7 +17,7 @@ import {
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { PlaceholderScreen } from "@/routes/placeholder";
-import { DENSITIES, DENSITY_LABEL, useUiPrefs } from "@/store/ui-prefs";
+import { DENSITIES, DENSITY_LABEL, DIFF_FONT_SIZES, useUiPrefs } from "@/store/ui-prefs";
 
 const PUSH_KEY = ["push-status"] as const;
 
@@ -153,6 +153,29 @@ function DensitySection() {
   );
 }
 
+function DiffFontSizeSection() {
+  const size = useUiPrefs((s) => s.diffFontSize);
+  const setSize = useUiPrefs((s) => s.setDiffFontSize);
+  return (
+    <Section title="Diff text size">
+      <p>Font size of code in diffs and the file viewer (the review panel changes it too).</p>
+      <div className="flex flex-wrap gap-2">
+        {DIFF_FONT_SIZES.map((option) => (
+          <Button
+            key={option}
+            size="sm"
+            variant={size === option ? "default" : "outline"}
+            aria-pressed={size === option}
+            onClick={() => setSize(option)}
+          >
+            {option}px
+          </Button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function ThemeSection() {
   const { theme, setTheme } = useTheme();
   return (
@@ -233,6 +256,7 @@ export function SettingsScreen() {
       <div className="flex flex-col gap-6 pb-8">
         <NotificationsSection />
         <DensitySection />
+        <DiffFontSizeSection />
         <ThemeSection />
         <PaletteSection />
         <AboutSection />

@@ -13,6 +13,7 @@ import {
   type MultiSelectResult,
 } from "@git-diff-view/react";
 import { useEffect, useMemo, useRef } from "react";
+import { useUiPrefs } from "@/store/ui-prefs";
 import type { LineSelection } from "./diff-viewer";
 
 /** Frames to wait for the view's rows before giving up on a selection or scroll target. */
@@ -77,6 +78,7 @@ export default function DiffViewImpl({
 }: DiffViewImplProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<DiffViewWithMultiSelectRef>(null);
+  const fontSize = useUiPrefs((s) => s.diffFontSize);
 
   // The library builds a new `DiffFile` (and clears the old one) whenever `data` is a new object.
   const view = useMemo(
@@ -132,7 +134,7 @@ export default function DiffViewImpl({
     diffViewMode: split ? DiffModeEnum.Split : DiffModeEnum.Unified,
     diffViewTheme: dark ? ("dark" as const) : ("light" as const),
     diffViewWrap: !split,
-    diffViewFontSize: 12,
+    diffViewFontSize: fontSize,
     diffViewHighlight: true,
   };
   return (
