@@ -56,7 +56,8 @@ function ConversationClosed() {
 
 /**
  * The `/agents/$agentId` subtree (conversation, tree and diff) around the agent's store from
- * the live registry, marked as the conversation on screen while mounted. Key it by `agentId`.
+ * the live registry, marked as the conversation on screen (acked, not evicted) while mounted.
+ * Key it by `agentId`.
  * Opening it uncollapses its sidebar groups, whatever led here. Once the agent is closed, the
  * subtree gives way to "Conversation closed".
  */
