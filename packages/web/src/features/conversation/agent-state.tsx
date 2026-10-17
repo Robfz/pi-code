@@ -9,6 +9,7 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
+  sheetCenteredOnDesktop,
 } from "@/components/ui/sheet";
 import { useStopOrDelete } from "@/features/sessions/stop-or-delete";
 import { errorMessage, restartAgent, trustAgent } from "@/lib/api";
@@ -50,7 +51,11 @@ export function TrustSheet({ container }: { container?: HTMLElement | null }) {
         loopFocus={container === undefined}
         showCloseButton={false}
         data-testid="trust-sheet"
-        className={cn("rounded-t-2xl pb-[env(safe-area-inset-bottom)]", container && "absolute")}
+        className={cn(
+          "rounded-t-2xl pb-[env(safe-area-inset-bottom)] lg:max-w-lg",
+          sheetCenteredOnDesktop,
+          container && "absolute",
+        )}
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
