@@ -186,14 +186,14 @@ describe("Settings · palette", () => {
     const neutral = await screen.findByRole("button", { name: "Neutral" });
     expect(neutral).toHaveAttribute("aria-pressed", "true");
     expect(document.documentElement.dataset.palette).toBe("neutral");
-    const nord = screen.getByRole("button", { name: "Nord" });
-    await user.click(nord);
-    expect(nord).toHaveAttribute("aria-pressed", "true");
+    const deco = screen.getByRole("button", { name: "Deco" });
+    await user.click(deco);
+    expect(deco).toHaveAttribute("aria-pressed", "true");
     expect(neutral).toHaveAttribute("aria-pressed", "false");
-    expect(useUiPrefs.getState().palette).toBe("nord");
-    expect(document.documentElement.dataset.palette).toBe("nord");
+    expect(useUiPrefs.getState().palette).toBe("deco");
+    expect(document.documentElement.dataset.palette).toBe("deco");
     // Each swatch reads its colours from its own palette's scope.
-    expect(nord.querySelector('[data-palette="nord"]')).not.toBeNull();
+    expect(deco.querySelector('[data-palette="deco"]')).not.toBeNull();
   });
 });
 
