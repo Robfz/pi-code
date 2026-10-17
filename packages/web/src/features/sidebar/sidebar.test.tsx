@@ -29,6 +29,27 @@ import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
 import { RELATIVE_TIME_TICK_MS, SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
 
+/** Renders of the rows' `×` by row title: every render of a row renders its `×`. */
+const dismissRenders = vi.hoisted(() => new Map<string, number>());
+
+vi.mock("@/features/sessions/stop-or-delete", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/sessions/stop-or-delete")>();
+  return {
+    ...actual,
+    // Called, not rendered: its context subscription is counted too.
+    DismissButton: (props: Parameters<typeof actual.DismissButton>[0]) => {
+      dismissRenders.set(props.title, (dismissRenders.get(props.title) ?? 0) + 1);
+      return actual.DismissButton(props);
+    },
+  };
+});
+
+/** Row renders by title from here on. */
+function countRenders(): (title: string) => number {
+  const before = new Map(dismissRenders);
+  return (title) => (dismissRenders.get(title) ?? 0) - (before.get(title) ?? 0);
+}
+
 function session(patch: Partial<SessionSummary> & { file: string }): SessionSummary {
   return {
     id: patch.file,
@@ -296,6 +317,63 @@ describe("Sidebar", () => {
       .click(await within(nav()).findByRole("button", { name: /^Exited one/ }));
     expect(await screen.findByText("Restart broke")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("follows agent frames, the catalog and the route in its rows", async () => {
+    const { router } = await renderSidebar("/agents/a2");
+    const one = makeAgent({ id: "a1", sessionName: "One", sessionFile: "f1" });
+    const two = makeAgent({ id: "a2", sessionName: "Two", startedAt: recent(30) });
+    baseline([one, two], [session({ file: "f1", lastPromptAt: recent(5) })]);
+    await findRow("One");
+    expect(within(row("Two")).getByRole("link")).toHaveAttribute("aria-current", "page");
+    expect(within(row("One")).getByText("5m ago")).toBeInTheDocument();
+
+    await act(() => router.navigate({ to: "/agents/$agentId", params: { agentId: "a1" } }));
+    expect(within(row("One")).getByRole("link")).toHaveAttribute("aria-current", "page");
+    expect(within(row("Two")).getByRole("link")).not.toHaveAttribute("aria-current");
+
+    act(() =>
+      sendFrame({ type: "catalog", sessions: [session({ file: "f1", lastPromptAt: recent(2) })] }),
+    );
+    expect(within(row("One")).getByText("2m ago")).toBeInTheDocument();
+
+    act(() =>
+      sendFrame({ type: "agent", agent: { ...one, sessionName: "Renamed", status: "exited" } }),
+    );
+    const renamed = row("Renamed");
+    expect(within(renamed).queryByRole("link")).toBeNull();
+    expect(within(renamed).getByRole("button", { name: /^Renamed/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(renamed.lastElementChild).toHaveAccessibleName("Delete Renamed (project)");
+    expect(within(row("Two")).getByText("30m ago")).toBeInTheDocument();
+  });
+
+  it("marks a row Working while its restart or resume runs", async () => {
+    await renderSidebar("/", (call) =>
+      call.method === "POST" ? [200, { agent: makeAgent({ id: "started" }) }] : undefined,
+    );
+    const held = holdFetch((_input, init) => init?.method === "POST");
+    baseline(
+      [makeAgent({ id: "exited", sessionName: "Exited one", status: "exited" })],
+      [session({ file: "free", name: "Disk one" })],
+    );
+    const user = userEvent.setup();
+    const mark = (name: string) =>
+      within(row(name))
+        .queryAllByRole("img")
+        .map((img) => img.getAttribute("aria-label"));
+    await user.click(await within(nav()).findByRole("button", { name: /^Exited one/ }));
+    expect(mark("Exited one")).toEqual(["Working"]);
+    expect(mark("Disk one")).toEqual([]);
+    // Opening is off on every row while a request runs.
+    expect(within(row("Disk one")).getByRole("button", { name: /^Disk one/ })).toBeDisabled();
+    act(() => held[0]?.());
+    await waitFor(() => expect(mark("Exited one")).toEqual([]));
+    await user.click(within(row("Disk one")).getByRole("button", { name: /^Disk one/ }));
+    expect(mark("Disk one")).toEqual(["Working"]);
+    act(() => held[1]?.());
   });
 
   it("ends every row with its ×", async () => {
@@ -714,6 +792,41 @@ describe("Sidebar", () => {
       expect(await within(row("Live one")).findByText("1m ago")).toBeInTheDocument();
       act(() => vi.advanceTimersByTime(RELATIVE_TIME_TICK_MS));
       expect(within(row("Live one")).getByText("2m ago")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("re-renders only the rows an agent frame, the minute tick or a dialog changes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      await renderSidebar();
+      const one = makeAgent({ id: "a1", sessionName: "One", startedAt: recent(1) });
+      const two = makeAgent({ id: "a2", sessionName: "Two", startedAt: recent(60 * 30) });
+      baseline([one, two], [session({ file: "free", name: "Disk one", lastPromptAt: recent(1) })]);
+      await findRow("Two");
+
+      let renders = countRenders();
+      act(() => sendFrame({ type: "agent", agent: { ...one, isStreaming: true } }));
+      expect(within(row("One")).getByRole("img", { name: "Working" })).toBeInTheDocument();
+      expect(renders("One")).toBeGreaterThan(0);
+      expect(renders("Two")).toBe(0);
+      expect(renders("Disk one")).toBe(0);
+
+      renders = countRenders();
+      act(() => vi.advanceTimersByTime(RELATIVE_TIME_TICK_MS));
+      expect(within(row("Disk one")).getByText("2m ago")).toBeInTheDocument();
+      expect(renders("One")).toBeGreaterThan(0);
+      expect(renders("Disk one")).toBeGreaterThan(0);
+      // Still "1d ago".
+      expect(renders("Two")).toBe(0);
+
+      renders = countRenders();
+      await userEvent
+        .setup({ advanceTimers: vi.advanceTimersByTime })
+        .click(within(row("One")).getByRole("button", { name: "Stop or delete One (project)" }));
+      expect(await screen.findByRole("dialog", { name: "Stop or delete One?" })).toBeVisible();
+      expect(renders("Two")).toBe(0);
+      expect(renders("Disk one")).toBe(0);
     } finally {
       vi.useRealTimers();
     }

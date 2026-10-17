@@ -249,6 +249,41 @@ describe("requestRemove", () => {
     expect(deletes(calls)).toEqual([{ path: WT }]);
   });
 
+  it("hands its consumers the same actions until a removal starts", async () => {
+    const release = hangingFetch(() => new Response(null, { status: 204 }));
+    const seen = new Set<ReturnType<typeof useWorktreeActions>>();
+    function Consumer() {
+      seen.add(useWorktreeActions());
+      return null;
+    }
+    await renderAt(
+      <>
+        <RemoveHarness />
+        <Consumer />
+      </>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Remove spike" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Remove spike?" })).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(seen.size).toBe(1);
+    await user.click(screen.getByRole("button", { name: "Remove spike" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Remove spike?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remove spike" })).toBeDisabled(),
+    );
+    expect(seen.size).toBeGreaterThan(1);
+    release();
+  });
+
   it("sends nothing when the first confirmation is cancelled", async () => {
     const calls = api(() => undefined);
     await renderAt(<RemoveHarness />);

@@ -12,7 +12,16 @@ import {
   SettingsIcon,
   XIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { StatusMark } from "@/components/agent-status";
@@ -21,7 +30,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
-import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
+import { DismissButton, type SessionTarget } from "@/features/sessions/stop-or-delete";
 import {
   ListingGroupIcon,
   type ListingGroupKind,
@@ -67,11 +76,18 @@ function useNow(intervalMs: number): number {
 const rowClass =
   "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-1 pl-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-70";
 
-function Row({
-  row,
+/**
+ * One conversation row. Memoised on value props: an agent frame, a catalog frame or the minute
+ * tick re-renders only the rows they change.
+ */
+const Row = memo(function Row({
+  title,
+  agent,
+  sessionFile,
+  at,
+  time,
   folder,
   project,
-  now,
   current,
   pending,
   disabled,
@@ -79,12 +95,19 @@ function Row({
   onRestart,
   onSelect,
 }: {
-  row: SidebarRow;
+  title: string;
+  /** Set on agent rows (exited agents included). */
+  agent: AgentInfo | undefined;
+  /** The session file to resume from this row. */
+  sessionFile: string | undefined;
+  /** The row's recency (epoch ms). */
+  at: number;
+  /** `at` as shown ("2m ago"). */
+  time: string;
   /** The group's label, to tell apart same-titled rows in the `×`'s label. */
   folder: string;
   /** Shown after the title (Active rows). */
   project?: string | undefined;
-  now: number;
   current: boolean;
   pending: boolean;
   /** Opening only; the `×` stays usable. */
@@ -93,14 +116,13 @@ function Row({
   onRestart(agent: AgentInfo): void;
   onSelect(): void;
 }) {
-  const agent = row.agent;
   const content = (
     <>
       <span className="flex size-4 shrink-0 items-center justify-center">
         <StatusMark status={agentStatus(agent, pending)} />
       </span>
       <span data-testid="sidebar-row-title" className="min-w-0 flex-1 truncate">
-        {row.title}
+        {title}
       </span>
       {project !== undefined && (
         <span
@@ -111,15 +133,22 @@ function Row({
         </span>
       )}
       <time
-        dateTime={new Date(row.recency.at).toISOString()}
+        dateTime={new Date(at).toISOString()}
         className="shrink-0 text-xs text-muted-foreground"
       >
-        {formatRelative(row.recency.at, now)}
+        {time}
       </time>
     </>
   );
   // Live agents are navigated to; exited agents are restarted and sessions resumed, then shown.
   const live = agent !== undefined && isLive(agent);
+  // Session rows are only for sessions no agent holds (`buildSidebarGroups`): the row's agent is
+  // the holder.
+  const target: SessionTarget | undefined = agent
+    ? { agent }
+    : sessionFile !== undefined
+      ? { file: sessionFile }
+      : undefined;
   return (
     <li
       data-testid="sidebar-row"
@@ -146,23 +175,17 @@ function Row({
           className={rowClass}
           onClick={() => {
             if (agent) onRestart(agent);
-            else if (row.sessionFile !== undefined) onOpen(row.sessionFile);
+            else if (sessionFile !== undefined) onOpen(sessionFile);
             onSelect();
           }}
         >
           {content}
         </button>
       )}
-      <StopOrDeleteButton
-        title={row.title}
-        folder={folder}
-        agent={agent}
-        file={row.sessionFile}
-        className="mr-1"
-      />
+      {target && <DismissButton title={title} folder={folder} target={target} className="mr-1" />}
     </li>
   );
-}
+});
 
 /** A collapsible group's state, and what its header shows of the rows it hides. */
 interface Collapse {
@@ -327,7 +350,12 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
   });
   const busy = open.isPending || restart.isPending;
   const pending = open.isPending ? open.variables : undefined;
-  const select = () => onSelect?.();
+  const select = useCallback(() => onSelect?.(), [onSelect]);
+  const openSession = useCallback(
+    (sessionFile: string) => open.mutate({ sessionFile }),
+    [open.mutate],
+  );
+  const restartRow = useCallback((agent: AgentInfo) => restart.mutate(agent.id), [restart.mutate]);
 
   const groups = useMemo(() => {
     const allAgents = Object.values(agents);
@@ -399,10 +427,13 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
   const rowItem = (row: SidebarRow, folder: string, disabled: boolean, project?: string) => (
     <Row
       key={row.key}
-      row={row}
+      title={row.title}
+      agent={row.agent}
+      sessionFile={row.sessionFile}
+      at={row.recency.at}
+      time={formatRelative(row.recency.at, now)}
       folder={folder}
       project={project}
-      now={now}
       current={row.agent !== undefined && row.agent.id === currentId}
       pending={
         row.agent !== undefined
@@ -412,8 +443,8 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
             pending.sessionFile === row.sessionFile
       }
       disabled={busy || disabled}
-      onOpen={(sessionFile) => open.mutate({ sessionFile })}
-      onRestart={(agent) => restart.mutate(agent.id)}
+      onOpen={openSession}
+      onRestart={restartRow}
       onSelect={select}
     />
   );

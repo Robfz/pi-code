@@ -2,7 +2,7 @@ import type { AgentId, AgentInfo } from "@pi-code/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { LoaderIcon, XIcon } from "lucide-react";
-import { createContext, type ReactNode, useContext, useRef, useState } from "react";
+import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,57 +51,60 @@ export function StopOrDeleteProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [asked, setAsked] = useState<{ agent: AgentInfo; title: string } | null>(null);
 
-  const track = (key: string, running: boolean) => {
-    if (running) inFlight.current.add(key);
-    else inFlight.current.delete(key);
-    setPending(new Set(inFlight.current));
-  };
+  // Changes with `pending` only: every row's `×` consumes it.
+  const actions = useMemo<StopOrDelete>(() => {
+    const track = (key: string, running: boolean) => {
+      if (running) inFlight.current.add(key);
+      else inFlight.current.delete(key);
+      setPending(new Set(inFlight.current));
+    };
 
-  const onScreen = (agentId: AgentId) =>
-    router.state.matches.some(
-      (match) => (match.params as { agentId?: string }).agentId === agentId,
-    );
+    const onScreen = (agentId: AgentId) =>
+      router.state.matches.some(
+        (match) => (match.params as { agentId?: string }).agentId === agentId,
+      );
 
-  async function run(target: SessionTarget, request: () => Promise<void>) {
-    const key = targetKey(target);
-    if (inFlight.current.has(key)) return;
-    track(key, true);
-    try {
-      await request();
-      if ("agent" in target) {
-        const { id } = target.agent;
-        if (onScreen(id)) await router.navigate({ to: "/" });
-        registry.drop(id);
+    async function run(target: SessionTarget, request: () => Promise<void>) {
+      const key = targetKey(target);
+      if (inFlight.current.has(key)) return;
+      track(key, true);
+      try {
+        await request();
+        if ("agent" in target) {
+          const { id } = target.agent;
+          if (onScreen(id)) await router.navigate({ to: "/" });
+          registry.drop(id);
+        }
+      } catch (error) {
+        toast.error(errorMessage(error));
+      } finally {
+        track(key, false);
+        // The catalog frame leaves out `ownedBy`.
+        void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       }
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      track(key, false);
-      // The catalog frame leaves out `ownedBy`.
-      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     }
-  }
 
-  const stop = (agent: AgentInfo) => void run({ agent }, () => closeAgent(agent.id));
-  const remove = (target: SessionTarget) => {
-    const file = "agent" in target ? target.agent.sessionFile : target.file;
-    if (file !== undefined) void run(target, () => deleteSession(file));
-    // pi writes no session file before the first message: nothing to delete yet.
-    else if ("agent" in target) stop(target.agent);
-  };
-
-  const actions: StopOrDelete = {
-    dismiss: (target, title) => {
-      if ("agent" in target && isLive(target.agent)) {
-        setAsked({ agent: target.agent, title });
-        setOpen(true);
-      } else remove(target);
-    },
-    stop,
-    remove,
-    pending: (target) => pending.has(targetKey(target)),
-  };
+    const stop = (agent: AgentInfo) => void run({ agent }, () => closeAgent(agent.id));
+    const remove = (target: SessionTarget) => {
+      const file = "agent" in target ? target.agent.sessionFile : target.file;
+      if (file !== undefined) void run(target, () => deleteSession(file));
+      // pi writes no session file before the first message: nothing to delete yet.
+      else if ("agent" in target) stop(target.agent);
+    };
+    return {
+      dismiss: (target, title) => {
+        if ("agent" in target && isLive(target.agent)) {
+          setAsked({ agent: target.agent, title });
+          setOpen(true);
+        } else remove(target);
+      },
+      stop,
+      remove,
+      pending: (target) => pending.has(targetKey(target)),
+    };
+  }, [registry, queryClient, router, pending]);
+  const { stop, remove } = actions;
 
   const choose = (action: (agent: AgentInfo) => void) => {
     if (!open || !asked) return;
@@ -146,7 +149,7 @@ export function useStopOrDelete(): StopOrDelete {
 
 /**
  * A row's `×`: `agent`'s conversation, else that of the registry's agent holding `file`, else the
- * session `file`. Off while its own request is in flight.
+ * session `file` (`DismissButton`).
  */
 export function StopOrDeleteButton({
   title,
@@ -162,7 +165,6 @@ export function StopOrDeleteButton({
   file?: string | undefined;
   className?: string;
 }) {
-  const { dismiss, pending } = useStopOrDelete();
   const owner = useLive((s) =>
     agent !== undefined || file === undefined
       ? undefined
@@ -175,14 +177,35 @@ export function StopOrDeleteButton({
       ? { file }
       : undefined;
   if (target === undefined) return null;
+  return <DismissButton title={title} folder={folder} target={target} className={className} />;
+}
+
+/**
+ * The `×` of a row that knows its target's holder: Stop or delete for a live agent, else Delete.
+ * Off while its own request is in flight.
+ */
+export function DismissButton({
+  title,
+  folder,
+  target,
+  className,
+}: {
+  title: string;
+  /** The row's folder label, to tell apart same-titled rows. */
+  folder: string;
+  target: SessionTarget;
+  className?: string;
+}) {
+  const { dismiss, pending } = useStopOrDelete();
   const busy = pending(target);
+  const live = "agent" in target && isLive(target.agent);
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon-xs"
       className={cn("shrink-0 text-muted-foreground", className)}
-      aria-label={`${holder && isLive(holder) ? "Stop or delete" : "Delete"} ${title} (${folder})`}
+      aria-label={`${live ? "Stop or delete" : "Delete"} ${title} (${folder})`}
       disabled={busy}
       onClick={() => dismiss(target, title)}
     >
