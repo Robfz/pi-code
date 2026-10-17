@@ -1,0 +1,16 @@
+{
+  "name": "@pi-code/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "perf": "playwright test -c playwright.perf.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@pi-code/protocol": "workspace:*",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.0"
+  }
+}
