@@ -10,7 +10,7 @@ const THEME_COLOR = "#0d0d0d";
 
 /** Lazy Shiki chunks (grammars, themes, engine) go to their own folder, outside the precache. */
 const SHIKI_DIR = "shiki";
-const SHIKI_MODULE = /[\\/]node_modules[\\/](?:shiki|@shikijs|@streamdown[\\/]code)[\\/]/;
+const SHIKI_MODULE = /[\\/]node_modules[\\/](?:shiki|@shikijs)[\\/]/;
 
 export default defineConfig({
   plugins: [

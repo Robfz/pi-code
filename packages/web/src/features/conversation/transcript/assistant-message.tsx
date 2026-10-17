@@ -40,7 +40,8 @@ export function StopReasonNotice({
 
 /**
  * Assistant text (Streamdown). Line references in it are clickable (`span[data-code-ref]`,
- * handled here by delegation).
+ * handled here by delegation), streaming or not: switching `codeRefs` when the text finishes
+ * would parse every block of it again.
  */
 export function AssistantText({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const openReference = useOpenReference();
@@ -62,7 +63,7 @@ export function AssistantText({ text, streaming = false }: { text: string; strea
         if (event.key === "Enter" && openAt(event.target)) event.preventDefault();
       }}
     >
-      <Markdown text={text} streaming={streaming} codeRefs={!streaming} />
+      <Markdown text={text} streaming={streaming} codeRefs />
     </div>
   );
 }
