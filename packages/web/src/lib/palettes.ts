@@ -7,33 +7,33 @@ export type Palette =
   | "neutral"
   | "macos"
   | "catppuccin"
-  | "nord"
   | "tokyo-night"
-  | "abyss"
   | "aurora"
   | "sumi"
-  | "sakura";
+  | "deco"
+  | "volt"
+  | "dusk";
 
 export const PALETTES: readonly Palette[] = [
   "neutral",
   "macos",
   "catppuccin",
-  "nord",
   "tokyo-night",
-  "abyss",
   "aurora",
   "sumi",
-  "sakura",
+  "deco",
+  "volt",
+  "dusk",
 ];
 
 export const PALETTE_LABEL: Record<Palette, string> = {
   neutral: "Neutral",
   macos: "macOS",
   catppuccin: "Catppuccin",
-  nord: "Nord",
   "tokyo-night": "Tokyo Night",
-  abyss: "Abyss",
   aurora: "Aurora",
   sumi: "Sumi",
-  sakura: "Sakura",
+  deco: "Deco",
+  volt: "Volt",
+  dusk: "Dusk",
 };

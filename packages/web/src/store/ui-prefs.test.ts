@@ -29,9 +29,9 @@ describe("ui prefs", () => {
 
   it("persists the density and palette as version 1", async () => {
     useUiPrefs.getState().setDensity("compact");
-    useUiPrefs.getState().setPalette("nord");
+    useUiPrefs.getState().setPalette("deco");
     expect(JSON.parse(localStorage.getItem(KEY) ?? "{}")).toEqual({
-      state: { density: "compact", palette: "nord" },
+      state: { density: "compact", palette: "deco" },
       version: 1,
     });
     expect(await rehydrateFrom({ state: { density: "compact" }, version: 1 })).toBe("compact");
