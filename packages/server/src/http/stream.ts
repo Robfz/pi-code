@@ -1,8 +1,8 @@
-import type { AgentId, CursorList, SequencedEvent, StreamFrame } from "@pi-code/protocol";
+import type { AgentId, CursorList, StreamFrame } from "@pi-code/protocol";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentManager } from "../agents/agent-manager.ts";
-import type { EventLog } from "../agents/event-log.ts";
+import type { EventLog, LoggedEvent } from "../agents/event-log.ts";
 import type { StreamHub } from "../live/stream-hub.ts";
 
 export interface SseOptions {
@@ -35,6 +35,15 @@ function parseCursors(value: string | undefined): Map<AgentId, number> {
     cursors.set(id, /^\d+$/.test(seq) ? Number(seq) : Number.NaN);
   }
   return cursors;
+}
+
+/**
+ * The `data:` of an agent's `event` frame: `JSON.stringify` of `{ type, agentId, seq, event }`,
+ * built around the event's JSON from the log, so each event is serialised once however many
+ * connections stream it.
+ */
+export function eventFrameData(agentId: AgentId, { seq, json }: LoggedEvent): string {
+  return `{"type":"event","agentId":${JSON.stringify(agentId)},"seq":${seq},"event":${json}}`;
 }
 
 /**
@@ -74,7 +83,7 @@ export function streamRoutes(manager: AgentManager, hub: StreamHub, opts: SseOpt
 
       // Replay and subscription happen in one synchronous block: publishing is synchronous
       // too, so no event can fall between them.
-      const streamed: { id: AgentId; log: EventLog; replay: SequencedEvent[] | undefined }[] = [];
+      const streamed: { id: AgentId; log: EventLog; replay: LoggedEvent[] | undefined }[] = [];
       // Each streamed agent's position, listed in `open` order. A resyncing agent has none until
       // its `resync` is queued, a closed one none from then on.
       const cursors = new Map<AgentId, number>();
@@ -87,15 +96,16 @@ export function streamRoutes(manager: AgentManager, hub: StreamHub, opts: SseOpt
         streamed.push({ id, log, replay });
         if (replay !== undefined) cursors.set(id, seq);
       }
-      const frame = (f: StreamFrame) => {
+      const sseFrame = (data: string) => {
         const ids: CursorList = streamed
           .flatMap(({ id }) => (cursors.has(id) ? [`${id}:${cursors.get(id)}`] : []))
           .join(",");
-        return `id: ${ids}\ndata: ${JSON.stringify(f)}\n\n`;
+        return `id: ${ids}\ndata: ${data}\n\n`;
       };
-      const eventFrame = (agentId: AgentId, { seq, event }: SequencedEvent) => {
-        cursors.set(agentId, seq);
-        return frame({ type: "event", agentId, seq, event });
+      const frame = (f: StreamFrame) => sseFrame(JSON.stringify(f));
+      const eventFrame = (agentId: AgentId, logged: LoggedEvent) => {
+        cursors.set(agentId, logged.seq);
+        return sseFrame(eventFrameData(agentId, logged));
       };
 
       // Written in order before the queue, one write each.
