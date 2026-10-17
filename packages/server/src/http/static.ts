@@ -23,8 +23,48 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
+ * Precompressed variants the web build writes next to its files (`web: scripts/compress-dist.ts`),
+ * in order of preference.
+ */
+const ENCODINGS = [
+  { name: "br", suffix: ".br" },
+  { name: "gzip", suffix: ".gz" },
+] as const;
+
+/**
+ * The precompressed variants `Accept-Encoding` allows (listed or through `*`, with a non-zero q),
+ * highest q first and ties in preference order (RFC 9110, section 12.5.3).
+ */
+function acceptedEncodings(header: string | undefined): (typeof ENCODINGS)[number][] {
+  const qualities = new Map<string, number>();
+  for (const part of header?.split(",") ?? []) {
+    const [token, ...params] = part.split(";").map((s) => s.trim().toLowerCase());
+    if (!token || qualities.has(token)) continue;
+    const q = params.find((p) => p.startsWith("q="));
+    qualities.set(token, q === undefined ? 1 : Number(q.slice(2)) || 0);
+  }
+  const wildcard = qualities.get("*") ?? 0;
+  return ENCODINGS.map((encoding) => ({ encoding, q: qualities.get(encoding.name) ?? wildcard }))
+    .filter(({ q }) => q > 0)
+    .sort((a, b) => b.q - a.q)
+    .map(({ encoding }) => encoding);
+}
+
+/** The variant of `path` to send for `acceptEncoding`: a precompressed file, else `path` itself. */
+async function variantFor(
+  path: string,
+  acceptEncoding: string | undefined,
+): Promise<{ path: string; encoding?: string }> {
+  for (const { name, suffix } of acceptedEncodings(acceptEncoding)) {
+    if (await isFile(path + suffix)) return { path: path + suffix, encoding: name };
+  }
+  return { path };
+}
+
+/**
  * Serves the built SPA from `dir`: existing files as-is, `index.html` for any other path
- * (client-side routes), except under `/assets/` where a miss is a real 404.
+ * (client-side routes), except under `/assets/` where a miss is a real 404. A file with a
+ * precompressed variant the client accepts is sent as that variant.
  */
 export function spaHandler(dir: string) {
   const root = normalize(dir);
@@ -48,14 +88,17 @@ export function spaHandler(dir: string) {
       if (rel.startsWith("assets/")) return c.text("Not Found", 404);
       file = "index.html";
     }
+    const variant = await variantFor(join(root, file), c.req.header("accept-encoding"));
     let body: Buffer;
     try {
-      body = await readFile(join(root, file));
+      body = await readFile(variant.path);
     } catch {
       return c.text("Not Found", 404);
     }
     c.header("Content-Type", getMimeType(file) ?? "application/octet-stream");
     c.header("Cache-Control", cacheControlFor(file));
+    c.header("Vary", "Accept-Encoding");
+    if (variant.encoding) c.header("Content-Encoding", variant.encoding);
     if (c.req.method === "HEAD") {
       c.header("Content-Length", String(body.byteLength));
       return c.body(null, 200);

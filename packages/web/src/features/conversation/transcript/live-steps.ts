@@ -16,45 +16,59 @@ function sortedBlocks(blocks: Record<number, StreamingBlock>): [number, Streamin
     .sort((a, b) => a[0] - b[0]);
 }
 
+/** Whether `text` has a non-space character; stops at the first one instead of copying it. */
+const hasContent = (text: string) => /\S/.test(text);
+
+function blockStep(key: string, index: number, block: StreamingBlock): Step | undefined {
+  switch (block.type) {
+    case "text":
+      return hasContent(block.text)
+        ? { kind: "text", key, text: block.text, streaming: !block.done }
+        : undefined;
+    case "thinking":
+      return block.done && !hasContent(block.text)
+        ? undefined
+        : {
+            kind: "thinking",
+            key,
+            text: block.text,
+            redacted: false,
+            live: !block.done,
+            startedAt: block.startedAt,
+            endedAt: block.endedAt,
+          };
+    case "toolCall":
+      return {
+        kind: "tool",
+        key: block.id || `pending-${index}`,
+        toolCallId: block.id,
+        toolName: block.name,
+        args: block.call?.arguments,
+        argsText: block.argsText,
+        streaming: block.call === undefined,
+      };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Each streaming block's step. A delta replaces only its own block (`reduceLive`), so the other
+ * blocks' steps keep their identity and their rows skip re-rendering. A block object belongs to
+ * one message at one index, so its key never changes.
+ */
+const stepOfBlock = new WeakMap<StreamingBlock, Step | null>();
+
 /** The steps of the assistant message in flight. */
-function streamingSteps(streaming: StreamingMessage | undefined): Step[] {
+export function streamingSteps(streaming: StreamingMessage | undefined): Step[] {
   if (streaming === undefined) return [];
   return sortedBlocks(streaming.blocks).flatMap(([index, block]): Step[] => {
-    const key = blockKey(streaming.timestamp, index);
-    switch (block.type) {
-      case "text":
-        return block.text.trim() === ""
-          ? []
-          : [{ kind: "text", key, text: block.text, streaming: !block.done }];
-      case "thinking":
-        return block.done && block.text.trim() === ""
-          ? []
-          : [
-              {
-                kind: "thinking",
-                key,
-                text: block.text,
-                redacted: false,
-                live: !block.done,
-                startedAt: block.startedAt,
-                endedAt: block.endedAt,
-              },
-            ];
-      case "toolCall":
-        return [
-          {
-            kind: "tool",
-            key: block.id || `pending-${index}`,
-            toolCallId: block.id,
-            toolName: block.name,
-            args: block.call?.arguments,
-            argsText: block.argsText,
-            streaming: block.call === undefined,
-          },
-        ];
-      default:
-        return [];
+    let step = stepOfBlock.get(block);
+    if (step === undefined) {
+      step = blockStep(blockKey(streaming.timestamp, index), index, block) ?? null;
+      stepOfBlock.set(block, step);
     }
+    return step === null ? [] : [step];
   });
 }
 

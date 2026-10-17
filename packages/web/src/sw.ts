@@ -4,6 +4,8 @@
  *
  * - Precaches the app shell; navigations fall back to `index.html` (except `/api/…`); API
  *   requests always go to the network (no route registered for them).
+ * - Caches the lazy assets left out of the precache (`sw/lazy-assets.ts`) on first use, so they
+ *   work offline from then on (the 200 most recently used of them).
  * - `push`: set / clear the app badge; show a notification unless a pi-code window is focused
  *   (that window gets a message instead, so it can refresh and toast).
  * - `notificationclick`: focus a pi-code window and route it to the conversation, else open one.
@@ -11,12 +13,15 @@
  */
 
 import { clientsClaim } from "workbox-core";
+import { ExpirationPlugin } from "workbox-expiration";
 import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
   precacheAndRoute,
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
+import { CacheFirst } from "workbox-strategies";
+import { isLazyAsset } from "./sw/lazy-assets.ts";
 import {
   badgeAction,
   hasFocusedClient,
@@ -34,6 +39,15 @@ precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL("index.html"), { denylist: [/^\/api(\/|$)/] }),
+);
+// Content-hashed, so a cached copy never goes stale and needs no age limit. Past `maxEntries` the
+// least recently used go first, which drops what deploys left behind.
+registerRoute(
+  ({ sameOrigin, url }) => sameOrigin && isLazyAsset(url.pathname),
+  new CacheFirst({
+    cacheName: "lazy-assets",
+    plugins: [new ExpirationPlugin({ maxEntries: 200, purgeOnQuotaError: true })],
+  }),
 );
 
 // A new version waits until the app asks (the "Update available" toast), so a reload never

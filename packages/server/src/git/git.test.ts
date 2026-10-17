@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { GitFileDiff } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "../errors.ts";
-import { gitDiff, gitStatus, MAX_PATCH_BYTES } from "./git.ts";
+import { FILE_DIFF_CONCURRENCY, gitDiff, gitStatus, MAX_PATCH_BYTES } from "./git.ts";
 
 // Spied on to count the git processes a diff spawns.
 vi.mock("node:child_process", async (importOriginal) => {
@@ -49,6 +49,17 @@ async function diffError(...args: Parameters<typeof gitDiff>): Promise<unknown> 
     return e;
   }
   return undefined;
+}
+
+/** Commits `count` files `<i>.txt`, then turns each into a symlink: a type change per file. */
+function typeChanges(count: number): void {
+  writeFileSync(join(repo, "t.txt"), "target\n");
+  for (let i = 0; i < count; i++) writeFileSync(join(repo, `${i}.txt`), `${i}\n`);
+  commit();
+  for (let i = 0; i < count; i++) {
+    unlinkSync(join(repo, `${i}.txt`));
+    execFileSync("ln", ["-s", "t.txt", `${i}.txt`], { cwd: repo });
+  }
 }
 
 describe("gitDiff", () => {
@@ -178,6 +189,41 @@ describe("gitDiff", () => {
     expect(files.link).toMatchObject({ status: "modified" });
     expect(files.link?.patch).toContain("+t.txt");
     expect(files["t.txt"]?.patch).toContain("+target 2");
+  });
+
+  it("diffs every file in the per-file fallback", async () => {
+    const count = 30;
+    typeChanges(count);
+    const files = byPath((await gitDiff(repo)).files);
+    expect(Object.keys(files)).toHaveLength(count);
+    for (let i = 0; i < count; i++) {
+      expect(files[`${i}.txt`]).toMatchObject({ status: "modified" });
+      expect(files[`${i}.txt`]?.patch).toContain(`-${i}\n`);
+      expect(files[`${i}.txt`]?.patch).toContain("+t.txt");
+    }
+  });
+
+  it("runs the per-file fallback at most FILE_DIFF_CONCURRENCY at a time", async () => {
+    typeChanges(30);
+    const real = vi.mocked(spawn).getMockImplementation() as typeof spawn;
+    let running = 0;
+    let peak = 0;
+    vi.mocked(spawn).mockImplementation(((command: string, args: string[], options: object) => {
+      const child = real(command, args, options);
+      // Only the fallback passes `--literal-pathspecs`.
+      if (args.includes("--literal-pathspecs")) {
+        peak = Math.max(peak, ++running);
+        child.on("close", () => running--);
+      }
+      return child;
+    }) as typeof spawn);
+    try {
+      expect((await gitDiff(repo)).files).toHaveLength(30);
+    } finally {
+      vi.mocked(spawn).mockImplementation(real);
+    }
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(FILE_DIFF_CONCURRENCY);
   });
 
   it("rejects a directory outside any work tree", async () => {

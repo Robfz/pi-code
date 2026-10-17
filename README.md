@@ -72,7 +72,11 @@ On macOS, notifications come from the browser (its name and icon) unless you ena
 pnpm dev          # server (tsx watch, NODE_ENV=development, hostname localhost) + Vite dev server
 pnpm test         # vitest, all packages (uses a fake pi replaying recorded fixtures; no tokens spent)
 pnpm check        # biome + typecheck
+pnpm e2e          # Playwright regression tests: production build, real server, fake pi, desktop + mobile Chromium
+pnpm e2e:perf     # Playwright timing scenarios → e2e/results/ (pnpm e2e:compare a.json b.json diffs two)
 ```
+
+The Playwright suites are described in [`e2e/README.md`](e2e/README.md); they aren't part of `pnpm test`.
 
 End-to-end smoke test against the real pi (spends a few cents with claude-haiku-4-5):
 

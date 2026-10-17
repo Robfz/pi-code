@@ -1,14 +1,25 @@
 import type { Element, Root } from "hast";
 import { ImageIcon, ImageOffIcon } from "lucide-react";
-import { type ComponentProps, memo, useState } from "react";
+import {
+  type ComponentProps,
+  cloneElement,
+  isValidElement,
+  memo,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import {
   type Components,
   type ControlsConfig,
   defaultRehypePlugins,
+  parseMarkdownIntoBlocks,
   Streamdown,
+  StreamdownContext,
   type StreamdownProps,
+  useIsCodeFenceIncomplete,
 } from "streamdown";
-import { lazyCodePlugin } from "@/lib/code-highlighter";
+import { lazyCodePlugin, PLAIN_THEMES } from "@/lib/code-highlighter";
 import { rehypeCodeRefs } from "@/lib/code-refs-rehype";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +94,46 @@ function MarkdownImage({ src, alt }: Pick<ComponentProps<"img">, "src" | "alt">)
   );
 }
 
-const COMPONENTS: Components = { img: MarkdownImage as Components["img"] };
+/**
+ * Streamdown's `pre` (it marks its `code` child as a block), showing a code fence still streaming
+ * unhighlighted (`PLAIN_THEMES`): Shiki would tokenise the growing block again on every delta. The
+ * block highlights once its fence closes or the message finishes. The provider stays in place
+ * either way, so the block isn't remounted when it switches.
+ */
+function CodeBlockPre({ children }: ComponentProps<"pre">) {
+  const context = useContext(StreamdownContext);
+  const incomplete = useIsCodeFenceIncomplete();
+  const plain = useMemo(() => ({ ...context, shikiTheme: PLAIN_THEMES }), [context]);
+  return (
+    <StreamdownContext.Provider value={incomplete ? plain : context}>
+      {isValidElement<Record<string, unknown>>(children)
+        ? cloneElement(children, { "data-block": "true" })
+        : children}
+    </StreamdownContext.Provider>
+  );
+}
+
+const COMPONENTS: Components = {
+  img: MarkdownImage as Components["img"],
+  pre: CodeBlockPre as Components["pre"],
+};
+
+/**
+ * A line starting a link reference or footnote definition (`[1]: https://…`, `[^1]: …`), inside
+ * blockquotes and list items too. A false match (in a code block, say) only costs keeping the text
+ * whole.
+ */
+const DEFINITION = /^(?:[ \t]*(?:>|[-+*][ \t]|\d{1,9}[.)][ \t]))*[ \t]*\[[^\]]+\]:/m;
+
+/**
+ * Streamdown's split into separately rendered blocks, keeping a finished text with link reference
+ * or footnote definitions whole: a reference resolves only against the definitions in its own
+ * block. Streaming text stays split (its references show as written until it finishes), so a
+ * definition doesn't turn every later delta into a parse of the whole text.
+ */
+function parseFinishedBlocks(markdown: string): string[] {
+  return DEFINITION.test(markdown) ? [markdown] : parseMarkdownIntoBlocks(markdown);
+}
 
 type RehypePlugins = NonNullable<StreamdownProps["rehypePlugins"]>;
 interface SanitizeSchema {
@@ -140,10 +190,16 @@ const CONTROLS: ControlsConfig = { code: { copy: true, download: false } };
 /**
  * Markdown via Streamdown; `streaming` enables incomplete-markdown handling for live text.
  * Single newlines inside a paragraph render as line breaks (`pre-line`), like pi's TUI.
- * Code blocks are highlighted by `@streamdown/code` (Shiki, languages loaded on demand); their
+ * Code blocks are highlighted by Shiki (`lazyCodePlugin`, languages loaded on demand); their
  * chrome and the prose styles live in `index.css` (`.markdown`).
  * `codeRefs` marks line references as `span[data-code-ref]` (`rehypeCodeRefs`); the caller
  * handles their clicks.
+ *
+ * Text that mounts streaming keeps Streamdown's streaming mode once it finishes: static mode
+ * renders it as one tree, so switching would replace its DOM and highlight its code blocks again.
+ * Streaming mode renders it block by block, and only the blocks that change re-render, as long as
+ * the rehype plugins stay the same (a caller keeps `codeRefs` fixed). A finished text with
+ * definitions is the exception: it becomes one block (`parseFinishedBlocks`), rendered again once.
  */
 export const Markdown = memo(function Markdown({
   text,
@@ -156,15 +212,17 @@ export const Markdown = memo(function Markdown({
   codeRefs?: boolean;
   className?: string;
 }) {
+  const [mode] = useState<StreamdownProps["mode"]>(streaming ? "streaming" : "static");
   return (
     <Streamdown
       className={cn(
         "markdown min-w-0 space-y-[0.8em] break-words text-prose [&_p]:whitespace-pre-line",
         className,
       )}
-      mode={streaming ? "streaming" : "static"}
+      mode={mode}
       isAnimating={streaming}
       parseIncompleteMarkdown={streaming}
+      parseMarkdownIntoBlocksFn={streaming ? parseMarkdownIntoBlocks : parseFinishedBlocks}
       components={COMPONENTS}
       rehypePlugins={codeRefs ? REHYPE_PLUGINS_WITH_CODE_REFS : REHYPE_PLUGINS}
       plugins={PLUGINS}

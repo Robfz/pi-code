@@ -76,6 +76,7 @@ export function ConversationScreen() {
         <ConversationHeader inert={inert} />
         <div
           ref={scrollRef}
+          data-testid="transcript-scroll"
           inert={inert}
           className={cn(
             "min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable_both-edges]",

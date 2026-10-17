@@ -24,6 +24,16 @@ describe("Thinking", () => {
     expect(within(row()).getByText(/First I'll read the file\./)).toBeInTheDocument();
   });
 
+  it.each([
+    ["first\r\n  second line  \r\n \n\t\n", "second line"],
+    ["only", "only"],
+    [" \n \n", null],
+    ["", null],
+  ])("live: previews the last non-blank line, trimmed (%j)", async (text, preview) => {
+    await view(<Thinking live text={text} />);
+    expect(screen.queryByTestId("thinking-preview")?.textContent ?? null).toBe(preview);
+  });
+
   it("done: 'Thought for 12s' from startedAt / endedAt", async () => {
     await view(<Thinking text="pondering" startedAt={1_000} endedAt={13_400} />);
     expect(trigger()).toHaveTextContent("Thoughtfor 12s");

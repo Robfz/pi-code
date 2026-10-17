@@ -1,7 +1,22 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { lazyCodePlugin, PLAIN_THEMES } from "@/lib/code-highlighter";
+import { splitCodeRefs } from "@/lib/code-refs";
 import { imagePolicy, Markdown } from "./markdown";
+
+// Calls show which text nodes `rehypeCodeRefs` saw, that is which blocks were parsed.
+vi.mock("@/lib/code-refs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/code-refs")>();
+  return { ...actual, splitCodeRefs: vi.fn(actual.splitCodeRefs) };
+});
+
+/** The text nodes parsed since `splitCodeRefs` was last cleared, blank ones left out. */
+const parsedTexts = () =>
+  vi
+    .mocked(splitCodeRefs)
+    .mock.calls.map(([text]) => text)
+    .filter((text) => text.trim() !== "");
 
 const PIXEL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -95,6 +110,132 @@ describe("Markdown codeRefs", () => {
   });
 });
 
+describe("Markdown while streaming", () => {
+  it("shows an unterminated code fence as an incomplete code block", () => {
+    const { container } = render(<Markdown text={"Here:\n\n```ts\nconst a = 1;"} streaming />);
+    const block = container.querySelector('[data-streamdown="code-block"]');
+    expect(block).toHaveAttribute("data-incomplete", "true");
+    expect(block).toHaveTextContent("const a = 1;");
+    expect(container).not.toHaveTextContent("```");
+  });
+
+  it("closes incomplete bold", () => {
+    const { container } = render(<Markdown text="some **bold" streaming />);
+    expect(container.querySelector('[data-streamdown="strong"]')).toHaveTextContent(/^bold$/);
+    expect(container).not.toHaveTextContent("**");
+  });
+
+  it("shows a partial link as an incomplete link", () => {
+    const { container } = render(<Markdown text="see [the docs](https://x.ex" streaming />);
+    const link = screen.getByText("the docs");
+    expect(link).toHaveAttribute("data-streamdown", "link");
+    expect(link).toHaveAttribute("data-incomplete", "true");
+    expect(container).not.toHaveTextContent("](");
+  });
+
+  it("marks code references while streaming and keeps the text once finished", () => {
+    const text = "Look at @src/a.ts:3 first.\n\n```ts\nconst a = 1;\n```\n\nThen";
+    const { container, rerender } = render(<Markdown text={text} streaming codeRefs />);
+    expect(container.querySelector("[data-code-ref]")).toHaveTextContent("@src/a.ts:3");
+    rerender(<Markdown text={text} codeRefs />);
+    expect(container).toHaveTextContent("Look at @src/a.ts:3 first.");
+    expect(container).toHaveTextContent("const a = 1;");
+    expect(container).toHaveTextContent(/Then$/);
+    expect(container.querySelector("[data-code-ref]")).toHaveTextContent("@src/a.ts:3");
+  });
+
+  it("parses only the last block on a delta, definitions or not", () => {
+    const text = "See [the docs][1] at @src/a.ts:3.\n\n[1]: https://x.example/docs\n\nMore";
+    const { rerender } = render(<Markdown text={text} streaming codeRefs />);
+    // A reference shows as written until the message finishes.
+    expect(screen.getByText(/the docs/)).not.toHaveAttribute("data-streamdown", "link");
+    vi.mocked(splitCodeRefs).mockClear();
+    rerender(<Markdown text={`${text} text`} streaming codeRefs />);
+    expect(parsedTexts()).toEqual(["More text"]);
+  });
+});
+
+describe("Markdown from streaming to finished", () => {
+  const keyword = (container: HTMLElement) =>
+    expect(within(container).getAllByText("const")[0]).toHaveStyle({
+      "--sdm-c": "var(--syntax-keyword)",
+    });
+
+  // Streamdown's highlighted code body and Shiki load lazily: once loaded, every render goes
+  // through the highlighter.
+  beforeAll(async () => {
+    const { container, unmount } = render(<Markdown text={"```ts\nconst warm = 1;\n```"} />);
+    await waitFor(() => keyword(container), { timeout: 5_000 });
+    unmount();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("leaves a code fence unhighlighted until it closes", async () => {
+    const highlight = vi.spyOn(lazyCodePlugin, "highlight");
+    const open = "Here:\n\n```ts\nconst a = 1;\nconst b";
+    const { container, rerender } = render(<Markdown text={open} streaming />);
+    rerender(<Markdown text={`${open} = 2;`} streaming />);
+    expect(container).toHaveTextContent("const a = 1;const b = 2;");
+    expect(highlight).toHaveBeenCalled();
+    for (const [options] of highlight.mock.calls) expect(options.themes).toBe(PLAIN_THEMES);
+
+    rerender(<Markdown text={`${open} = 2;\n\`\`\`\n\nMore`} streaming />);
+    await waitFor(() => keyword(container), { timeout: 5_000 });
+    expect(highlight.mock.calls.at(-1)?.[0].themes).not.toBe(PLAIN_THEMES);
+  });
+
+  it("highlights a fence left open once the message finishes", async () => {
+    const text = "```ts\nconst a = 1;";
+    const { container, rerender } = render(<Markdown text={text} streaming />);
+    rerender(<Markdown text={text} codeRefs />);
+    await waitFor(() => keyword(container), { timeout: 5_000 });
+  });
+
+  it("keeps the earlier blocks' DOM, highlighting and parse", async () => {
+    const text = "Look at @src/a.ts:3 first.\n\n```ts\nconst a = 1;\n```\n\nThen **more";
+    const { container, rerender } = render(<Markdown text={text} streaming codeRefs />);
+    await waitFor(() => keyword(container), { timeout: 5_000 });
+    const paragraph = container.querySelector("p");
+    const block = container.querySelector('[data-streamdown="code-block"]');
+    const code = within(container).getAllByText("const")[0];
+    const highlight = vi.spyOn(lazyCodePlugin, "highlight");
+    vi.mocked(splitCodeRefs).mockClear();
+
+    rerender(<Markdown text={text} codeRefs />);
+    expect(container.querySelector("p")).toBe(paragraph);
+    expect(container.querySelector('[data-streamdown="code-block"]')).toBe(block);
+    expect(within(container).getAllByText("const")[0]).toBe(code);
+    expect(highlight).not.toHaveBeenCalled();
+    // Only the last block changes: its bold is no longer closed for it.
+    expect(parsedTexts()).toEqual(["Then **more"]);
+    expect(container.querySelector("[data-code-ref]")).toHaveTextContent("@src/a.ts:3");
+    expect(container).toHaveTextContent(/Then \*\*more$/);
+  });
+
+  it("resolves link references in a finished message", () => {
+    const text = "See [the docs][1].\n\nMore text.\n\n[1]: https://x.example/docs";
+    const { rerender } = render(<Markdown text={text} streaming codeRefs />);
+    rerender(<Markdown text={text} codeRefs />);
+    expect(screen.getByText("the docs")).toHaveAttribute("data-streamdown", "link");
+    expect(screen.queryByText(/\[1\]/)).toBeNull();
+  });
+
+  it("resolves references to definitions inside blockquotes and list items", () => {
+    const text = [
+      "See [the docs][1] and [the spec][2].",
+      "> Sources:\n>\n> [1]: https://x.example/docs",
+      "- Also:\n\n  [2]: https://x.example/spec",
+    ].join("\n\n");
+    const { rerender } = render(<Markdown text={text} streaming />);
+    rerender(<Markdown text={text} />);
+    expect(screen.getByText("the docs")).toHaveAttribute("data-streamdown", "link");
+    expect(screen.getByText("the spec")).toHaveAttribute("data-streamdown", "link");
+  });
+});
+
 describe("imagePolicy", () => {
   it("classifies image URLs", () => {
     expect(imagePolicy("https://x.example/a.png")).toEqual({ kind: "click", host: "x.example" });
@@ -145,7 +286,6 @@ describe("code highlighting", () => {
       () =>
         expect(within(container).getByText("const")).toHaveStyle({
           "--sdm-c": "var(--syntax-keyword)",
-          "--shiki-dark": "var(--syntax-keyword)",
         }),
       { timeout: 5_000 },
     );

@@ -8,6 +8,17 @@
  * - `resync`, or an `agent_status` turning the agent `ready`, refetches that store the same way.
  *   Until it's hydrated again it ignores its frames and is left out of reconnect URLs; what it
  *   missed replays after the reconnect that follows its hydrate.
+ * - `event` frames are buffered per store and applied once per animation frame, in one store
+ *   update each. A hidden tab gets no animation frames, so a `FLUSH_TIMEOUT_MS` timer and
+ *   `visibilitychange` flush too. Every other frame, stream error or close, and every reconnect,
+ *   flushes first, so effects keep the stream's order. Each event's side effects (the ready
+ *   refetch, the `git_status` invalidation) run as it is applied. A refetch discards the
+ *   store's buffer: its snapshot supersedes it.
+ * - Stores off screen (released) stay open, so going back to a conversation doesn't refetch it,
+ *   until a hydrate reconnects the stream anyway: then all but the `KEEP_RELEASED` most recently
+ *   used (opened, or left the screen) are evicted, leaving the cursor list without an extra
+ *   reconnect. An evicted store isn't closed; opening its agent again creates a new one from a
+ *   snapshot.
  * - EventSource reconnects by itself (with `Last-Event-ID`) after transient errors; when it gives
  *   up (`CLOSED`) the registry reconnects with a backoff, as it retries failed snapshots. On
  *   visible, window `focus` or `online`, a closed stream or one silent for `STALE_AFTER_MS` (the
@@ -24,6 +35,7 @@ import {
   type AgentId,
   type AgentInfo,
   applySidebarPatch,
+  type SequencedEvent,
   SIDEBAR_KEYS,
   type SidebarPatch,
   type SidebarState,
@@ -80,10 +92,23 @@ export interface RegistryDeps {
     Document,
     "visibilityState" | "hasFocus" | "addEventListener" | "removeEventListener"
   >;
-  window: Pick<Window, "addEventListener" | "removeEventListener"> & {
+  window: Pick<
+    Window,
+    "addEventListener" | "removeEventListener" | "requestAnimationFrame" | "cancelAnimationFrame"
+  > & {
     navigator: { onLine: boolean };
   };
 }
+
+/** Longest an event waits to be applied when animation frames don't come (hidden tab). */
+export const FLUSH_TIMEOUT_MS = 100;
+
+/**
+ * Released stores kept open: enough to go back and forth between the last few conversations
+ * without a snapshot fetch, while each kept store costs its transcript in memory and its events
+ * in every stream and replay.
+ */
+export const KEEP_RELEASED = 3;
 
 /** Backoff between failed attempts, in ms; the last value repeats. */
 const RETRY_DELAYS = [1_000, 2_000, 5_000, 10_000] as const;
@@ -106,6 +131,10 @@ interface Opened {
   generation: number;
   failures: number;
   retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Events received and not yet applied. */
+  pending: SequencedEvent[];
+  /** When it was last opened or left the screen, on the registry's `clock`. */
+  usedAt: number;
 }
 
 export class LiveRegistry {
@@ -127,6 +156,10 @@ export class LiveRegistry {
   /** When the current stream last showed signs of life (open, message or ping). */
   private lastMessageAt = 0;
   private onScreen: AgentId | undefined;
+  private flushFrame: number | undefined;
+  private flushTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Orders opens and departures from the screen, for eviction. */
+  private clock = 0;
 
   constructor(
     queryClient: Pick<QueryClient, "invalidateQueries">,
@@ -167,13 +200,18 @@ export class LiveRegistry {
   /** The agent's store, created and loaded on first call. */
   open(agentId: AgentId): ConversationStore {
     const existing = this.opened.get(agentId);
-    if (existing) return existing.store;
+    if (existing) {
+      existing.usedAt = ++this.clock;
+      return existing.store;
+    }
     const entry: Opened = {
       store: createConversationStore(agentId),
       refetching: true,
       generation: 0,
       failures: 0,
       retryTimer: undefined,
+      pending: [],
+      usedAt: ++this.clock,
     };
     this.opened.set(agentId, entry);
     this.refetch(entry);
@@ -184,17 +222,21 @@ export class LiveRegistry {
   drop(agentId: AgentId): void {
     const entry = this.opened.get(agentId);
     if (!entry) return;
-    clearTimeout(entry.retryTimer);
-    this.opened.delete(agentId);
+    this.forget(entry);
     entry.store.getState().markClosed();
   }
 
-  /** Marks the conversation on screen and acks it; returns the cleanup for when it leaves. */
+  /**
+   * Marks the conversation on screen, which keeps its store from eviction, and acks it; returns
+   * the cleanup for when it leaves.
+   */
   show(agentId: AgentId): () => void {
     this.onScreen = agentId;
     this.ack(agentId);
     return () => {
       if (this.onScreen === agentId) this.onScreen = undefined;
+      const entry = this.opened.get(agentId);
+      if (entry) entry.usedAt = ++this.clock;
     };
   }
 
@@ -228,6 +270,7 @@ export class LiveRegistry {
   private refetch(entry: Opened): void {
     const generation = ++entry.generation;
     entry.refetching = true;
+    entry.pending = [];
     clearTimeout(entry.retryTimer);
     if (!this.running) return;
     const { store } = entry;
@@ -243,6 +286,7 @@ export class LiveRegistry {
         store.getState().setConnection(this.live.getState().connection);
         // Events dropped during the refetch may include a `git_status`.
         this.invalidateReview(agentId);
+        this.evictReleased();
         this.reconnect();
       },
       (error: unknown) => {
@@ -257,8 +301,25 @@ export class LiveRegistry {
     );
   }
 
+  /** Evicts released stores (all but the one on screen) beyond the `KEEP_RELEASED` most recent. */
+  private evictReleased(): void {
+    const released = [...this.opened]
+      .filter(([id]) => id !== this.onScreen)
+      .map(([, entry]) => entry)
+      .sort((a, b) => b.usedAt - a.usedAt);
+    for (const entry of released.slice(KEEP_RELEASED)) this.forget(entry);
+  }
+
+  /** Stops feeding the entry's store; a snapshot in flight for it is dropped when it lands. */
+  private forget(entry: Opened): void {
+    clearTimeout(entry.retryTimer);
+    entry.pending = [];
+    this.opened.delete(entry.store.getState().agentId);
+  }
+
   /** Replaces the stream with one opening every hydrated store at its `seq`. */
   private reconnect(): void {
+    // Closing applies buffered events, so the cursors below include them.
     this.closeStream();
     if (!this.running) return;
     const cursors = [...this.opened]
@@ -284,6 +345,7 @@ export class LiveRegistry {
     };
     es.addEventListener("ping", this.onPing);
     es.onerror = () => {
+      this.flushEvents();
       if (es.readyState === EVENT_SOURCE_CLOSED) {
         this.closeStream();
         this.setStreamState(this.failedState());
@@ -296,6 +358,7 @@ export class LiveRegistry {
   }
 
   private handleFrame(frame: StreamFrame): void {
+    if (frame.type !== "event") this.flushEvents();
     switch (frame.type) {
       case "baseline": {
         const agents = Object.fromEntries(frame.agents.map((agent) => [agent.id, agent]));
@@ -318,18 +381,8 @@ export class LiveRegistry {
       case "event": {
         const entry = this.opened.get(frame.agentId);
         if (!entry || entry.refetching) return;
-        const { store } = entry;
-        const wasReady = store.getState().agent.status === "ready";
-        store.getState().apply(frame.event, frame.seq);
-        if (frame.event.type === "git_status") this.invalidateReview(frame.agentId);
-        // pi just became ready: the snapshot now has state, stats and the startup transcript.
-        if (
-          frame.event.type === "agent_status" &&
-          !wasReady &&
-          store.getState().agent.status === "ready"
-        ) {
-          this.refetch(entry);
-        }
+        entry.pending.push({ seq: frame.seq, event: frame.event });
+        this.scheduleFlush();
         return;
       }
       case "resync": {
@@ -374,6 +427,43 @@ export class LiveRegistry {
     }
   }
 
+  private scheduleFlush(): void {
+    if (this.flushTimer !== undefined) return;
+    this.flushTimer = setTimeout(this.flushEvents, FLUSH_TIMEOUT_MS);
+    if (this.deps.document.visibilityState === "visible") {
+      this.flushFrame = this.deps.window.requestAnimationFrame(this.flushEvents);
+    }
+  }
+
+  /** Applies every store's buffered events, one store update each. */
+  private readonly flushEvents = () => {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = undefined;
+    if (this.flushFrame !== undefined) this.deps.window.cancelAnimationFrame(this.flushFrame);
+    this.flushFrame = undefined;
+    for (const entry of this.opened.values()) {
+      if (entry.pending.length > 0) this.applyPending(entry);
+    }
+  };
+
+  private applyPending(entry: Opened): void {
+    const { store, pending } = entry;
+    entry.pending = [];
+    const agentId = store.getState().agentId;
+    let becameReady = false;
+    store.getState().applyBatch(pending, (event, before, after) => {
+      if (event.type === "git_status") this.invalidateReview(agentId);
+      // pi just became ready: the snapshot now has state, stats and the startup transcript.
+      becameReady =
+        event.type === "agent_status" &&
+        before.agent.status !== "ready" &&
+        after.agent.status === "ready";
+      return becameReady;
+    });
+    // The events after it are left unapplied: the refetch supersedes them.
+    if (becameReady) this.refetch(entry);
+  }
+
   /** Every `git_status` follows a git refresh, changed or not: the review queries refetch. */
   private invalidateReview(agentId: AgentId): void {
     void this.queryClient.invalidateQueries({ queryKey: queryKeys.review(agentId) });
@@ -398,6 +488,7 @@ export class LiveRegistry {
   }
 
   private closeStream(): void {
+    this.flushEvents();
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
     const es = this.es;
@@ -448,6 +539,7 @@ export class LiveRegistry {
   }
 
   private readonly onVisibility = () => {
+    this.flushEvents();
     if (this.deps.document.visibilityState === "visible") this.resume();
   };
 

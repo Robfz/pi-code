@@ -8,7 +8,7 @@ import {
   LoaderIcon,
   Trash2Icon,
 } from "lucide-react";
-import { createContext, type ReactNode, useContext, useState } from "react";
+import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,18 +89,22 @@ export function WorktreeActionsProvider({ children }: { children: ReactNode }) {
 
   const target = step?.target;
   const busy = removing.length > 0;
-  const actions: WorktreeActions = {
-    requestRemove: (worktree) => {
-      if (busy) return;
-      setStep({ target: worktree, dirty: false });
-      setRemoveOpen(true);
-    },
-    removing: removing[0],
-    openNewWorktree: (repo, onOpened) => {
-      setNewIn({ repo, onOpened });
-      setSheetOpen(true);
-    },
-  };
+  const removingPath = removing[0];
+  const actions = useMemo<WorktreeActions>(
+    () => ({
+      requestRemove: (worktree) => {
+        if (busy) return;
+        setStep({ target: worktree, dirty: false });
+        setRemoveOpen(true);
+      },
+      removing: removingPath,
+      openNewWorktree: (repo, onOpened) => {
+        setNewIn({ repo, onOpened });
+        setSheetOpen(true);
+      },
+    }),
+    [busy, removingPath],
+  );
 
   return (
     <WorktreeActionsContext.Provider value={actions}>

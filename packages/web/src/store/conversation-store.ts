@@ -2,9 +2,10 @@
  * Live conversation store (`docs/design/03-web-client.md`, "Live conversation store").
  *
  * One vanilla Zustand store per open agent. `hydrate` replaces everything with a snapshot;
- * `apply` runs each streamed event through the shared reducers (`reduceLive` for the live half,
+ * `applyBatch` runs streamed events through the shared reducers (`reduceLive` for the live half,
  * `applyServerEventToCaches` for the committed half), exactly like the server does, so a
- * snapshot at `seq` plus the events after it equals the server's state.
+ * snapshot at `seq` plus the events after it equals the server's state. A batch folds its events
+ * and notifies subscribers once.
  */
 
 import {
@@ -14,6 +15,7 @@ import {
   initialLiveState,
   type LiveState,
   reduceLive,
+  type SequencedEvent,
   type ServerEvent,
   type SessionCaches,
   type Snapshot,
@@ -36,11 +38,26 @@ export interface ConversationData extends SessionCaches {
 
 export interface ConversationActions {
   hydrate(snapshot: Snapshot): void;
-  /** Apply one event. Events at or below the current `seq` are ignored (replays). */
+  /**
+   * Apply one event. Events at or below the current `seq` are ignored (replays). The registry
+   * applies batches; this one-event form of `applyBatch` is what tests and fixtures drive.
+   */
   apply(event: ServerEvent, seq: number): void;
+  /**
+   * Apply `events` in order with one update, ignoring replays as `apply` does. `visit` sees each
+   * event (replays included) with the state before and after it; returning true stops the
+   * batch after that event, leaving the rest unapplied.
+   */
+  applyBatch(events: readonly SequencedEvent[], visit?: BatchVisitor): void;
   setConnection(connection: ConnectionState): void;
   markClosed(): void;
 }
+
+export type BatchVisitor = (
+  event: ServerEvent,
+  before: ConversationData,
+  after: ConversationData,
+) => boolean;
 
 export type ConversationState = ConversationData & ConversationActions;
 export type ConversationStore = StoreApi<ConversationState>;
@@ -90,19 +107,32 @@ export function createConversationStore(
     },
 
     apply(event, seq) {
-      const current = get();
-      if (seq <= current.seq) return;
-      const live = reduceLive(current.live, event);
-      const caches = applyServerEventToCaches(current, event);
-      const patch: Partial<ConversationData> = { seq };
-      if (live !== current.live) patch.live = live;
-      if (caches !== current) {
-        if (caches.agent !== current.agent) patch.agent = caches.agent;
-        if (caches.state !== current.state) patch.state = caches.state;
-        if (caches.transcript !== current.transcript) patch.transcript = caches.transcript;
-        if (caches.stats !== current.stats) patch.stats = caches.stats;
-        if (caches.gitStatus !== current.gitStatus) patch.gitStatus = caches.gitStatus;
+      get().applyBatch([{ event, seq }]);
+    },
+
+    applyBatch(events, visit) {
+      const start = get();
+      let current: ConversationData = start;
+      for (const { event, seq } of events) {
+        const before = current;
+        if (seq > current.seq) {
+          current = {
+            ...applyServerEventToCaches(current, event),
+            live: reduceLive(current.live, event),
+            seq,
+          };
+        }
+        if (visit?.(event, before, current)) break;
       }
+      if (current === start) return;
+      // Only changed slices: untouched ones keep their identity for selectors.
+      const patch: Partial<ConversationData> = { seq: current.seq };
+      if (current.live !== start.live) patch.live = current.live;
+      if (current.agent !== start.agent) patch.agent = current.agent;
+      if (current.state !== start.state) patch.state = current.state;
+      if (current.transcript !== start.transcript) patch.transcript = current.transcript;
+      if (current.stats !== start.stats) patch.stats = current.stats;
+      if (current.gitStatus !== start.gitStatus) patch.gitStatus = current.gitStatus;
       set(patch);
     },
 

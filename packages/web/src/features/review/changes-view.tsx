@@ -410,7 +410,12 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     queryKey: branchMode
       ? queryKeys.gitDiff(agentId, "branch", base, mode.uncommitted)
       : queryKeys.gitDiff(agentId, "uncommitted"),
-    queryFn: () => getGitDiff(agentId, branchMode ? { base, uncommitted: mode.uncommitted } : {}),
+    queryFn: ({ client, queryKey }) =>
+      getGitDiff(
+        agentId,
+        branchMode ? { base, uncommitted: mode.uncommitted } : {},
+        client.getQueryData(queryKey),
+      ),
     enabled: !branchMode || base !== undefined,
     staleTime: 0,
     refetchOnWindowFocus: false,

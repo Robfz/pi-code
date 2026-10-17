@@ -28,7 +28,7 @@ The **main rule** for a folder `M`: `M/.git` is a directory, `basename(M)` is `m
 - Linked worktrees are tied to their repo through `commondir`, not through their position, so one outside the container joins its repo too. A `.git` file without `commondir` (a submodule) or with a common dir not named `.git` (a bare repo) gets none.
 - A worktree deleted outside pi-code has lost its `.git` file, so only its parent ties it to the repo (F15).
 - Only checkout roots and the container are classified: a session started in `<repo>/main/packages/server` is a flat folder group.
-- Classification costs a few `stat`s and two small reads per cwd, no `git`. `SessionCatalog.scanNow` builds a per-scan cwd → layout map and attaches `layout` to copies of the `SessionSummary` and `ProjectSummary` values it emits. `ParsedSession`, the per-file `(path, mtime, size)` cached value, stays layout-free: a file's layout changes without the file changing. A worktree deleted outside pi-code thus turns `missing` at the next rescan. `AgentManager` classifies an agent's cwd once at creation.
+- Classification costs a few `stat`s and two small reads per cwd, no `git`. `SessionCatalog.scanNow` builds a per-scan cwd → layout map and attaches `layout` to copies of the `SessionSummary` and `ProjectSummary` values it emits. `ParsedSession`, the per-file cached value, stays layout-free: a file's layout changes without the file changing. A worktree deleted outside pi-code thus turns `missing` at the next rescan. `AgentManager` classifies an agent's cwd once at creation.
 
 ### On the wire
 

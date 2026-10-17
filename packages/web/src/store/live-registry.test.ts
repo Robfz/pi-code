@@ -15,7 +15,13 @@ import { ApiRequestError } from "@/lib/api";
 import { FakeEventSource } from "@/test/fake-event-source";
 import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtures";
 import type { ConversationStore } from "./conversation-store";
-import { LiveRegistry, type RegistryDeps, STALE_AFTER_MS } from "./live-registry";
+import {
+  FLUSH_TIMEOUT_MS,
+  KEEP_RELEASED,
+  LiveRegistry,
+  type RegistryDeps,
+  STALE_AFTER_MS,
+} from "./live-registry";
 
 const noSidebar: SidebarView = { pinned: [], collapsed: [], mains: {} };
 
@@ -131,11 +137,32 @@ class FakeDocument extends EventTarget {
   }
 }
 
+/** A window whose animation frames run when the test calls `paint`. */
 class FakeWindow extends EventTarget {
   navigator = { onLine: true };
+  private frames = new Map<number, FrameRequestCallback>();
+  private nextFrame = 1;
+  requestAnimationFrame(callback: FrameRequestCallback): number {
+    const id = this.nextFrame++;
+    this.frames.set(id, callback);
+    return id;
+  }
+  cancelAnimationFrame(id: number) {
+    this.frames.delete(id);
+  }
+  get pendingFrames(): number {
+    return this.frames.size;
+  }
+  paint() {
+    const due = [...this.frames.values()];
+    this.frames.clear();
+    for (const callback of due) callback(0);
+  }
 }
 
 const latest = () => FakeEventSource.latest();
+/** The next animation frame: buffered events apply. */
+const paint = () => fakeWindow.paint();
 const openStreams = () => FakeEventSource.instances.filter((es) => !es.closed);
 const flush = () =>
   vi.isFakeTimers()
@@ -148,15 +175,17 @@ const flush = () =>
  */
 function trackSeqs(store: ConversationStore): string[] {
   const log: string[] = [];
-  const { hydrate, apply } = store.getState();
+  const { hydrate, applyBatch } = store.getState();
   store.setState({
     hydrate: (snapshot) => {
       log.push(`h${snapshot.seq}`);
       hydrate(snapshot);
     },
-    apply: (event: ServerEvent, seq: number) => {
-      if (seq > store.getState().seq) log.push(String(seq));
-      apply(event, seq);
+    applyBatch: (events, visit) => {
+      applyBatch(events, (event, before, after) => {
+        if (after !== before) log.push(String(after.seq));
+        return visit?.(event, before, after) ?? false;
+      });
     },
   });
   return log;
@@ -388,6 +417,7 @@ describe("LiveRegistry", () => {
     expect(latest().cursors).toBe("a1:5");
     server.connect(latest());
     for (const event of events.slice(5, 8)) server.push("a1", event);
+    paint();
     expect(a1.getState().seq).toBe(8);
 
     await openHydrated("a2");
@@ -445,6 +475,7 @@ describe("LiveRegistry", () => {
     server.connect(stream, stream.lastEventId);
     expect(deps.fetchSnapshot).toHaveBeenLastCalledWith("a1");
     expect(a1.getState().connection).toBe("connecting");
+    paint();
     expect(a2.getState()).toMatchObject({ seq: 23, connection: "live" });
 
     // a2 keeps streaming, and resumes again, while a1's snapshot is in flight; a1 ignores its
@@ -457,6 +488,7 @@ describe("LiveRegistry", () => {
     server.connect(stream, stream.lastEventId);
     push("a1", 5);
     push("a2", 5);
+    paint();
     expect(a1.getState().seq).toBe(15);
     expect(a2.getState().seq).toBe(43);
     expect(FakeEventSource.instances.at(-1)).toBe(stream);
@@ -469,6 +501,7 @@ describe("LiveRegistry", () => {
     server.connect(latest());
     push("a1", events.length - next.a1);
     push("a2", events.length - next.a2);
+    paint();
 
     for (const [store, seqs] of [
       [a1, a1Seqs],
@@ -524,6 +557,7 @@ describe("LiveRegistry", () => {
     // An unchanged status is a refresh signal too.
     server.push("a1", { type: "git_status", status });
     server.push("a2", { type: "pi", event: { type: "agent_start" } });
+    paint();
     expect(invalidated()).toEqual([
       ["agent", "a1", "review"],
       ["agent", "a1", "review"],
@@ -549,10 +583,245 @@ describe("LiveRegistry", () => {
     expect(latest().cursors).toBe("a1:1");
     const agent = makeAgent({ status: "ready" });
     latest().send({ type: "event", agentId: "a1", seq: 2, event: { type: "agent_status", agent } });
+    paint();
     expect(deps.fetchSnapshot).toHaveBeenCalledTimes(2);
     await flush();
     expect(a1.getState().seq).toBe(3);
     expect(latest().cursors).toBe("a1:3");
+  });
+
+  it("runs each event's side effects in order; frames after the ready transition wait for the snapshot", async () => {
+    const effects: string[] = [];
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidated = () => invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey);
+    const snapshot = makeSnapshot({ seq: 0, agent: makeAgent({ status: "starting" }) });
+    deps.fetchSnapshot.mockResolvedValueOnce(snapshot);
+    start();
+    const a1 = registry.open("a1");
+    await flush();
+    invalidateQueries.mockClear();
+    invalidateQueries.mockImplementation(async () => {
+      effects.push(`review@${a1.getState().seq}`);
+    });
+    const status = { branch: "main", dirty: true };
+    const send = (seq: number, event: ServerEvent) =>
+      latest().send({ type: "event", agentId: "a1", seq, event });
+    let release = (_snapshot: Snapshot) => {};
+    deps.fetchSnapshot.mockImplementationOnce(() => {
+      effects.push(`snapshot@${a1.getState().seq}`);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    });
+
+    send(1, { type: "git_status", status });
+    send(2, { type: "agent_status", agent: makeAgent({ status: "starting" }) });
+    // A replay is a no-op for the store but still invalidates.
+    send(1, { type: "git_status", status });
+    send(3, { type: "agent_status", agent: makeAgent({ status: "ready" }) });
+    send(4, { type: "git_status", status });
+    paint();
+    expect(invalidated()).toEqual([
+      ["agent", "a1", "review"],
+      ["agent", "a1", "review"],
+    ]);
+    expect(deps.fetchSnapshot).toHaveBeenCalledTimes(2);
+    expect(a1.getState()).toMatchObject({
+      seq: 3,
+      agent: { status: "ready" },
+      gitStatus: status,
+      connection: "connecting",
+    });
+    // Invalidations run as their event is folded, before the batch's one update; the refetch
+    // follows the update.
+    expect(effects).toEqual(["review@0", "review@0", "snapshot@3"]);
+
+    // The discarded event stays discarded: the snapshot supersedes it.
+    release(makeSnapshot({ seq: 3, agent: makeAgent({ status: "ready" }) }));
+    await flush();
+    paint();
+    expect(a1.getState().seq).toBe(3);
+    expect(latest().cursors).toBe("a1:3");
+  });
+
+  it("applies events before the frames that follow them", async () => {
+    start();
+    const a1 = await openHydrated("a1");
+    const a2 = await openHydrated("a2");
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    server.push("a2", { type: "pi", event: { type: "agent_start" } });
+    const snapshot = deferSnapshot();
+    latest().send({ type: "resync", agentId: "a2" });
+    latest().send({ type: "agent_closed", agentId: "a1" });
+    expect(a1.getState()).toMatchObject({ seq: 1, closed: true, live: { run: { active: true } } });
+    expect(a2.getState()).toMatchObject({ seq: 1, live: { run: { active: true } } });
+    snapshot.release();
+  });
+
+  it("applies each store's events once per animation frame, in one update", async () => {
+    const events = fixtureEvents("plain-answer");
+    start();
+    const a1 = await openHydrated("a1");
+    const a2 = await openHydrated("a2");
+    const updates = { a1: 0, a2: 0 };
+    a1.subscribe(() => updates.a1++);
+    a2.subscribe(() => updates.a2++);
+    for (const event of events) {
+      server.push("a1", event);
+      server.push("a2", event);
+    }
+    expect(a1.getState().seq).toBe(0);
+    expect(fakeWindow.pendingFrames).toBe(1);
+    paint();
+    expect(updates).toEqual({ a1: 1, a2: 1 });
+    for (const store of [a1, a2]) {
+      expect(store.getState().seq).toBe(events.length);
+      expect(store.getState().live).toEqual(reduceAll(events));
+    }
+    // Nothing buffered, nothing scheduled.
+    expect(fakeWindow.pendingFrames).toBe(0);
+  });
+
+  it("in a hidden tab, applies buffered events after a timeout or on visibilitychange", async () => {
+    vi.useFakeTimers();
+    start();
+    const a1 = await openHydrated("a1");
+    fakeDocument.setVisibility("hidden");
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    expect(fakeWindow.pendingFrames).toBe(0);
+    await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT_MS - 1);
+    expect(a1.getState().seq).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(a1.getState().seq).toBe(1);
+
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    fakeDocument.setVisibility("visible");
+    expect(a1.getState().seq).toBe(2);
+
+    // Visible: whichever of the frame and the timeout comes first.
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT_MS);
+    expect(a1.getState().seq).toBe(3);
+    expect(fakeWindow.pendingFrames).toBe(0);
+  });
+
+  it("applies buffered events before a reconnect, a stream error and a close", async () => {
+    start();
+    const a1 = await openHydrated("a1");
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    await openHydrated("a2");
+    expect(FakeEventSource.instances.at(-2)?.closed).toBe(true);
+    expect(FakeEventSource.instances.at(-1)?.cursors).toBe("a1:1,a2:0");
+
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    latest().drop();
+    expect(a1.getState().seq).toBe(2);
+
+    server.connect(latest(), latest().lastEventId);
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    registry.stop();
+    expect(a1.getState().seq).toBe(3);
+  });
+
+  it("discards a dropped store's buffered events", async () => {
+    start();
+    const a1 = await openHydrated("a1");
+    server.push("a1", { type: "pi", event: { type: "agent_start" } });
+    registry.drop("a1");
+    paint();
+    expect(a1.getState()).toMatchObject({ seq: 0, closed: true });
+  });
+
+  it("evicts released stores beyond the most recent few, only when a hydrate reconnects", async () => {
+    const others = Array.from({ length: KEEP_RELEASED }, (_, i) => `a${i + 2}`);
+    const last = `a${KEEP_RELEASED + 2}`;
+    for (const id of [...others, last]) server.add(id);
+    const cursors = (ids: AgentId[]) => ids.map((id) => `${id}:0`).join(",");
+    start();
+    const stores = new Map<AgentId, ConversationStore>();
+    // a1 stays on screen while the others open beside it.
+    stores.set("a1", await openHydrated("a1"));
+    registry.show("a1");
+    for (const id of others) stores.set(id, await openHydrated(id));
+    const count = FakeEventSource.instances.length;
+    expect(latest().cursors).toBe(cursors(["a1", ...others]));
+
+    // Opening an opened store again makes it the most recently used, without evicting.
+    const [first, ...rest] = others as [AgentId, ...AgentId[]];
+    expect(registry.open(first)).toBe(stores.get(first));
+    expect(FakeEventSource.instances).toHaveLength(count);
+    // Nor does a reconnect that isn't a hydrate's.
+    latest().fail();
+    fakeWindow.dispatchEvent(new Event("online"));
+    expect(FakeEventSource.instances).toHaveLength(count + 1);
+    expect(latest().cursors).toBe(cursors(["a1", ...others]));
+    server.connect(latest());
+
+    // `last`'s hydrate reconnects anyway: the least recently used stores beyond KEEP_RELEASED go
+    // with it, without being closed. a1, opened first, stays: it's on screen.
+    await openHydrated(last);
+    const evicted = [last, first, ...[...rest].reverse()].slice(KEEP_RELEASED);
+    expect(evicted.length).toBeGreaterThan(0);
+    expect(FakeEventSource.instances).toHaveLength(count + 2);
+    expect(latest().cursors).toBe(
+      cursors(["a1", ...others, last].filter((id) => !evicted.includes(id))),
+    );
+    expect(registry.open("a1")).toBe(stores.get("a1"));
+    expect(registry.open(first)).toBe(stores.get(first));
+    for (const id of evicted) {
+      expect(stores.get(id)?.getState().closed).toBe(false);
+      expect(registry.open(id)).not.toBe(stores.get(id));
+    }
+  });
+
+  it("counts the store on screen as used when it leaves", async () => {
+    const others = Array.from({ length: KEEP_RELEASED }, (_, i) => `a${i + 2}`);
+    const last = `a${KEEP_RELEASED + 2}`;
+    for (const id of [...others, last]) server.add(id);
+    start();
+    const a1 = await openHydrated("a1");
+    const leave = registry.show("a1");
+    for (const id of others) await openHydrated(id);
+    leave();
+
+    // Opened first, but left last: it outlasts the others.
+    await openHydrated(last);
+    expect(latest().cursors).toMatch(/^a1:0,/);
+    expect(latest().cursors.split(",")).toHaveLength(KEEP_RELEASED);
+    expect(registry.open("a1")).toBe(a1);
+  });
+
+  it("re-opens an evicted conversation from its snapshot, without gaps or duplicates", async () => {
+    for (const id of ["a3", "a4"]) server.add(id);
+    const events = fixtureEvents("plain-answer");
+    let next = 0;
+    const push = (count: number) => {
+      for (let i = 0; i < count; i++) server.push("a1", events[next++] as ServerEvent);
+    };
+    start();
+    const a1 = await openHydrated("a1");
+    push(5);
+    paint();
+    for (const id of ["a2", "a3", "a4"]) await openHydrated(id);
+    expect(latest().cursors).toBe("a2:0,a3:0,a4:0");
+
+    // Its events while evicted reach no store.
+    push(10);
+    paint();
+    expect(a1.getState()).toMatchObject({ seq: 5, closed: false });
+
+    const again = registry.open("a1");
+    expect(again).not.toBe(a1);
+    const seqs = trackSeqs(again);
+    await flush();
+    expect(deps.fetchSnapshot).toHaveBeenLastCalledWith("a1");
+    server.connect(latest());
+    push(events.length - next);
+    paint();
+    expect(seqs[0]).toBe("h15");
+    expect(gaps(seqs)).toEqual([]);
+    expect(again.getState().seq).toBe(events.length);
+    expect(again.getState().live).toEqual(reduceAll(events));
   });
 
   it("drops stores whose agent is missing from a new baseline, or closed", async () => {

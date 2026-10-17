@@ -3,7 +3,7 @@
  * docs/session-format.md); session deletion and worktree removal delete listed files through
  * `session-files.ts`. Only header `cwd`s are trusted; directory names are lossy.
  */
-import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { type FileHandle, open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   type AgentId,
@@ -74,36 +74,50 @@ function preview(text: string): string | undefined {
 }
 
 /**
- * Summarizes one session file's content. Returns `undefined` when its first record isn't a
- * session header. Tolerates malformed lines and old format versions (v1 entries have no
- * `id`/`parentId`; v2 has the `hookMessage` role).
+ * What a session file's lines say so far. pi appends to session files, so the lines read so far
+ * fold into this and later lines fold on top (`foldLines`), giving the same summary as parsing
+ * the whole file at once.
  */
-export function parseSessionFile(
-  file: string,
-  content: string,
-  fallbackTime: string,
-): ParsedSession | undefined {
-  let header: Record<string, unknown> | undefined;
-  let name: string | undefined;
-  let firstMessage: string | undefined;
-  let headerLine = -1;
-  const lines = content.split("\n");
+interface ParseState {
+  /** The header record, once found. */
+  header?: Record<string, unknown>;
+  /** The first record isn't a session header: not a session file, whatever follows. */
+  notSession?: true;
+  /** From the last `session_info` line; one without a name clears it. */
+  name?: string;
+  firstMessage?: string;
+  /** Of the last line after the header with a valid timestamp. */
+  lastTimestamp?: string;
+  /** Of the last user message after the header with a valid timestamp. */
+  lastPromptAt?: string;
+}
+
+/**
+ * Folds `lines` (complete lines following those `state` saw, in file order) into a new state.
+ * Tolerates malformed lines and old format versions (v1 entries have no `id`/`parentId`; v2 has
+ * the `hookMessage` role).
+ */
+function foldLines(state: ParseState, lines: string[]): ParseState {
+  if (state.notSession) return state;
+  const next: ParseState = { ...state };
+  // Index of the first of `lines` after the header.
+  let afterHeader = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] as string;
     // Once the first user message is known, only `session_info` lines matter.
-    if (firstMessage !== undefined && !line.includes('"session_info"')) continue;
+    if (next.firstMessage !== undefined && !line.includes('"session_info"')) continue;
     const record = parseLine(line);
     if (record === undefined) continue;
-    if (header === undefined) {
-      if (record.type !== "session") return undefined;
-      header = record;
-      headerLine = i;
+    if (next.header === undefined) {
+      if (record.type !== "session") return { notSession: true };
+      next.header = record;
+      afterHeader = i + 1;
       continue;
     }
     if (record.type === "session_info") {
-      name = typeof record.name === "string" ? record.name.trim() || undefined : undefined;
+      next.name = typeof record.name === "string" ? record.name.trim() || undefined : undefined;
     } else if (
-      firstMessage === undefined &&
+      next.firstMessage === undefined &&
       record.type === "message" &&
       isRecord(record.message) &&
       record.message.role === "user"
@@ -111,41 +125,67 @@ export function parseSessionFile(
       // Leading `<file>` blocks (attached text files) are left out; a message with nothing but
       // files shows their names.
       const { files, body } = splitFileBlocks(contentText(record.message.content));
-      firstMessage =
+      next.firstMessage =
         preview(body) ??
         (files.length > 0
           ? preview(`(file: ${files.map((f) => basename(f.name)).join(", ")})`)
           : undefined);
     }
   }
-  if (header === undefined) return undefined;
-
-  // The last entry's timestamp (skipping malformed or timestamp-less trailing lines).
-  let lastTimestamp: string | undefined;
-  for (let i = lines.length - 1; i > headerLine && lastTimestamp === undefined; i--) {
-    lastTimestamp = validDate(parseLine(lines[i] as string)?.timestamp);
+  if (next.header === undefined) return next;
+  // Both scan from the end: only the last match counts, and it is usually near the end.
+  for (let i = lines.length - 1; i >= afterHeader; i--) {
+    const at = validDate(parseLine(lines[i] as string)?.timestamp);
+    if (at !== undefined) {
+      next.lastTimestamp = at;
+      break;
+    }
   }
+  const lastPromptAt = lastUserMessageTime(lines, afterHeader);
+  if (lastPromptAt !== undefined) next.lastPromptAt = lastPromptAt;
+  return next;
+}
+
+/** The summary a parse state gives; `undefined` without a session header. */
+function summaryOf(
+  file: string,
+  state: ParseState,
+  fallbackTime: string,
+): ParsedSession | undefined {
+  const { header } = state;
+  if (header === undefined) return undefined;
   const createdAt = validDate(header.timestamp) ?? fallbackTime;
   const summary: ParsedSession = {
     file,
     id: typeof header.id === "string" && header.id !== "" ? header.id : idFromFileName(file),
     cwd: typeof header.cwd === "string" ? header.cwd : "",
     createdAt,
-    updatedAt: lastTimestamp ?? createdAt,
+    updatedAt: state.lastTimestamp ?? createdAt,
   };
-  const lastPromptAt = lastUserMessageTime(lines, headerLine);
-  if (lastPromptAt !== undefined) summary.lastPromptAt = lastPromptAt;
-  if (name !== undefined) summary.name = name;
-  if (firstMessage !== undefined) summary.firstMessage = firstMessage;
+  if (state.lastPromptAt !== undefined) summary.lastPromptAt = state.lastPromptAt;
+  if (state.name !== undefined) summary.name = state.name;
+  if (state.firstMessage !== undefined) summary.firstMessage = state.firstMessage;
   if (typeof header.parentSession === "string" && header.parentSession !== "") {
     summary.parentSession = header.parentSession;
   }
   return summary;
 }
 
-/** The timestamp of the last user message entry after `headerLine`, scanning from the end. */
-function lastUserMessageTime(lines: string[], headerLine: number): string | undefined {
-  for (let i = lines.length - 1; i > headerLine; i--) {
+/**
+ * Summarizes one session file's content. Returns `undefined` when its first record isn't a
+ * session header.
+ */
+export function parseSessionFile(
+  file: string,
+  content: string,
+  fallbackTime: string,
+): ParsedSession | undefined {
+  return summaryOf(file, foldLines({}, content.split("\n")), fallbackTime);
+}
+
+/** The timestamp of the last user message entry from `lines[from]` on, scanning from the end. */
+function lastUserMessageTime(lines: string[], from: number): string | undefined {
+  for (let i = lines.length - 1; i >= from; i--) {
     const line = lines[i] as string;
     if (!line.includes('"user"')) continue;
     const record = parseLine(line);
@@ -196,10 +236,67 @@ export async function readSessionHeader(
   return undefined;
 }
 
+/** A session file as of its last read. */
 interface CacheEntry {
+  ino: number;
   mtimeMs: number;
+  /** Bytes read. */
   size: number;
   summary: ParsedSession | undefined;
+  /**
+   * The state after the complete lines read, the bytes after the last newline (a line still
+   * being written), and the last bytes read (`FINGERPRINT_BYTES` at most). Absent when the read
+   * failed.
+   */
+  parsed?: { state: ParseState; tail: Buffer; fingerprint: Buffer };
+}
+
+/**
+ * How many of the last bytes read are compared before resuming a grown file. pi rewrites a file
+ * in place (same inode, truncated, usually larger) when it migrates an old format; the migrated
+ * records differ from the old ones, so the bytes before the resume offset change too.
+ */
+const FINGERPRINT_BYTES = 64;
+
+/** Bytes `[start, end)` of an open file, fewer if it ends sooner. */
+async function readRange(handle: FileHandle, start: number, end: number): Promise<Buffer> {
+  const buf = Buffer.allocUnsafe(end - start);
+  let read = 0;
+  while (read < buf.length) {
+    const { bytesRead } = await handle.read(buf, read, buf.length - read, start + read);
+    if (bytesRead === 0) break;
+    read += bytesRead;
+  }
+  return buf.subarray(0, read);
+}
+
+/** Where a read continues: an offset, and what the bytes before it left. */
+interface ResumePoint {
+  from: number;
+  state: ParseState;
+  tail: Buffer;
+  /** The last bytes before `from` (the cached fingerprint). */
+  before: Buffer;
+}
+
+const START: ResumePoint = { from: 0, state: {}, tail: Buffer.alloc(0), before: Buffer.alloc(0) };
+
+/**
+ * Where to continue reading a file the cache read before: after the bytes read, when the file is
+ * the same inode, grew, and still has the fingerprint's bytes right before them; else `undefined`.
+ */
+async function resumeRead(
+  handle: FileHandle,
+  cached: CacheEntry | undefined,
+  current: { ino: number; size: number },
+): Promise<ResumePoint | undefined> {
+  if (cached?.parsed === undefined || cached.ino !== current.ino || current.size <= cached.size) {
+    return undefined;
+  }
+  const { state, tail, fingerprint } = cached.parsed;
+  const before = await readRange(handle, cached.size - fingerprint.length, cached.size);
+  if (!before.equals(fingerprint)) return undefined;
+  return { from: cached.size, state, tail, before };
 }
 
 interface SessionCatalogDeps {
@@ -217,7 +314,7 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
-/** Session summaries and projects, cached per file by `(path, mtime, size)`. */
+/** Session summaries and projects, cached per file and parsed incrementally as files grow. */
 export class SessionCatalog {
   private readonly deps: SessionCatalogDeps;
   private readonly cache = new Map<string, CacheEntry>();
@@ -359,6 +456,11 @@ export class SessionCatalog {
       .map((s) => ({ ...s, ...folders.get(s.cwd) }));
   }
 
+  /**
+   * Summarizes a file, reading only what changed since the cached read: nothing when its
+   * `(inode, mtime, size)` is unchanged, the appended bytes when it grew and still has the bytes
+   * last read before them, and the whole file otherwise (shrunk, rewritten, replaced).
+   */
   private async summarize(file: string): Promise<ParsedSession | undefined> {
     let s: Awaited<ReturnType<typeof stat>>;
     try {
@@ -368,14 +470,53 @@ export class SessionCatalog {
       return undefined;
     }
     const cached = this.cache.get(file);
-    if (cached && cached.mtimeMs === s.mtimeMs && cached.size === s.size) return cached.summary;
-    let summary: ParsedSession | undefined;
-    try {
-      summary = parseSessionFile(file, await readFile(file, "utf8"), s.mtime.toISOString());
-    } catch {
-      summary = undefined;
+    if (cached?.ino === s.ino && cached.mtimeMs === s.mtimeMs && cached.size === s.size) {
+      return cached.summary;
     }
-    this.cache.set(file, { mtimeMs: s.mtimeMs, size: s.size, summary });
-    return summary;
+    let entry: CacheEntry;
+    try {
+      const handle = await open(file, "r");
+      try {
+        // The open file's own stat, so a file replaced since `stat` isn't resumed.
+        const current = await handle.stat();
+        const resume = (await resumeRead(handle, cached, current)) ?? START;
+        const bytes = await readRange(handle, resume.from, current.size);
+        const chunk = resume.tail.length === 0 ? bytes : Buffer.concat([resume.tail, bytes]);
+        const end = chunk.lastIndexOf(0x0a);
+        // Newline bytes never occur inside a multi-byte UTF-8 sequence, so lines decode alone.
+        const state =
+          end < 0
+            ? resume.state
+            : foldLines(resume.state, chunk.toString("utf8", 0, end).split("\n"));
+        const tail = Buffer.from(chunk.subarray(end + 1));
+        // As in a full parse, an unfinished last line counts if it parses; it is folded for good
+        // once its newline arrives.
+        const summary = summaryOf(
+          file,
+          foldLines(state, [tail.toString("utf8")]),
+          current.mtime.toISOString(),
+        );
+        const last =
+          bytes.length >= FINGERPRINT_BYTES ? bytes : Buffer.concat([resume.before, bytes]);
+        entry = {
+          ino: current.ino,
+          mtimeMs: current.mtimeMs,
+          size: resume.from + bytes.length,
+          summary,
+          parsed: {
+            state,
+            tail,
+            fingerprint: Buffer.from(last.subarray(Math.max(0, last.length - FINGERPRINT_BYTES))),
+          },
+        };
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      entry = { ino: s.ino, mtimeMs: s.mtimeMs, size: s.size, summary: undefined };
+    }
+    // A new entry rather than an update, so concurrent scans of one file don't fold twice.
+    this.cache.set(file, entry);
+    return entry.summary;
   }
 }

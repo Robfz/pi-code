@@ -38,6 +38,31 @@ describe.each(names)("fixture %s through the store", (name) => {
     expect(state.seq).toBe(events.length);
   });
 
+  it.each([1, 7, Number.POSITIVE_INFINITY])(
+    "applied in batches of %d, ends as applied one by one",
+    (size) => {
+      const sequential = hydratedEmpty();
+      events.forEach((event, index) => {
+        sequential.getState().apply(event, index + 1);
+      });
+      const batched = hydratedEmpty();
+      const sequenced = events.map((event, index) => ({ event, seq: index + 1 }));
+      for (let start = 0; start < sequenced.length; start += size) {
+        batched.getState().applyBatch(sequenced.slice(start, start + size));
+      }
+      const { live, agent, state, transcript, stats, gitStatus, seq } = sequential.getState();
+      expect(batched.getState()).toMatchObject({
+        live,
+        agent,
+        state,
+        transcript,
+        stats,
+        gitStatus,
+        seq,
+      });
+    },
+  );
+
   it("ignores replayed events (seq at or below the current one)", () => {
     const store = hydratedEmpty();
     events.forEach((event, index) => {
@@ -89,6 +114,46 @@ describe("conversation store", () => {
         expect(selectActiveBranch(after)).toBe(selectActiveBranch(before));
       }
     }
+  });
+
+  it("applies a batch with one update, and none for replays only", () => {
+    const store = hydratedEmpty();
+    const deltas = fixtureEvents("plain-answer")
+      .filter((event) => event.type === "pi" && event.event.type === "message_update")
+      .map((event, index) => ({ event, seq: index + 1 }));
+    expect(deltas.length).toBeGreaterThan(5);
+    let updates = 0;
+    store.subscribe(() => updates++);
+    const before = store.getState();
+    store.getState().applyBatch(deltas);
+    expect(updates).toBe(1);
+    expect(store.getState().seq).toBe(deltas.length);
+    expect(store.getState().transcript).toBe(before.transcript);
+    store.getState().applyBatch(deltas);
+    expect(updates).toBe(1);
+  });
+
+  it("shows each event of a batch to the visitor, replays included, and stops where it says", () => {
+    const store = hydratedEmpty();
+    const start = { type: "pi", event: { type: "agent_start" } } as const;
+    const settled = { type: "pi", event: { type: "agent_settled" } } as never;
+    store.getState().apply(start, 1);
+    const seen: string[] = [];
+    store.getState().applyBatch(
+      [
+        { event: start, seq: 1 },
+        { event: settled, seq: 2 },
+        { event: start, seq: 3 },
+        { event: settled, seq: 4 },
+      ],
+      (_event, before, after) => {
+        seen.push(`${before.seq}→${after.seq}:${after.live.run.active}`);
+        return after.seq === 3;
+      },
+    );
+    expect(seen).toEqual(["1→1:true", "1→2:false", "2→3:true"]);
+    expect(store.getState().seq).toBe(3);
+    expect(selectIsRunning(store.getState())).toBe(true);
   });
 
   it("derives the active branch, labels and tool results", () => {

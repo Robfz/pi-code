@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AgentManager } from "./agents/agent-manager.ts";
@@ -63,10 +64,14 @@ function apiRoutes(deps: AppDeps) {
     .route("/push", pushRoutes(deps.push));
 }
 
-/** Builds the Hono app: guards, `/api` routes, error envelope, static SPA. */
+/** Builds the Hono app: guards, compressed JSON, `/api` routes, error envelope, static SPA. */
 export function createApp(deps: AppDeps) {
   const app = new Hono();
   app.use("*", requestGuards({ hostname: deps.hostname, port: deps.port }));
+  // JSON only: compressing `text/event-stream` would buffer `/api/stream`'s frames. `c.json`
+  // sets no Content-Length, so the size threshold never applies and even tiny bodies are gzipped;
+  // that costs a few bytes and microseconds, which isn't worth buffering every body to measure.
+  app.use("/api/*", compress({ contentTypeFilter: /^application\/json(?:[;\s]|$)/i }));
   app.route("/", apiRoutes(deps));
   app.all("/api/*", (c) => c.json(errorEnvelope("not_found", `no route ${c.req.path}`), 404));
   const spa = spaHandler(deps.staticDir);

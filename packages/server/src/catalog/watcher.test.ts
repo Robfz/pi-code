@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { throttle, watchSessions } from "./watcher.ts";
+import { affectsListing, throttle, watchSessions } from "./watcher.ts";
 
 describe("throttle", () => {
   beforeEach(() => {
@@ -60,7 +60,7 @@ describe("watchSessions", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("calls back for writes anywhere below the sessions dir, until closed", async () => {
+  it("calls back for session file writes, until closed", async () => {
     const sessions = join(root, "sessions");
     mkdirSync(join(sessions, "--project--"), { recursive: true });
     let calls = 0;
@@ -81,9 +81,64 @@ describe("watchSessions", () => {
     expect(calls).toBe(seen);
   });
 
+  it("ignores files the listing can't hold, not project dirs or session file deletions", async () => {
+    const sessions = join(root, "sessions");
+    const project = join(sessions, "--project--");
+    mkdirSync(join(project, "run"), { recursive: true });
+    writeFileSync(join(project, "s.jsonl"), "{}\n");
+    let calls = 0;
+    const watcher = watchSessions(sessions, () => calls++, 20);
+    // Wait out events from the setup above, which a starting watch may still report.
+    await vi.waitFor(
+      () => {
+        writeFileSync(join(project, "s.jsonl"), "{}\n");
+        expect(calls).toBeGreaterThan(0);
+      },
+      { timeout: 5_000, interval: 50 },
+    );
+    await new Promise((r) => setTimeout(r, 200));
+
+    calls = 0;
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(project, "run", "sub.jsonl"), `${i}\n`);
+      writeFileSync(join(project, "notes.txt"), `${i}\n`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls).toBe(0);
+
+    rmSync(join(project, "s.jsonl"));
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(0), { timeout: 5_000 });
+    calls = 0;
+    mkdirSync(join(sessions, "--other--"));
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(0), { timeout: 5_000 });
+    calls = 0;
+    rmSync(project, { recursive: true });
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(0), { timeout: 5_000 });
+    watcher?.close();
+  });
+
   it("warns and doesn't watch a missing dir", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(watchSessions(join(root, "missing"), () => {})).toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(join(root, "missing")));
+  });
+});
+
+describe("affectsListing", () => {
+  const path = (...parts: string[]) => parts.join(sep);
+
+  it("keeps project dirs and their session files, and unknown paths", () => {
+    expect(affectsListing(path("--p--"))).toBe(true);
+    expect(affectsListing(path("--p--", "s.jsonl"))).toBe(true);
+    expect(affectsListing("")).toBe(true);
+    expect(affectsListing(null)).toBe(true);
+  });
+
+  it("drops other files in project dirs and anything deeper", () => {
+    expect(affectsListing(path("--p--", "notes.txt"))).toBe(false);
+    expect(affectsListing(path("--p--", "run"))).toBe(false);
+    expect(affectsListing(path("--p--", "run", "sub.jsonl"))).toBe(false);
+    expect(affectsListing(path("--p--", "a", "b", "c.jsonl"))).toBe(false);
   });
 });

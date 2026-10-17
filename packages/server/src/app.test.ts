@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentManager } from "./agents/agent-manager.ts";
 import { createApp } from "./app.ts";
@@ -13,6 +14,7 @@ import { SidebarStateStore } from "./store/sidebar-state.ts";
 const HOSTNAME = "mac.tail1234.ts.net";
 const PORT = 4180;
 const ORIGIN = `https://${HOSTNAME}`;
+const APP_JS = `export const app = "${"x".repeat(2000)}";`;
 
 let dist: string;
 let app: ReturnType<typeof createApp>;
@@ -25,6 +27,10 @@ beforeAll(() => {
   writeFileSync(join(dist, "manifest.webmanifest"), "{}");
   writeFileSync(join(dist, "icon.png"), "png");
   writeFileSync(join(dist, "assets", "index-abc123.js"), "console.log(1);");
+  // A file with the precompressed variants the web build writes.
+  writeFileSync(join(dist, "assets", "app-def456.js"), APP_JS);
+  writeFileSync(join(dist, "assets", "app-def456.js.br"), brotliCompressSync(APP_JS));
+  writeFileSync(join(dist, "assets", "app-def456.js.gz"), gzipSync(APP_JS));
   const manager = new AgentManager({
     home: dist,
     command: () => ({ bin: "/nonexistent", args: [] }),
@@ -47,8 +53,23 @@ afterAll(() => {
   rmSync(dist, { recursive: true, force: true });
 });
 
-function get(path: string, host = HOSTNAME) {
-  return app.request(`http://${host}${path}`);
+function get(path: string, host = HOSTNAME, headers: Record<string, string> = {}) {
+  return app.request(`http://${host}${path}`, { headers });
+}
+
+/** Reads `body` until the text read so far contains `marker`, leaving the stream open. */
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  marker: string,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = "";
+  while (!text.includes(marker)) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error(`stream ended before ${marker}`);
+    text += decoder.decode(value, { stream: true });
+  }
+  return text;
 }
 
 function post(
@@ -190,6 +211,69 @@ describe("static SPA", () => {
     expect(res.headers.get("cache-control")).toBe("public, max-age=3600");
   });
 
+  it("serves files as-is to a client that accepts no encoding", async () => {
+    const res = await get("/assets/index-abc123.js");
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.text()).toBe("console.log(1);");
+  });
+
+  it("answers HEAD with the file's length and no body", async () => {
+    const res = await app.request(`http://${HOSTNAME}/assets/index-abc123.js`, { method: "HEAD" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String("console.log(1);".length));
+    expect(await res.text()).toBe("");
+  });
+
+  it("serves the precompressed variant with the highest q, preferring brotli on a tie", async () => {
+    const cases: [string, string | null][] = [
+      ["gzip, deflate, br, zstd", "br"],
+      ["gzip", "gzip"],
+      ["br;q=0, gzip;q=0.5", "gzip"],
+      ["br;q=0.1, gzip", "gzip"],
+      ["BR;Q=0.8, gzip;q=0.9", "gzip"],
+      ["gzip;q=0.5, br;q=0.5", "br"],
+      ["*", "br"],
+      ["*;q=0.5, gzip", "gzip"],
+      ["*, br;q=0", "gzip"],
+      ["*;q=0", null],
+      ["identity", null],
+      ["gzip;q=0", null],
+      ["br;q=0, gzip;q=0", null],
+    ];
+    for (const [accept, encoding] of cases) {
+      const res = await get("/assets/app-def456.js", HOSTNAME, { "accept-encoding": accept });
+      expect(res.status, accept).toBe(200);
+      expect(res.headers.get("content-encoding"), accept).toBe(encoding);
+      expect(res.headers.get("vary"), accept).toBe("Accept-Encoding");
+      expect(res.headers.get("content-type"), accept).toMatch(/javascript/);
+      expect(res.headers.get("cache-control"), accept).toBe("public, max-age=31536000, immutable");
+      const body = Buffer.from(await res.arrayBuffer());
+      const decoded =
+        encoding === "br"
+          ? brotliDecompressSync(body)
+          : encoding === "gzip"
+            ? gunzipSync(body)
+            : body;
+      expect(decoded.toString(), accept).toBe(APP_JS);
+    }
+  });
+
+  it("answers HEAD with the length of the variant it would send", async () => {
+    const res = await app.request(`http://${HOSTNAME}/assets/app-def456.js`, {
+      method: "HEAD",
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(res.headers.get("content-encoding")).toBe("gzip");
+    expect(res.headers.get("content-length")).toBe(String(gzipSync(APP_JS).byteLength));
+  });
+
+  it("serves a file without variants as-is to a client accepting compression", async () => {
+    const res = await get("/assets/index-abc123.js", HOSTNAME, { "accept-encoding": "gzip, br" });
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(res.headers.get("vary")).toBe("Accept-Encoding");
+    expect(await res.text()).toBe("console.log(1);");
+  });
+
   it("404s missing assets instead of serving index.html", async () => {
     expect((await get("/assets/missing-000.js")).status).toBe(404);
   });
@@ -202,6 +286,58 @@ describe("static SPA", () => {
     }
   });
 
+  it("answers unknown /api routes with a JSON 404", async () => {
+    const res = await get("/api/nope");
+    expect(res.status).toBe(404);
+    expect((await errorOf(res)).code).toBe("not_found");
+  });
+});
+
+describe("JSON compression", () => {
+  it("gzips JSON responses for a client that accepts it", async () => {
+    const res = await get("/api/health", HOSTNAME, { "accept-encoding": "gzip, deflate, br" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-encoding")).toBe("gzip");
+    expect(res.headers.get("vary")).toBe("Accept-Encoding");
+    const body = gunzipSync(Buffer.from(await res.arrayBuffer())).toString();
+    expect(JSON.parse(body)).toEqual({ ok: true, piVersion: "9.9.9" });
+  });
+
+  it("sends JSON as-is to a client that accepts no encoding", async () => {
+    const res = await get("/api/health");
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.json()).toEqual({ ok: true, piVersion: "9.9.9" });
+  });
+});
+
+describe("live stream", () => {
+  it("streams frames as they happen, uncompressed, to a client accepting compression", async () => {
+    const controller = new AbortController();
+    const res = await app.request(`http://${HOSTNAME}/api/stream`, {
+      headers: { "accept-encoding": "gzip, deflate, br" },
+      signal: controller.signal,
+    });
+    expect(res.headers.get("content-type")).toMatch(/^text\/event-stream/);
+    expect(res.headers.get("content-encoding")).toBeNull();
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    try {
+      expect(await readUntil(reader, '"type":"baseline"')).toMatch(/^retry: \d+\n\n/);
+      // A change after the baseline arrives while the stream stays open.
+      const patched = await app.request(`http://${HOSTNAME}/api/sidebar`, {
+        method: "PATCH",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ collapsed: { [dist]: true } }),
+      });
+      expect(patched.status).toBe(200);
+      expect(await readUntil(reader, '"type":"sidebar"')).toContain(JSON.stringify([dist]));
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    }
+  });
+});
+
+describe("unknown routes", () => {
   it("answers unknown /api routes with a JSON 404", async () => {
     const res = await get("/api/nope");
     expect(res.status).toBe(404);

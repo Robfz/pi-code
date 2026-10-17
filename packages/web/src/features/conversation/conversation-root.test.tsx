@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
 import { createQueryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/router";
+import { LiveRegistry } from "@/store/live-registry";
 import { sendFrame } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
@@ -86,6 +87,27 @@ describe("ConversationRoot", () => {
       window.dispatchEvent(new Event("focus"));
     });
     expect(acks()).toHaveLength(2);
+  });
+
+  it("shows its store while mounted", async () => {
+    const shown: string[] = [];
+    const show = LiveRegistry.prototype.show;
+    vi.spyOn(LiveRegistry.prototype, "show").mockImplementation(function (
+      this: LiveRegistry,
+      agentId,
+    ) {
+      shown.push(agentId);
+      const leave = show.call(this, agentId);
+      return () => {
+        shown.splice(shown.indexOf(agentId), 1);
+        leave();
+      };
+    });
+    const { router } = renderAgent();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
+    expect(shown).toEqual(["a1"]);
+    await act(() => router.navigate({ to: "/" }));
+    expect(shown).toEqual([]);
   });
 
   it("shows a conversation closed while on screen, with New conversation", async () => {
