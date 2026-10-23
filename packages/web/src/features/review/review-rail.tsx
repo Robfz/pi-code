@@ -27,8 +27,9 @@ export function ReviewRail({ agentId }: { agentId: string }) {
       className="flex h-dvh w-(--rail-width) shrink-0 flex-col items-center border-l bg-background"
     >
       {/* The rail's cell of the header row, the title bar under Window Controls Overlay. It is
-          empty, so the window controls may cover it: no inset of its own. */}
-      <div className="titlebar box-content h-12 w-full shrink-0 border-b pt-[env(safe-area-inset-top)] [--titlebar-left:100vw] [--titlebar-pad:0px] [--titlebar-right:100vw]" />
+          empty, so the window controls may cover it: no inset of its own. Under WCO the controls
+          hide most of its bottom border, leaving a stub, so it has none there. */}
+      <div className="titlebar box-content h-12 w-full shrink-0 border-b pt-[env(safe-area-inset-top)] [@media(display-mode:window-controls-overlay)]:border-b-0 [--titlebar-left:100vw] [--titlebar-pad:0px] [--titlebar-right:100vw]" />
       <div className="flex flex-col items-center gap-1 py-2">
         {ITEMS.map(([value, Icon]) => {
           const active = paneOpen && tab === value;

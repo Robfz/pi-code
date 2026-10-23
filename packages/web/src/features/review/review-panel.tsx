@@ -96,10 +96,7 @@ export function ReviewPanel({
       </ScreenHeader>
       {/* `relative` so absolutely positioned descendants (`sr-only` labels) are clipped here
           instead of overflowing the document. */}
-      <div
-        role="tabpanel"
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]"
-      >
+      <div role="tabpanel" className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {tab === "changes" && (
           <div className="pb-6">
             <ChangesView agentId={agentId} {...(onAdded && { onAdded })} />
