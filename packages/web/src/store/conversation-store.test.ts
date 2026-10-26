@@ -1,5 +1,5 @@
 import { initialLiveState, type LiveState } from "@pi-code/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
   applyAll,
   fixtureEvents,
@@ -9,7 +9,7 @@ import {
   makeSnapshot,
   reduceAll,
 } from "@/test/fixtures";
-import { createConversationStore } from "./conversation-store";
+import { type ConversationStore, createConversationStore, waitForSeq } from "./conversation-store";
 import { selectActiveBranch, selectIsRunning, selectLabels, selectToolResults } from "./selectors";
 
 const names = fixtureNames();
@@ -199,5 +199,76 @@ describe("conversation store", () => {
     expect(store.getState().live.thinkingMs).toEqual({});
     store.getState().apply({ type: "pi", event: { type: "agent_start" } }, 1);
     expect(store.getState().live.run.active).toBe(true);
+  });
+});
+
+describe("waitForSeq", () => {
+  const start = { type: "pi", event: { type: "agent_start" } } as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** `waitForSeq` with a flag that flips once it resolves. */
+  function track(store: ConversationStore, seq: number) {
+    const wait = { resolved: false };
+    void waitForSeq(store, seq, 1000).then(() => {
+      wait.resolved = true;
+    });
+    return wait;
+  }
+
+  /** Spies on the listener `waitForSeq` subscribes to `store`. */
+  function spyListener(store: ConversationStore) {
+    const subscribe = store.subscribe;
+    type Listener = Parameters<ConversationStore["subscribe"]>[0];
+    const spy: { listener?: Mock<Listener> } = {};
+    vi.spyOn(store, "subscribe").mockImplementation((listener) => {
+      const wrapped = vi.fn(listener);
+      spy.listener = wrapped;
+      return subscribe(wrapped);
+    });
+    return spy;
+  }
+
+  it("resolves at once, without a timer, when the store is already there", async () => {
+    const store = createConversationStore("a1");
+    store.getState().apply(start, 3);
+    const wait = track(store, 3);
+    expect(vi.getTimerCount()).toBe(0);
+    await Promise.resolve();
+    expect(wait.resolved).toBe(true);
+  });
+
+  it("resolves once the store reaches seq, and clears its timer", async () => {
+    const store = createConversationStore("a1");
+    const wait = track(store, 2);
+    expect(vi.getTimerCount()).toBe(1);
+    store.getState().apply(start, 1);
+    await Promise.resolve();
+    expect(wait.resolved).toBe(false);
+    store.getState().apply(start, 2);
+    await Promise.resolve();
+    expect(wait.resolved).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("resolves after the timeout, and stops listening to the store", async () => {
+    const store = createConversationStore("a1");
+    const spy = spyListener(store);
+    const wait = track(store, 5);
+    store.getState().apply(start, 1);
+    expect(spy.listener).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(wait.resolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wait.resolved).toBe(true);
+    store.getState().apply(start, 2);
+    store.getState().apply(start, 5);
+    expect(spy.listener).toHaveBeenCalledTimes(1);
   });
 });

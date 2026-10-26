@@ -18,7 +18,9 @@ export interface SessionCaches {
  * changes nothing, otherwise a shallow copy where only the touched fields are replaced (extra
  * fields of `C`, e.g. a store's `live` or `seq`, are carried over untouched).
  *
- * - `entries_appended` → appends entries not already present (by id) and moves `leafId`.
+ * - `entries_appended` → appends entries not already present (by id) and moves `leafId`, which
+ *   needn't be an appended entry: after tree navigation `entries` may be empty and `leafId` may
+ *   point anywhere in the transcript (the `entries` array is then kept as is).
  * - `transcript_reset` → replaces `transcript` and `state`.
  * - `state` / `stats` / `git_status` / `agent_status` → replace `state` / `stats` / `gitStatus` / `agent`.
  * - `state` and `transcript_reset` also copy `sessionFile` / `sessionId` / `sessionName` into `agent`.

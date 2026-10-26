@@ -171,8 +171,10 @@ async function assertTreeCommand(agent: Agent): Promise<void> {
 /**
  * In-place tree navigation (`POST /tree/navigate`) through the pi-code extension's
  * `/pi-code-tree` command. pi answers the prompt once the navigation (and its optional branch
- * summary) is done; the server then resyncs (`transcript_reset`). `cancelled` when the leaf
- * didn't move. A failing navigation surfaces as pi's `extension_error` → `pi_error`.
+ * summary) is done; the server then syncs the moved leaf (`entries_appended`, see
+ * `syncAfterNavigation`) and answers with the resulting `leafId` and the `seq` its events were
+ * published up to. `cancelled` when the leaf didn't move. A failing navigation surfaces as pi's
+ * `extension_error` → `pi_error`, after the sync.
  */
 export async function navigateTree(agent: Agent, body: NavigateBody): Promise<NavigateResponse> {
   assertAcceptsInput(agent);
@@ -209,9 +211,10 @@ export async function navigateTree(agent: Agent, body: NavigateBody): Promise<Na
     } finally {
       host.off("event", onEvent);
     }
-    await pipeline.resync();
+    await pipeline.syncAfterNavigation();
     if (failure !== undefined) throw new ApiError("pi_error", failure);
-    return { cancelled: pipeline.transcript.leafId === leafBefore };
+    const leafId = pipeline.transcript.leafId;
+    return { cancelled: leafId === leafBefore, leafId, seq: pipeline.seq };
   });
 }
 

@@ -92,6 +92,26 @@ describe("applyServerEventToCaches", () => {
     expect(moved.transcript.leafId).toBeNull();
   });
 
+  it("entries_appended without entries moves the leaf anywhere (tree navigation)", () => {
+    const c = base();
+    const tree = applyServerEventToCaches(c, {
+      type: "entries_appended",
+      entries: [entry("b", "a"), entry("c", "b")],
+      leafId: "c",
+    });
+    const moved = applyServerEventToCaches(tree, {
+      type: "entries_appended",
+      entries: [],
+      leafId: "a",
+    });
+    expect(moved.transcript.entries).toBe(tree.transcript.entries);
+    expect(moved.transcript.leafId).toBe("a");
+    expect(activeBranch(moved.transcript).map((e) => e.id)).toEqual(["a"]);
+    expect(
+      applyServerEventToCaches(moved, { type: "entries_appended", entries: [], leafId: "a" }),
+    ).toBe(moved);
+  });
+
   it("transcript_reset replaces transcript and state and copies session fields to the agent", () => {
     const c = base();
     const newState = { ...state, sessionId: "s2", sessionFile: "/f2", sessionName: "n" };

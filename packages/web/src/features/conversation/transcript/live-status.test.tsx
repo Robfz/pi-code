@@ -214,4 +214,34 @@ describe("LiveStatusRow run error", () => {
     renderRow({ run: { active: false, lastError: "rate limited" } }, { transcript });
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("drops the error when tree navigation leaves the failed branch", () => {
+    const entry = (id: string, parentId: string | null, message: unknown) =>
+      ({
+        type: "message",
+        id,
+        parentId,
+        timestamp: new Date(0).toISOString(),
+        message,
+      }) as unknown as SessionEntry;
+    const transcript: Transcript = {
+      entries: [
+        entry("u1", null, { role: "user", content: "hi", timestamp: 0 }),
+        entry("a1", "u1", {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "rate limited",
+          timestamp: 0,
+        }),
+      ],
+      leafId: "a1",
+    };
+    const store = renderRow({ run: { active: false, lastError: "rate limited" } }, { transcript });
+    act(() => {
+      store.getState().apply({ type: "entries_appended", entries: [], leafId: "u1" }, 2);
+    });
+    expect(store.getState().transcript.leafId).toBe("u1");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

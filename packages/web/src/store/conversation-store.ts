@@ -145,3 +145,26 @@ export function createConversationStore(
     },
   }));
 }
+
+/**
+ * Resolves once `store` has applied events up to `seq`, or after `timeoutMs` regardless (a
+ * stalled stream mustn't block the caller).
+ */
+export function waitForSeq(
+  store: ConversationStore,
+  seq: number,
+  timeoutMs: number,
+): Promise<void> {
+  if (store.getState().seq >= seq) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    const unsubscribe = store.subscribe((state) => {
+      if (state.seq >= seq) done();
+    });
+  });
+}
