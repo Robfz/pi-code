@@ -58,6 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {desktop && (
             <aside
               id={SIDEBAR_ID}
+              data-region="side"
               className={cn(
                 "sticky top-0 flex h-dvh shrink-0 flex-col border-r bg-surface-side",
                 sidebarOpen
