@@ -63,6 +63,7 @@ describe("before_agent_start", () => {
   function event(options: Partial<BeforeAgentStartEvent["systemPromptOptions"]>) {
     return {
       type: "before_agent_start",
+      messageType: "user",
       prompt: "hi",
       systemPrompt: "",
       systemPromptOptions: {
