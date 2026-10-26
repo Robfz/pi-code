@@ -13,13 +13,16 @@ function stubCanvas(pixels: Record<string, [number, number, number]>) {
   );
 }
 
-/** Each background the body computes to, in order. */
-function stubBackgrounds(...colors: string[]) {
+/** Each value `--surface-chrome` computes to on <html>, in order. */
+function stubChrome(...colors: string[]) {
   const real = window.getComputedStyle;
   let next = 0;
   vi.spyOn(window, "getComputedStyle").mockImplementation((element) =>
-    element === document.body
-      ? ({ backgroundColor: colors[Math.min(next++, colors.length - 1)] } as CSSStyleDeclaration)
+    element === document.documentElement
+      ? ({
+          getPropertyValue: (name: string) =>
+            name === "--surface-chrome" ? ` ${colors[Math.min(next++, colors.length - 1)]}` : "",
+        } as CSSStyleDeclaration)
       : real(element),
   );
 }
@@ -40,13 +43,13 @@ afterEach(() => {
 });
 
 describe("syncThemeColor", () => {
-  it("sets the meta to the page background as hex, then follows theme and palette", async () => {
+  it("sets the meta to the chrome surface as hex, then follows theme and palette", async () => {
     stubCanvas({
       "oklch(0.992 0 0)": [253, 253, 253],
       "oklch(0.16 0 0)": [14, 14, 14],
       "oklch(0.2 0.03 280)": [20, 22, 40],
     });
-    stubBackgrounds("oklch(0.992 0 0)", "oklch(0.16 0 0)", "oklch(0.2 0.03 280)");
+    stubChrome("oklch(0.992 0 0)", "oklch(0.16 0 0)", "oklch(0.2 0.03 280)");
     const meta = addMeta();
 
     const stop = syncThemeColor();
@@ -62,7 +65,7 @@ describe("syncThemeColor", () => {
 
   it("passes the colour through without a canvas", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
-    stubBackgrounds("rgb(1, 2, 3)");
+    stubChrome("rgb(1, 2, 3)");
     const meta = addMeta();
     syncThemeColor()();
     expect(meta.content).toBe("rgb(1, 2, 3)");
