@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  */
 export function ScreenHeader({ children }: { children: ReactNode }) {
   return (
-    <header className="titlebar box-content flex h-12 min-w-0 shrink-0 items-center gap-1 border-b bg-surface-chrome/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
+    <header className="titlebar box-content flex h-12 min-w-0 shrink-0 items-center gap-1 border-b bg-surface-chrome px-2 pt-[env(safe-area-inset-top)]">
       {children}
     </header>
   );
