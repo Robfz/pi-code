@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   type AgentInfo,
   initialLiveState,
+  type NavigateResponse,
   reduceLive,
   type ServerEvent,
   type SessionSummary,
@@ -404,45 +405,90 @@ describe("tree navigation", () => {
     return { id: a.id, entries };
   }
 
-  it("moves the leaf in place and resyncs", async () => {
+  it("moves the leaf in place and syncs it incrementally", async () => {
     const h = await start();
     const { id, entries } = await conversation(h);
     const [user1, assistant1, user2] = entries.map((e) => e.id) as [string, string, string];
     const seq = (await h.snapshot(id)).seq;
     const client = h.stream({ open: [[id, seq]] });
+    const navigate = (body: Json) =>
+      h.json<NavigateResponse>("POST", `/api/agents/${id}/tree/navigate`, body);
 
-    const nav = await h.json<{ cancelled: boolean }>("POST", `/api/agents/${id}/tree/navigate`, {
-      entryId: assistant1,
-      summarize: false,
-    });
-    expect(nav).toEqual({ status: 200, body: { cancelled: false } });
+    const nav = await navigate({ entryId: assistant1, summarize: false });
+    expect(nav.status).toBe(200);
+    expect(nav.body).toMatchObject({ cancelled: false, leafId: assistant1 });
     let snap = await h.snapshot(id);
     expect(snap.transcript.leafId).toBe(assistant1);
-    await client.waitForEvent(id, (r) => r.event.type === "transcript_reset");
+    const moved = await client.waitForEvent(id, (r) => r.event.type === "entries_appended");
+    expect(moved.event).toEqual({ type: "entries_appended", entries: [], leafId: assistant1 });
+    const movedStats = await client.waitForEvent(
+      id,
+      (r) => r.seq > moved.seq && r.event.type === "stats",
+    );
+    expect(movedStats.seq).toBe(moved.seq + 1);
+    expect(nav.body.seq).toBe(movedStats.seq);
 
-    // Navigating to where the leaf already is: nothing moves.
-    const same = await h.json("POST", `/api/agents/${id}/tree/navigate`, {
-      entryId: assistant1,
-      summarize: false,
-    });
-    expect(same.body).toEqual({ cancelled: true });
+    // Navigating to where the leaf already is: nothing moves; only fresh stats are published.
+    const same = await navigate({ entryId: assistant1, summarize: false });
+    expect(same.body).toEqual({ cancelled: true, leafId: assistant1, seq: movedStats.seq + 1 });
+    const sameStats = await client.waitForEvent(id, (r) => r.seq === movedStats.seq + 1);
+    expect(sameStats.event.type).toBe("stats");
 
     // To a user message, with a summary: leaf = summary under its parent; text → editor.
-    const summarized = await h.json("POST", `/api/agents/${id}/tree/navigate`, {
+    const summarized = await navigate({
       entryId: user2,
       summarize: true,
       customInstructions: "short",
     });
-    expect(summarized.body).toEqual({ cancelled: false });
+    expect(summarized.body.cancelled).toBe(false);
     snap = await h.snapshot(id);
     const leaf = snap.transcript.entries.find((e) => e.id === snap.transcript.leafId);
     expect(leaf).toMatchObject({ type: "branch_summary", parentId: assistant1 });
+    expect(summarized.body.leafId).toBe(leaf?.id);
     expect(snap.live.editorText?.text).toBe("two");
     expect(user1).toBeDefined();
+
+    const stats = await client.waitForEvent(
+      id,
+      (r) => r.seq > sameStats.seq && r.event.type === "stats",
+    );
+    expect(summarized.body.seq).toBe(stats.seq);
+    const appended = client
+      .events(id)
+      .filter((r) => r.seq > sameStats.seq && r.event.type === "entries_appended");
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.seq).toBeLessThan(stats.seq);
+    expect(appended[0]?.event).toEqual({
+      type: "entries_appended",
+      entries: [leaf],
+      leafId: leaf?.id,
+    });
+    expect(client.events(id).some((r) => r.event.type === "transcript_reset")).toBe(false);
 
     // pi-code-* commands stay hidden from get_commands.
     const cmds = await h.rpc<{ commands: { name: string }[] }>(id, { type: "get_commands" });
     expect(cmds.body.data.commands).toEqual([]);
+  });
+
+  it("refreshes stats when an earlier sync already published the move", async () => {
+    const h = await start();
+    extraEnv = { MINI_PI_TREE_ENTRY_EVENT: "1" };
+    const { id, entries } = await conversation(h);
+    const seq = (await h.snapshot(id)).seq;
+    const client = h.stream({ open: [[id, seq]] });
+    const nav = await h.json<NavigateResponse>("POST", `/api/agents/${id}/tree/navigate`, {
+      entryId: entries[1]?.id,
+      summarize: true,
+    });
+    expect(nav.body.cancelled).toBe(false);
+    await client.waitForSeq(id, nav.body.seq as number);
+    const events = client.events(id).map((r) => r.event);
+    // The `entry_appended` sync published the branch summary and the moved leaf…
+    expect(events.filter((e) => e.type === "entries_appended")).toMatchObject([
+      { leafId: nav.body.leafId },
+    ]);
+    // …and the navigation's own sync, finding nothing new, still ends with stats.
+    expect(events.at(-1)?.type).toBe("stats");
   });
 
   it("validates the body and the entry, and rejects a busy agent", async () => {

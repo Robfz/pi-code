@@ -39,7 +39,7 @@ Handler:
 2. `await ctx.navigateTree(entryId, { summarize, customInstructions })`.
 3. If the target entry is a user message, `ctx.ui.setEditorText(<its text>)` (the TUI puts it back into the editor for re-editing).
 
-The server resolves `POST /tree/navigate` on the prompt response and reports `cancelled` when the leaf did not move. Before sending, it checks that `pi-code-tree` appears in `get_commands` — otherwise the text would go to the model as a normal prompt. It hides `pi-code-*` commands from `get_commands` results given to clients.
+pi emits no RPC event for the move, so on the prompt response the server syncs `get_entries { since }` (the moved leaf, plus the `branch_summary` entry when summarizing), then resolves `POST /tree/navigate`, reporting `cancelled` when the leaf did not move. Before sending, it checks that `pi-code-tree` appears in `get_commands` — otherwise the text would go to the model as a normal prompt. It hides `pi-code-*` commands from `get_commands` results given to clients.
 
 ## 3. Line-reference guideline
 

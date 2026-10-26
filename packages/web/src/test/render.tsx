@@ -77,10 +77,13 @@ export interface FetchCall {
 }
 
 /**
- * Stub `fetch`: records calls; `handler` returns `[status, body]` per request (default 200 `{}`).
+ * Stub `fetch`: records calls; `handler` returns (or resolves to) `[status, body]` per request
+ * (default 200 `{}`).
  */
 export function stubFetch(
-  handler: (call: FetchCall) => [number, unknown] | undefined = () => undefined,
+  handler: (
+    call: FetchCall,
+  ) => [number, unknown] | undefined | Promise<[number, unknown] | undefined> = () => undefined,
 ) {
   const calls: FetchCall[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -92,7 +95,7 @@ export function stubFetch(
     const parsed = new URL(url, "http://localhost:3000");
     const call = { url: parsed.pathname, search: parsed.search, method, body };
     calls.push(call);
-    const [status, payload] = handler(call) ?? [200, {}];
+    const [status, payload] = (await handler(call)) ?? [200, {}];
     return new Response(status === 204 ? null : JSON.stringify(payload), {
       status,
       headers: { "Content-Type": "application/json" },

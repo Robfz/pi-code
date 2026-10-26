@@ -202,8 +202,10 @@ export function reduceLive(state: LiveState, event: ServerEvent): LiveState {
       if (!state.dialogs.some((d) => d.request.id === event.id)) return state;
       return { ...state, dialogs: state.dialogs.filter((d) => d.request.id !== event.id) };
     }
-    case "entries_appended":
-      return reduceEntriesAppended(state, event.entries);
+    case "entries_appended": {
+      const next = reduceEntriesAppended(state, event.entries);
+      return isLeafMove(event) ? dropSettled(next) : next;
+    }
     case "transcript_reset":
       return reduceTranscriptReset(state);
     case "curator": {
@@ -636,13 +638,33 @@ function reduceEntriesAppended(state: LiveState, entries: readonly SessionEntry[
   return next;
 }
 
+/**
+ * Whether an `entries_appended` comes from tree navigation: its leaf isn't the last appended entry
+ * (a plain move), or it carries the `branch_summary` of the branch being left.
+ */
+function isLeafMove(event: Extract<ServerEvent, { type: "entries_appended" }>): boolean {
+  return (
+    event.leafId !== event.entries.at(-1)?.id ||
+    event.entries.some((entry) => entry.type === "branch_summary")
+  );
+}
+
 function reduceTranscriptReset(state: LiveState): LiveState {
+  if (state.streaming === undefined && state.pendingUser === undefined) return dropSettled(state);
   const { streaming: _, pendingUser: __, ...rest } = state;
-  let next: LiveState = rest;
-  // A settled run's error banner belongs to the transcript being replaced (session switch, fork,
-  // compaction); run errors that matter are in the transcript's own assistant entries.
+  return dropSettled(rest);
+}
+
+/**
+ * Drops live state that belongs to the transcript being replaced (session switch, fork,
+ * compaction) or the branch being left (tree navigation): a settled run's error banner, finished
+ * tools and finished bash runs. Run errors that matter are in the transcript's own assistant
+ * entries.
+ */
+function dropSettled(state: LiveState): LiveState {
+  let next = state;
   if (!state.run.active && state.run.lastError !== undefined) {
-    const { lastError: ___, ...run } = state.run;
+    const { lastError: _, ...run } = state.run;
     next = { ...next, run };
   }
   const finishedTools = Object.entries(state.tools)
@@ -656,14 +678,7 @@ function reduceTranscriptReset(state: LiveState): LiveState {
     .filter(([, run]) => run.done !== undefined)
     .map(([id]) => id);
   if (finishedBash.length > 0) next = { ...next, bash: omitKeys(next.bash, finishedBash) };
-  const unchanged =
-    next.run === state.run &&
-    next.tools === state.tools &&
-    next.curator === state.curator &&
-    next.bash === state.bash &&
-    state.streaming === undefined &&
-    state.pendingUser === undefined;
-  return unchanged ? state : next;
+  return next;
 }
 
 function omitKeys<T>(record: Record<string, T>, keys: readonly string[]): Record<string, T> {

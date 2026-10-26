@@ -211,6 +211,11 @@ export type ServerEvent =
   | { type: "pi"; event: JsonAgentSessionEvent; receivedAt?: number }
   | { type: "ui_request"; request: RpcExtensionUIRequest; receivedAt: number }
   | { type: "ui_resolved"; id: string }
+  /**
+   * New entries plus pi's leaf. Usually the leaf is the last appended entry, but after tree
+   * navigation `entries` may be empty (or hold just the `branch_summary`) and `leafId` may point
+   * anywhere in the transcript.
+   */
   | { type: "entries_appended"; entries: SessionEntry[]; leafId: string | null }
   | { type: "transcript_reset"; transcript: Transcript; state: RpcSessionState }
   /** After model / thinking / mode / name changes. */
@@ -303,7 +308,12 @@ export interface NavigateBody {
 }
 
 export interface NavigateResponse {
+  /** The leaf didn't move. */
   cancelled: boolean;
+  /** The leaf after the navigation. Absent from older servers. */
+  leafId?: string | null;
+  /** Seq up to which the navigation's events are published. Absent from older servers. */
+  seq?: number;
 }
 
 // ---------------------------------------------------------------------------

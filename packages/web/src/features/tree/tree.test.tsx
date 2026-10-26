@@ -1,4 +1,4 @@
-import { initialLiveState, type SessionEntry } from "@pi-code/protocol";
+import { initialLiveState, type NavigateResponse, type SessionEntry } from "@pi-code/protocol";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
@@ -124,6 +124,20 @@ function handler(navigateResult: { cancelled: boolean } = { cancelled: false }) 
     }
     if (call.url === "/api/agents/a1/tree/navigate") return [200, navigateResult];
     return undefined;
+  };
+}
+
+/** `handler` with a navigate request that stays pending until `respond`. */
+function pendingNavigate() {
+  let respond: (result: NavigateResponse) => void = () => {};
+  const result = new Promise<NavigateResponse>((resolve) => {
+    respond = resolve;
+  });
+  const base = handler();
+  return {
+    respond,
+    handler: async (call: FetchCall): Promise<[number, unknown] | undefined> =>
+      call.url === "/api/agents/a1/tree/navigate" ? [200, await result] : base(call),
   };
 }
 
@@ -581,6 +595,115 @@ describe("TreeScreen", () => {
       entryId: "a4",
       summarize: false,
     });
+    expect(router.state.location.pathname).toBe("/agents/a1/tree");
+  });
+
+  /** Opens Go here on u3 and confirms it, with or without a summary. */
+  async function confirmGoHere(summarize: boolean) {
+    const u = userEvent.setup();
+    await u.click(within(row("u3")).getByText("Try plan B instead"));
+    await u.click(within(row("u3")).getByRole("button", { name: /Go here/ }));
+    const sheet = await screen.findByTestId("navigate-sheet");
+    if (summarize) await u.click(within(sheet).getByRole("checkbox"));
+    await u.click(within(sheet).getByRole("button", { name: /Go here/ }));
+    return { u, sheet };
+  }
+
+  it("shows Moving… while navigating without a summary; no seq → back right away", async () => {
+    const pending = pendingNavigate();
+    stubFetch(pending.handler);
+    const { router } = await renderTree();
+    const { u, sheet } = await confirmGoHere(false);
+    expect(await within(sheet).findByRole("button", { name: /Moving…/ })).toBeDisabled();
+    expect(within(sheet).queryByTestId("navigate-progress")).toBeNull();
+    await u.keyboard("{Escape}");
+    expect(screen.getByTestId("navigate-sheet")).toBeInTheDocument();
+    pending.respond({ cancelled: false });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
+  });
+
+  /**
+   * Yields to real macrotasks (only `setTimeout` / `clearTimeout` are faked) until Go here's wait
+   * for the store has scheduled its timeout, without advancing fake time.
+   */
+  async function untilSyncTimerPending() {
+    for (let i = 0; i < 50 && vi.getTimerCount() === 0; i++) {
+      await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    }
+    expect(vi.getTimerCount()).toBe(1);
+  }
+
+  it("shows Summarizing… and the progress line, and waits for the store to reach seq", async () => {
+    const pending = pendingNavigate();
+    stubFetch(pending.handler);
+    const { router, store } = await renderTree();
+    const { sheet } = await confirmGoHere(true);
+    expect(await within(sheet).findByRole("button", { name: /Summarizing…/ })).toBeDisabled();
+    expect(within(sheet).getByTestId("navigate-progress")).toHaveTextContent(
+      "Summarizing the branch you're leaving — this can take a while.",
+    );
+    // Leaving a3 for u3 with a summary: pi's new leaf is a branch summary under u3's parent.
+    const summary = entry("s1", "a1", {
+      type: "branch_summary",
+      fromId: "a3",
+      summary: "Plan A, summarized",
+    });
+    const seq = store.getState().seq + 1;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      pending.respond({ cancelled: false, leafId: "s1", seq });
+      await untilSyncTimerPending();
+      expect(router.state.location.pathname).toBe("/agents/a1/tree");
+      act(() =>
+        store.getState().apply({ type: "entries_appended", entries: [summary], leafId: "s1" }, seq),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      expect(store.getState().transcript.leafId).toBe("s1");
+      expect(row("s1")).toHaveAttribute("data-current", "true");
+      expect(row("a3")).not.toHaveAttribute("data-current", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
+  });
+
+  it("goes back after 1.5 s when the store never reaches seq", async () => {
+    const pending = pendingNavigate();
+    stubFetch(pending.handler);
+    const { router, store } = await renderTree();
+    await confirmGoHere(false);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Without a summary, going to u3 lands on its parent a1.
+      pending.respond({ cancelled: false, leafId: "a1", seq: store.getState().seq + 5 });
+      await untilSyncTimerPending();
+      await act(async () => vi.advanceTimersByTime(1499));
+      expect(screen.getByTestId("navigate-sheet")).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe("/agents/a1/tree");
+      await act(async () => vi.advanceTimersByTime(1));
+      expect(screen.queryByTestId("navigate-sheet")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(router.state.location.pathname).toBe("/agents/a1"));
+  });
+
+  it("doesn't go back once the tree is gone", async () => {
+    const pending = pendingNavigate();
+    stubFetch(pending.handler);
+    const { router, store, unmount } = await renderTree();
+    await confirmGoHere(false);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      pending.respond({ cancelled: false, leafId: "a1", seq: store.getState().seq + 5 });
+      await untilSyncTimerPending();
+      unmount();
+      await act(async () => vi.advanceTimersByTime(1500));
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(router.state.location.pathname).toBe("/agents/a1/tree");
   });
 

@@ -63,7 +63,7 @@ The pi-code extension path resolves to `packages/pi-extension/src/index.ts` (pi 
 - `close(agentId)` → stop process, drop ownership (`DELETE /api/agents/:id`, the idle sweep, session deletion and worktree removal).
 - Each agent's cwd is classified once at creation (`layoutOf`); `AgentInfo.layout` carries it.
 - Emits `agent` on every `AgentInfo` change and `closed` when an agent is removed; the StreamHub turns them into frames.
-- After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`, the tree-navigation command), refresh `get_state` and update `owners`. A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
+- After any command that can change the session (`new_session`, `switch_session`, `fork`, `clone`), refresh `get_state` and update `owners`. In-place tree navigation keeps the session file and only syncs entries (see Event pipeline). A `switch_session` to a file owned by another agent is rejected before reaching pi (`409`).
 - `cwd` must resolve inside `$HOME` (realpath), else `400`.
 
 ### Project trust
@@ -81,7 +81,8 @@ All records from one agent flow through a single **sequential** async queue, so 
 
 1. **Side effects** (may await pi) produce the list of server events to publish:
    - `message_end`, `entry_appended`, `agent_settled`, and every non-query command response (many commands create entries without an event: names, model/thinking changes, labels, `bash`) → `get_entries { since: lastEntryId }` → emit `entries_appended { entries, leafId }` when non-empty. If the returned `leafId` is not the last appended entry, or `since` is unknown, fall back to a full `get_entries` and emit `transcript_reset`.
-   - `compaction_end`, and completion of `new_session` / `switch_session` / `fork` / `clone` / tree navigation → full `get_entries` + `get_state` → `transcript_reset`.
+   - `compaction_end`, and completion of `new_session` / `switch_session` / `fork` / `clone` → full `get_entries` + `get_state` → `transcript_reset`.
+   - Completion of tree navigation (pi emits no event for it) → `get_entries { since: lastEntryId }` → one `entries_appended { entries, leafId }` carrying the moved leaf, which may be any known entry, with `entries` empty or holding the new `branch_summary`; nothing when the leaf didn't move. Then `stats`, every time (pi's context usage covers the active branch, and a sync queued while pi navigated, e.g. on an `entry_appended`, may already have published the move). If the returned `leafId` is neither a known nor a returned entry, or `since` is unknown, fall back to `transcript_reset` + `stats`.
    - `tool_execution_update|end` whose `details.curatorUrl` is set → register the curator session with the curator proxy and emit `curator { toolCallId, url }`.
    - `agent_settled`, dialog `extension_ui_request`, run failure → notification triggers (see Push).
    - `turn_end` → `get_session_stats` → emit `stats`; refresh git status (debounced) → emit `git_status`, changed or not (see Git).

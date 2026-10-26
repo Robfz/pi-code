@@ -244,10 +244,10 @@ type ServerEvent =
   | { type: "pi"; event: JsonAgentSessionEvent; receivedAt?: number } // every pi session event, verbatim; receivedAt = server clock (ms)
   | { type: "ui_request"; request: RpcExtensionUIRequest; receivedAt: number }
   | { type: "ui_resolved"; id: string }
-  | { type: "entries_appended"; entries: SessionEntry[]; leafId: string | null }
+  | { type: "entries_appended"; entries: SessionEntry[]; leafId: string | null } // new entries + pi's leaf, usually the last one; after tree navigation `entries` may be empty and `leafId` any entry
   | { type: "transcript_reset"; transcript: Transcript; state: RpcSessionState }
   | { type: "state"; state: RpcSessionState }                // after model/thinking/mode/name changes
-  | { type: "stats"; stats: SessionStats }                   // after each turn_end
+  | { type: "stats"; stats: SessionStats }                   // after each turn_end and tree navigation
   | { type: "git_status"; status: GitStatus | null }         // after each post-turn / bash refresh, changed or not
   | { type: "curator"; toolCallId: string; url: string }     // proxied curator URL
   | { type: "bash_output"; id: string; delta: string; command?: string; excludeFromContext?: boolean } // `!` / `!!` streaming output
@@ -306,7 +306,7 @@ interface NavigateBody {
   customInstructions?: string;     // for the summary
 }
 ```
-→ `200 { cancelled: boolean }` (`cancelled` when the leaf didn't move), after the resulting `transcript_reset` is published; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
+→ `200 { cancelled: boolean; leafId?: string | null; seq?: number }` once the navigation's events (`entries_appended` with the new leaf, see the event list, or `transcript_reset` on a fallback; then `stats`, published even when the leaf didn't move) are published: `cancelled` when the leaf didn't move, `leafId` the resulting leaf, `seq` the agent's seq after those events, so a client can wait for its store to reach it; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
 
 ## Worktrees
 
@@ -458,8 +458,8 @@ interface PendingDialog {
 
 Semantics (pi's streaming rules from pi's `docs/json.md`):
 - `*_delta` appends to the block at `contentIndex`; `*_end` replaces it with the authoritative content; `message_end(assistant)` clears `streaming`.
-- `entries_appended` clears `pendingUser` and removes tools whose results are now committed.
-- `transcript_reset` clears `streaming`, `pendingUser` and finished tools.
+- `entries_appended` clears `pendingUser` and removes tools whose results are now committed. One from tree navigation (its `leafId` isn't the last appended entry, or it carries a `branch_summary`) also clears a settled run's `lastError`, finished tools and finished bash runs, which belong to the branch being left.
+- `transcript_reset` clears `streaming`, `pendingUser`, a settled run's `lastError`, finished tools and finished bash runs.
 - `agent_settled` (and `agent_status` exited) sets `run.active = false`, clears `streaming`, `retry` and `compaction`.
 - `live_reset` does the same and also clears `pendingUser`, `tools`, `curator`, `queue`, `dialogs` and `bash`; extension UI (`statuses`, `widgets`, `title`, `editorText`, `notices`), `run.lastError` and `thinkingMs` stay.
 - `ui_request` with a fire-and-forget method updates `statuses` / `widgets` / `title` / `editorText` / `notices`; dialog methods append to `dialogs`; `ui_resolved` removes one (the server publishes it on answer and on timeout).
