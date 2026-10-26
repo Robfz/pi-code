@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <aside
               id={SIDEBAR_ID}
               className={cn(
-                "sticky top-0 flex h-dvh shrink-0 flex-col border-r",
+                "sticky top-0 flex h-dvh shrink-0 flex-col border-r bg-surface-side",
                 sidebarOpen
                   ? "w-[280px] pt-[env(safe-area-inset-top)] [--titlebar-right:calc(100vw-280px)]"
                   : "w-10 items-center pt-[max(0.5rem,env(safe-area-inset-top),env(titlebar-area-height,0px))]",

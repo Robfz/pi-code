@@ -188,7 +188,7 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   return (
     <header
       inert={inert}
-      className="titlebar box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur"
+      className="titlebar box-content flex h-12 shrink-0 items-center gap-1 border-b bg-surface-chrome/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur"
     >
       <HomeBackButton />
       {!desktop && <SidebarSheet />}

@@ -200,7 +200,7 @@ function FileSection({
       <div
         ref={header}
         className={cn(
-          "sticky top-0 z-20 flex h-9 items-center gap-2 bg-background pr-3 pl-2",
+          "sticky top-0 z-20 flex h-9 items-center gap-2 bg-background pr-3 pl-2 in-data-[region=side]:bg-surface-side",
           open && "border-b",
         )}
       >

@@ -24,7 +24,7 @@ export function ReviewRail({ agentId }: { agentId: string }) {
       role="toolbar"
       aria-orientation="vertical"
       aria-label="Side panel"
-      className="flex h-dvh w-(--rail-width) shrink-0 flex-col items-center border-l bg-background"
+      className="flex h-dvh w-(--rail-width) shrink-0 flex-col items-center border-l bg-surface-chrome"
     >
       {/* The rail's cell of the header row, the title bar under Window Controls Overlay. It is
           empty, so the window controls may cover it: no inset of its own. Under WCO the controls

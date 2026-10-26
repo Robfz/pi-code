@@ -3,7 +3,7 @@
  * overrides neutral's colour tokens (`index.css`) in light and dark, for `data-palette` on <html>
  * or on any element inside it (the settings swatches). Values come from each palette's official
  * colours (Aurora, Sumi, Deco, Volt and Dusk are our own), with lightness adjusted where text would
- * fall short of contrast.
+ * fall short of contrast. Zoned, last, takes neutral's tokens and sets only the region surfaces.
  *
  * Imported after `index.css`: a light block ties with neutral's `.dark` in specificity and wins
  * by order, so each dark block (one class higher) sets every token its light block sets.
@@ -813,4 +813,16 @@
   --syntax-variable: oklch(0.92 0.022 300);
   --syntax-type: oklch(0.78 0.11 300);
   --syntax-punctuation: oklch(0.7 0.04 302);
+}
+
+/* Zoned (experimental): neutral's tokens (shared in `index.css`) with a surface per region, as in
+ * an IDE: the title bars and activity rail darkest, the side panels (sidebar, review pane) one step
+ * up, the main content on the page background. */
+[data-palette="zoned"] {
+  --surface-chrome: oklch(0.955 0 0);
+  --surface-side: oklch(0.97 0 0);
+}
+:is(.dark[data-palette="zoned"], .dark [data-palette="zoned"]) {
+  --surface-chrome: oklch(0.12 0 0);
+  --surface-side: oklch(0.14 0 0);
 }
