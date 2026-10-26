@@ -379,7 +379,7 @@ interface LiveState {
 - **Run:** `startedAt` at `agent_start`; settling drops it with the rest of the run.
 - **Thinking durations:** at `thinking_end`, `endedAt − startedAt` is stored in `thinkingMs` under `thinkingKey(timestamp, contentIndex)` (exported by `@pi-code/protocol`: `"${timestamp}:${contentIndex}"`) of the streaming message and the block. Settling keeps it, so a committed block looks up its duration by the same key from its message's `timestamp` and its index in `content` (the web's step keys are built with it too). It keeps the latest `MAX_THINKING_DURATIONS` (500) entries, dropping the oldest by insertion order, and lives as long as the agent's live state on the server: reloads keep it, and only a restart of the pi process or the server loses it.
 - The web store fills fields a snapshot lacks from `initialLiveState()` on hydrate, so a client newer than the server it talks to still gets every field.
-- Committed calls use `ToolResultMessage.durationMs` and turns use `AssistantMessage.durationMs` (both absent on legacy messages). `packages/protocol` is typed against pi `1.1.0`, which has these fields and `tool_execution_end.durationMs`.
+- Committed calls use `ToolResultMessage.durationMs` and turns use `AssistantMessage.durationMs` (both absent on legacy messages). `packages/protocol` is typed against pi `1.4.0`, which has these fields and `tool_execution_end.durationMs`.
 - Every field derives from the event alone, so a snapshot at any `seq` plus the following events still equals the full reduction.
 - Elapsed times compare `receivedAt` with the device's clock, clamped at 0.
 

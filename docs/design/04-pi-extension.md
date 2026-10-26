@@ -4,7 +4,7 @@ A small pi extension loaded **only** into server-spawned pi processes (`pi --mod
 
 It fills two gaps in pi's RPC mode, adds one prompt guideline and names conversations, using documented extension APIs. Trust and tree navigation were verified in `docs/spikes/e1-e2.md`.
 
-It is typed against `@earendil-works/pi-coding-agent` `1.1.0` (dev dependency, type-only imports), the installed pi's version, for `BeforeAgentStartEvent.systemPromptOptions` (section 3). The protocol package keeps its own pin.
+It is typed against `@earendil-works/pi-coding-agent` `1.4.0` (dev dependency, type-only imports), the installed pi's version, for `BeforeAgentStartEvent.systemPromptOptions` (section 3). The protocol package keeps its own pin.
 
 ## 1. Project trust decision
 
