@@ -21,7 +21,19 @@ describe("review state", () => {
       tab: "changes",
       diff: { mode: "uncommitted", uncommitted: false },
       files: { query: "" },
+      tree: { collapsed: [] },
     });
+  });
+
+  it("toggles the tree's collapsed branch points, without persisting them", () => {
+    const { openPane, toggleTreeBranch } = useReviewStore.getState();
+    openPane("a1", "tree");
+    toggleTreeBranch("a1", "e1");
+    toggleTreeBranch("a1", "e2");
+    expect(review("a1").tree.collapsed).toEqual(["e1", "e2"]);
+    toggleTreeBranch("a1", "e1");
+    expect(review("a1").tree.collapsed).toEqual(["e2"]);
+    expect(localStorage.getItem("pi-code:review")).not.toContain("e2");
   });
 
   it("updates one conversation's entry", () => {
