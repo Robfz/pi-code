@@ -284,12 +284,17 @@ One 12px faint line under the composer: folder name (from 1024px) · git branch 
 
 ## Tree screen
 
-`TreeView` (`features/tree/tree-view.tsx`) is the body of both the phone's `/agents/$agentId/tree` page (`TreeScreen`, with its back chevron and "Session tree" title) and the desktop review pane's Tree tab (no header of its own). It shows the store's transcript (all branches) and labels rendered as an indented tree of user and assistant entries (tool traffic collapsed), labels as badges, the current leaf highlighted. Actions on an entry:
+`TreeView` (`features/tree/tree-view.tsx`) is the body of both the phone's `/agents/$agentId/tree` page (`TreeScreen`, with its back chevron and "Session tree" title) and the desktop review pane's Tree tab (no header of its own). It shows the store's transcript (all branches) and labels as a compact git-graph-style tree of user and assistant entries (tool traffic collapsed) plus compaction and branch-summary markers (the summary's text):
 
-- **Go here** → `POST /tree/navigate` with a "summarize the branch you're leaving?" choice (and optional instructions).
-- **Fork from here** (user messages) → `fork`.
+- **Gutter.** A linear chain stays in one column; each branch point's branches start one column to the right, joined by `├` / `└` elbows (several roots hang off a virtual root, the first with a `┌`), with a vertical guide wherever an enclosing branch continues below. Depth is uncapped; preview text truncates instead. A node dot marks each row: filled on the path to the current leaf, hollow off it (those rows are muted too), ringed on the current row, which also gets a "current" badge and a tinted background.
+- **Rows.** One line each: kind icon, one-line preview (full preview in the tooltip), label badge, a `+N` badge on collapsed branch points, and the relative time. Branch points have a chevron to collapse or expand their branches, in a slot every row keeps so text lines up by depth; the collapsed set is kept per conversation in the review store for the tab's lifetime (not persisted), so it survives switching tabs.
+- **Actions.** The selected row, and the hovered or focused one where hovering exists, shows icon buttons in place of its time, in a slot as wide as either, so the row never changes height or text width:
+  - **Go here** → `POST /tree/navigate` with a "summarize the branch you're leaving?" choice (and optional instructions), confirmed in a centered dialog on desktop and a bottom sheet on phones. Not offered on the current row.
+  - **Fork from here** (user messages) → `fork`.
+- **Keyboard.** The list is an ARIA tree with a single tab stop on the selected row (the current row, or its nearest visible ancestor when a collapse hides it, at first and again whenever the selected row disappears; focus follows it there if it was on the row that disappeared). Up / Down, Home / End move; Right expands a collapsed branch point, else moves down; Left collapses an expanded branch point, else moves to the parent branch point; Enter opens Go here.
+- **Scrolling.** On open the current row (or that ancestor) is scrolled to the middle of the view. The view isn't virtualized: rows use `content-visibility: auto` with a fixed intrinsic height so offscreen rows skip layout and paint. Entry previews are computed once per entry and bounded to a short single line, and labels keep their identity across appends that don't change them, so a new entry doesn't redo the whole tree's work and only changed rows re-render.
 
-Disabled while a run is active, with a notice sticking to the top of the scroll area. Both actions end on `/agents/$agentId`: from the page they return to the conversation; in the pane, already there, the pane stays open on Tree.
+Actions are disabled while a run is active, with a notice sticking to the top of the scroll area. Both actions end on `/agents/$agentId`: from the page they return to the conversation; in the pane, already there, the pane stays open on Tree.
 
 ## Review panel
 

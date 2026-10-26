@@ -12,16 +12,7 @@ import {
   SettingsIcon,
   XIcon,
 } from "lucide-react";
-import {
-  memo,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, type ReactNode, useCallback, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import { StatusMark } from "@/components/agent-status";
@@ -45,6 +36,7 @@ import { errorMessage, restartAgent, searchSessions } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { formatRelative } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { RELATIVE_TIME_TICK_MS, useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { useLive, useLiveRegistry } from "@/store/context";
 import {
@@ -59,19 +51,6 @@ import {
 
 /** Delay before the search text queries `GET /api/sessions?q=`. */
 export const SEARCH_DEBOUNCE_MS = 200;
-
-/** How often relative times ("2m ago") are refreshed. */
-export const RELATIVE_TIME_TICK_MS = 60_000;
-
-/** `Date.now()`, refreshed every `intervalMs`. */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
-}
 
 const rowClass =
   "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-1 pl-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-70";

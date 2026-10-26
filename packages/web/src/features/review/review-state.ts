@@ -1,7 +1,8 @@
 /**
  * Per-conversation review state (`docs/design/07-code-review.md`, "Review state"): the desktop
- * pane, the active tab, the Changes mode and the Files search and open file. Only open panes and
- * their tab are persisted (`pi-code:review`); the rest lasts for the tab's lifetime.
+ * pane, the active tab, the Changes mode, the Files search and open file, and the Tree tab's
+ * collapsed branch points. Only open panes and their tab are persisted (`pi-code:review`); the
+ * rest lasts for the tab's lifetime.
  */
 
 import { create } from "zustand";
@@ -43,6 +44,8 @@ export interface ReviewState {
   tab: ReviewTab;
   diff: DiffMode;
   files: { query: string; path?: string; target?: FileTarget };
+  /** Branch points collapsed in the session tree, by entry id. */
+  tree: { collapsed: string[] };
 }
 
 export const DEFAULT_REVIEW: ReviewState = {
@@ -50,6 +53,7 @@ export const DEFAULT_REVIEW: ReviewState = {
   tab: "changes",
   diff: { mode: "uncommitted", uncommitted: false },
   files: { query: "" },
+  tree: { collapsed: [] },
 };
 
 interface ReviewStore {
@@ -66,6 +70,8 @@ interface ReviewStore {
   /** Back from the open file to the Files search. */
   closeFile(agentId: string): void;
   setFilesQuery(agentId: string, query: string): void;
+  /** Collapses the tree's branch point `entryId`, or expands it when collapsed. */
+  toggleTreeBranch(agentId: string, entryId: string): void;
 }
 
 let nextNonce = 1;
@@ -104,6 +110,14 @@ export const useReviewStore = create<ReviewStore>()(
           update(agentId, (review) => ({ files: { query: review.files.query } })),
         setFilesQuery: (agentId, query) =>
           update(agentId, (review) => ({ files: { ...review.files, query } })),
+        toggleTreeBranch: (agentId, entryId) =>
+          update(agentId, ({ tree }) => ({
+            tree: {
+              collapsed: tree.collapsed.includes(entryId)
+                ? tree.collapsed.filter((id) => id !== entryId)
+                : [...tree.collapsed, entryId],
+            },
+          })),
       };
     },
     {

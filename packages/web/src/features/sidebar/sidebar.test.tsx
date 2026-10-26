@@ -21,13 +21,14 @@ import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
+import { RELATIVE_TIME_TICK_MS } from "@/lib/use-now";
 import { createAppRouter } from "@/router";
 import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendFrame } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
-import { RELATIVE_TIME_TICK_MS, SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
+import { SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
 
 /** Renders of the rows' `×` by row title: every render of a row renders its `×`. */
 const dismissRenders = vi.hoisted(() => new Map<string, number>());

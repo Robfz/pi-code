@@ -4,11 +4,20 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversationUi } from "@/features/conversation/conversation-ui";
+import { useReviewStore } from "@/features/review/review-state";
+import { RELATIVE_TIME_TICK_MS } from "@/lib/use-now";
 import { useDrafts } from "@/store/drafts";
+import { stubMatchMedia } from "@/test/dom-stubs";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
-import { buildTreeModel, flattenTree } from "./tree-model";
+import {
+  buildTreeModel,
+  describeEntry,
+  flattenTree,
+  PREVIEW_CHARS,
+  type TreeModel,
+} from "./tree-model";
 import { TreeScreen } from "./tree-screen";
-import { MAX_INDENT } from "./tree-view";
+import { TreeView } from "./tree-view";
 
 vi.mock("sonner", async (importOriginal) => {
   const actual = await importOriginal<typeof import("sonner")>();
@@ -129,6 +138,10 @@ async function renderTree(running = false) {
 const rows = () => screen.getAllByTestId("tree-row");
 const row = (id: string) =>
   rows().find((r) => r.dataset.entryId === id) ?? (null as unknown as HTMLElement);
+const selectedRows = () =>
+  rows()
+    .filter((r) => r.getAttribute("aria-selected") === "true")
+    .map((r) => r.dataset.entryId);
 
 beforeEach(() => {
   useConversationUi.getState().reset();
@@ -181,18 +194,132 @@ describe("tree model", () => {
     expect(buildTreeModel(entries, "tr").currentId).toBe("u2");
   });
 
-  it("caps indentation depth", async () => {
-    // A chain of nested branch points deeper than MAX_INDENT.
+  it("doesn't cap depth: deep rows get one gutter column per level", async () => {
+    // A chain of nested branch points.
     const entries: SessionEntry[] = [];
-    for (let i = 0; i <= MAX_INDENT + 3; i++) {
+    for (let i = 0; i <= 10; i++) {
       entries.push(user(`n${i}`, i === 0 ? null : `n${i - 1}`, `msg ${i}`));
       if (i > 0) entries.push(user(`s${i}`, `n${i - 1}`, `side ${i}`));
     }
     await renderWithStore(<TreeScreen />, hydratedStore({ transcript: { entries, leafId: "n0" } }));
     await screen.findAllByTestId("tree-row");
-    const deepest = rows().find((r) => r.dataset.entryId === `n${MAX_INDENT + 3}`);
-    expect(Number(deepest?.dataset.depth)).toBeGreaterThan(MAX_INDENT);
-    expect(deepest?.style.paddingLeft).toBe(`${MAX_INDENT * 14}px`);
+    const deepest = row("n10");
+    expect(deepest.dataset.depth).toBe("10");
+    expect(deepest).toHaveAttribute("aria-level", "11");
+    // Ten guide columns, then the node.
+    expect(deepest.querySelector('[data-slot="tree-gutter"]')?.children).toHaveLength(11);
+  });
+
+  it("describes each entry once, as a bounded one-line preview", () => {
+    const long = user("u1", null, `first   line\n\nsecond ${"word ".repeat(5000)}`);
+    const description = describeEntry(long);
+    expect(describeEntry(long)).toBe(description);
+    expect(description?.text.startsWith("first line second word")).toBe(true);
+    expect(description?.text.length).toBe(PREVIEW_CHARS + 1);
+    expect(description?.text.endsWith("…")).toBe(true);
+    expect(describeEntry(user("u2", null, "short\ntext"))?.text).toBe("short text");
+  });
+
+  it("shows a branch summary's text", () => {
+    const summary = (id: string, text: string) =>
+      entry(id, "u1", { type: "branch_summary", fromId: "x", summary: text });
+    const model = buildTreeModel(
+      [user("u1", null, "hi"), summary("b1", "Tried plan A"), summary("b2", "")],
+      "b1",
+    );
+    expect(model.items.get("b1")?.text).toBe("Tried plan A");
+    expect(model.items.get("b2")?.text).toBe("Branch summary");
+  });
+});
+
+/** `id depth guides elbow links`: guides as `|` (line) / `.`, links `^` up and `v` down. */
+function gutter(model: TreeModel, collapsed: string[] = []): string[] {
+  return flattenTree(model, new Set(collapsed)).map((r) =>
+    [
+      r.item.id,
+      r.depth,
+      r.guides.map((g) => (g ? "|" : ".")).join("") || "-",
+      r.elbow ?? "-",
+      `${r.linkUp ? "^" : ""}${r.linkDown ? "v" : ""}` || "-",
+    ].join(" "),
+  );
+}
+
+describe("tree guides", () => {
+  it("a single chain has no guides, only links", () => {
+    const model = buildTreeModel(
+      [
+        user("u1", null, "a"),
+        assistant("a1", "u1", [{ type: "text", text: "b" }]),
+        user("u2", "a1", "c"),
+      ],
+      "u2",
+    );
+    expect(gutter(model)).toEqual(["u1 0 - - v", "a1 0 - - ^v", "u2 0 - - ^"]);
+  });
+
+  it("branches of a branch point get ├ elbows, the last └; chains keep their branch's line", () => {
+    const { entries, leafId } = sampleTree();
+    expect(gutter(buildTreeModel(entries, leafId))).toEqual([
+      "u1 0 - - v",
+      "a1 0 - - ^v",
+      "u2 1 | mid v",
+      "a3 1 | - ^",
+      "u3 1 . last v",
+      "a4 1 . - ^v",
+      "c1 1 . - ^",
+    ]);
+  });
+
+  it("three branches", () => {
+    const model = buildTreeModel(
+      [user("r", null, "r"), user("b1", "r", "1"), user("b2", "r", "2"), user("b3", "r", "3")],
+      "b1",
+    );
+    expect(gutter(model)).toEqual(["r 0 - - v", "b1 1 | mid -", "b2 1 | mid -", "b3 1 . last -"]);
+  });
+
+  it("nested branch points keep the outer branch's line", () => {
+    const model = buildTreeModel(
+      [
+        user("r", null, "r"),
+        user("b1", "r", "b1"),
+        user("b2", "r", "b2"),
+        user("c1", "b1", "c1"),
+        user("c2", "b1", "c2"),
+        user("d", "c2", "d"),
+      ],
+      "d",
+    );
+    expect(gutter(model)).toEqual([
+      "r 0 - - v",
+      "b1 1 | mid v",
+      "c1 2 || mid -",
+      "c2 2 |. last v",
+      "d 2 |. - ^",
+      "b2 1 . last -",
+    ]);
+  });
+
+  it("several roots are branches of a virtual root", () => {
+    const model = buildTreeModel(
+      [user("r1", null, "r1"), user("x", "r1", "x"), user("r2", null, "r2")],
+      "x",
+    );
+    // The first root's elbow (┌) has nothing above it.
+    expect(gutter(model)).toEqual(["r1 1 | first v", "x 1 | - ^", "r2 1 . last -"]);
+  });
+
+  it("several roots start at ARIA level 1", async () => {
+    const entries = [user("r1", null, "r1"), user("x", "r1", "x"), user("r2", null, "r2")];
+    await renderWithStore(<TreeView />, hydratedStore({ transcript: { entries, leafId: "x" } }));
+    await screen.findAllByTestId("tree-row");
+    expect(rows().map((r) => r.getAttribute("aria-level"))).toEqual(["1", "1", "1"]);
+  });
+
+  it("a collapsed branch point hides its branches and links nothing down", () => {
+    const { entries, leafId } = sampleTree();
+    expect(gutter(buildTreeModel(entries, leafId), ["a1"])).toEqual(["u1 0 - - v", "a1 0 - - ^"]);
   });
 });
 
@@ -244,9 +371,181 @@ describe("TreeScreen", () => {
     await renderTree();
     await u.click(within(row("a1")).getByRole("button", { name: "Collapse branches" }));
     expect(rows().map((r) => r.dataset.entryId)).toEqual(["u1", "a1"]);
-    expect(row("a1")).toHaveTextContent("2 branches");
+    expect(row("a1")).toHaveTextContent("2 branches hidden");
+    expect(row("a1")).toHaveAttribute("aria-expanded", "false");
     await u.click(within(row("a1")).getByRole("button", { name: "Expand branches" }));
     expect(rows()).toHaveLength(7);
+  });
+
+  it("collapsed branch points survive remounting the view", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    const { store, unmount } = await renderTree();
+    await u.click(within(row("a1")).getByRole("button", { name: "Collapse branches" }));
+    unmount();
+    const again = await renderWithStore(<TreeScreen />, store);
+    await again.router.navigate({ to: "/agents/$agentId/tree", params: { agentId: "a1" } });
+    await screen.findAllByTestId("tree-row");
+    expect(rows().map((r) => r.dataset.entryId)).toEqual(["u1", "a1"]);
+    // Kept for the tab's lifetime only.
+    expect(localStorage.getItem("pi-code:review") ?? "").not.toContain("collapsed");
+    expect(useReviewStore.getState().reviews.a1?.tree.collapsed).toEqual(["a1"]);
+  });
+
+  it("is an ARIA tree with one tab stop, on the current row at first", async () => {
+    stubFetch(handler());
+    await renderTree();
+    expect(screen.getByRole("tree", { name: "Session tree" })).toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem")).toHaveLength(7);
+    expect(row("a3")).toHaveAttribute("aria-selected", "true");
+    expect(rows().filter((r) => r.tabIndex === 0)).toEqual([row("a3")]);
+    expect(row("a1")).toHaveAttribute("aria-expanded", "true");
+    expect(row("u1")).not.toHaveAttribute("aria-expanded");
+    expect(row("u2")).toHaveAttribute("aria-level", "2");
+  });
+
+  it("names each row by its preview, label and current badge only", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    await renderTree();
+    await u.click(within(row("u2")).getByText("Go with plan A"));
+    expect(screen.getByRole("treeitem", { name: "Go with plan A checkpoint" })).toBe(row("u2"));
+    expect(screen.getByRole("treeitem", { name: "Plan A done current" })).toBe(row("a3"));
+    expect(screen.getByRole("treeitem", { name: "Sure, plan below" })).toBe(row("a1"));
+  });
+
+  it("refreshes relative times every minute", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const recent = user("u1", null, "Hello");
+      const store = hydratedStore({
+        transcript: {
+          entries: [{ ...recent, timestamp: new Date(Date.now() - 10_000).toISOString() }],
+          leafId: "u1",
+        },
+      });
+      await renderWithStore(<TreeView />, store);
+      expect(
+        await within(await screen.findByTestId("tree-row")).findByText("just now"),
+      ).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(RELATIVE_TIME_TICK_MS));
+      expect(within(row("u1")).getByText("1m ago")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("selecting a row keeps its actions inside it", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    await renderTree();
+    await u.click(within(row("u3")).getByText("Try plan B instead"));
+    expect(screen.getAllByRole("treeitem")).toHaveLength(7);
+    expect(rows().map((r) => r.getAttribute("aria-selected"))).toEqual(
+      ["u1", "a1", "u2", "a3", "u3", "a4", "c1"].map((id) => String(id === "u3")),
+    );
+    expect(row("u3").tabIndex).toBe(0);
+    expect(document.activeElement).toBe(row("u3"));
+    const goHere = within(row("u3")).getByRole("button", { name: "Go here" });
+    expect(goHere.closest('[role="treeitem"]')).toBe(row("u3"));
+  });
+
+  it("keyboard: arrows move and collapse / expand, Home / End, Enter opens Go here", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    await renderTree();
+    act(() => row("a3").focus());
+    const focused = () => (document.activeElement as HTMLElement).dataset.entryId;
+    const selected = () =>
+      rows().find((r) => r.getAttribute("aria-selected") === "true")?.dataset.entryId;
+
+    await u.keyboard("{ArrowUp}");
+    expect([focused(), selected()]).toEqual(["u2", "u2"]);
+    // Left from a branch's row goes to its branch point; left again collapses it.
+    await u.keyboard("{ArrowLeft}");
+    expect(focused()).toBe("a1");
+    await u.keyboard("{ArrowLeft}");
+    expect(rows().map((r) => r.dataset.entryId)).toEqual(["u1", "a1"]);
+    // Right expands, then moves down.
+    await u.keyboard("{ArrowRight}");
+    expect(rows()).toHaveLength(7);
+    expect(focused()).toBe("a1");
+    await u.keyboard("{ArrowRight}");
+    expect(focused()).toBe("u2");
+    await u.keyboard("{End}");
+    expect(focused()).toBe("c1");
+    await u.keyboard("{Home}");
+    expect(focused()).toBe("u1");
+    await u.keyboard("{ArrowUp}");
+    expect(focused()).toBe("u1");
+
+    // Enter on the current row does nothing; on another it opens the confirmation.
+    act(() => row("a3").focus());
+    await u.keyboard("{Enter}");
+    expect(screen.queryByTestId("navigate-sheet")).toBeNull();
+    await u.keyboard("{ArrowDown}{Enter}");
+    const sheet = await screen.findByTestId("navigate-sheet");
+    expect(within(sheet).getByText("Try plan B instead")).toBeInTheDocument();
+  });
+
+  it("confirms Go here in a centered dialog on desktop", async () => {
+    stubMatchMedia(() => true);
+    stubFetch(handler());
+    const u = userEvent.setup();
+    await renderWithStore(<TreeView />, sampleStore());
+    await screen.findAllByTestId("tree-row");
+    await u.click(within(row("u3")).getByRole("button", { name: "Go here" }));
+    const dialog = await screen.findByTestId("navigate-sheet");
+    expect(dialog).toHaveAttribute("data-slot", "dialog-content");
+    expect(within(dialog).getByRole("checkbox")).toBeInTheDocument();
+  });
+
+  it("keeps a valid selection when the selected row goes away", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    const { store } = await renderTree();
+    await u.click(within(row("u2")).getByText("Go with plan A"));
+    await u.click(within(row("a1")).getByRole("button", { name: "Collapse branches" }));
+    // The chevron's click reaches its row, which selects the branch point.
+    expect(selectedRows()).toEqual(["a1"]);
+    expect(rows().filter((r) => r.tabIndex === 0)).toEqual([row("a1")]);
+    await u.click(within(row("a1")).getByRole("button", { name: "Expand branches" }));
+    act(() => {
+      store.setState((s) => ({
+        transcript: { entries: [...s.transcript.entries, user("u4", "a4", "Next")], leafId: "u4" },
+      }));
+    });
+    // A leaf move keeps a visible selection.
+    expect(selectedRows()).toEqual(["a1"]);
+  });
+
+  it("a hidden selected row hands selection and focus to the current row's nearest visible ancestor", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    await renderTree();
+    await u.click(within(row("u2")).getByText("Go with plan A"));
+    expect(document.activeElement).toBe(row("u2"));
+    act(() => useReviewStore.getState().toggleTreeBranch("a1", "a1"));
+    expect(rows().map((r) => r.dataset.entryId)).toEqual(["u1", "a1"]);
+    expect(selectedRows()).toEqual(["a1"]);
+    expect(document.activeElement).toBe(row("a1"));
+  });
+
+  it("scrolls to the current row's nearest visible ancestor when a collapse hides it", async () => {
+    const scrolled: string[] = [];
+    const scrollIntoView = vi.fn(function (this: HTMLElement) {
+      scrolled.push(this.dataset.entryId ?? "");
+    });
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      stubFetch(handler());
+      useReviewStore.getState().toggleTreeBranch("a1", "a1");
+      await renderTree();
+      expect(selectedRows()).toEqual(["a1"]);
+      expect(scrolled).toEqual(["a1"]);
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    }
   });
 
   it("Go here: summary choice + instructions → POST /tree/navigate, then back to the conversation", async () => {

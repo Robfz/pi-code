@@ -1,8 +1,9 @@
 import { initialLiveState, type SessionEntry, type ToolRun } from "@pi-code/protocol";
 import { describe, expect, it } from "vitest";
 import { makeSnapshot } from "@/test/fixtures";
+import type { ConversationState } from "./conversation-store";
 import { createConversationStore } from "./conversation-store";
-import { selectSubagentSpend } from "./selectors";
+import { selectLabels, selectSubagentSpend } from "./selectors";
 
 const details = (...costs: number[]) => ({
   mode: costs.length > 1 ? "parallel" : "single",
@@ -85,5 +86,34 @@ describe("selectSubagentSpend", () => {
   it("counts an aborted call as 0 but still reports it", () => {
     expect(spend([toolResult("e1", null, "spawn", "t1", {})])).toBe(0);
     expect(spend([], { t1: run({ status: "error", result: { details: {} } }) })).toBe(0);
+  });
+});
+
+describe("selectLabels", () => {
+  const entry = (id: string, body: Record<string, unknown>) =>
+    ({
+      id,
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      ...body,
+    }) as unknown as SessionEntry;
+  const labelEntry = (id: string, targetId: string, label: string | undefined) =>
+    entry(id, { type: "label", targetId, label });
+  const message = (id: string) =>
+    entry(id, { type: "message", message: { role: "user", content: "hi", timestamp: 0 } });
+  const labels = (entries: SessionEntry[]) =>
+    selectLabels({ transcript: { entries, leafId: null } } as unknown as ConversationState);
+
+  it("keeps the same Map while the labels don't change", () => {
+    const base = [message("u1"), labelEntry("l1", "u1", "start")];
+    const first = labels(base);
+    expect([...first]).toEqual([["u1", "start"]]);
+    expect(labels([...base, message("u2")])).toBe(first);
+
+    const renamed = labels([...base, message("u2"), labelEntry("l2", "u1", "renamed")]);
+    expect(renamed).not.toBe(first);
+    expect([...renamed]).toEqual([["u1", "renamed"]]);
+    // Another conversation never sees these labels.
+    expect([...labels([message("x1")])]).toEqual([]);
   });
 });

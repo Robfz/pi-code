@@ -255,6 +255,7 @@ interface ReviewState {
   tab: "changes" | "files" | "tree";                   // "tree": desktop pane only
   diff: { mode: "uncommitted" | "branch"; base?: string; uncommitted: boolean };
   files: { query: string; path?: string; target?: { start: number; end: number; nonce: number } };
+  tree: { collapsed: string[] };                       // session tree's collapsed branch points
 }
 ```
 

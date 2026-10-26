@@ -40,6 +40,19 @@ const toolResultsOf = memoByIdentity((entries: SessionEntry[]) => {
   return results;
 });
 
+function sameLabels(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [target, label] of a) if (b.get(target) !== label) return false;
+  return true;
+}
+
+/**
+ * The last labels computed, by any conversation. Equal content is interchangeable, so handing
+ * it out again keeps the result identical across appends that don't touch labels, which spares
+ * label consumers (the tree model) a rebuild.
+ */
+let lastLabels: Map<string, string> = new Map();
+
 const labelsOf = memoByIdentity((entries: SessionEntry[]) => {
   const labels = new Map<string, string>();
   for (const entry of entries) {
@@ -48,6 +61,8 @@ const labelsOf = memoByIdentity((entries: SessionEntry[]) => {
     if (label === undefined || label === "") labels.delete(targetId);
     else labels.set(targetId, label);
   }
+  if (sameLabels(labels, lastLabels)) return lastLabels;
+  lastLabels = labels;
   return labels;
 });
 
@@ -85,7 +100,7 @@ export const selectPromptHistory = (s: ConversationState): string[] =>
 export const selectToolResults = (s: ConversationState): Map<string, ToolResultMessage> =>
   toolResultsOf(s.transcript.entries);
 
-/** Current label per target entry id. */
+/** Current label per target entry id; the same `Map` while the labels don't change. */
 export const selectLabels = (s: ConversationState): Map<string, string> =>
   labelsOf(s.transcript.entries);
 
