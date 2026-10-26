@@ -551,12 +551,19 @@ export class AgentPipeline {
   }
 
   /**
-   * Full resync after an out-of-band session change (tree navigation): `transcript_reset` +
-   * `stats`. Resolves once published.
+   * Sync after an in-place tree navigation, which pi reports without any event: the moved leaf
+   * (plus the `branch_summary` entry when summarizing) as `entries_appended`, falling back to
+   * `transcript_reset`, then `stats` (pi's context usage is computed over the active branch).
+   * `stats` come every time, even when this sync finds nothing new: an event-driven sync queued
+   * while pi was navigating may already have published the move. No `get_state`: of what it
+   * reports, navigation changes only `messageCount`, which pi-code doesn't read. Resolves once
+   * published.
    */
-  resync(): Promise<void> {
+  syncAfterNavigation(): Promise<void> {
     return this.enqueue(async () => {
-      this.publishAll(await this.resetSession());
+      const events = await this.syncEntries({ gated: false, leafMove: true });
+      events.push(...(await this.fetchStats()));
+      this.publishAll(events);
     });
   }
 
@@ -719,8 +726,15 @@ export class AgentPipeline {
    * `get_entries { since: <last entry> }` → `entries_appended`. Falls back to a full reset when
    * pi doesn't know `since` or its leaf isn't the last new entry. When `gated`, stops at the
    * first message entry whose `message_end` hasn't been published yet (see `unsyncedMessages`).
+   *
+   * With `leafMove` (after tree navigation) the leaf may be any entry: the result is one
+   * `entries_appended` with pi's leaf (possibly with no entries), nothing when neither the
+   * entries nor the leaf changed, and a reset only when the leaf is an entry the cache doesn't
+   * have (the cache diverged from pi).
    */
-  private async syncEntries(opts: { gated?: boolean } = {}): Promise<ServerEvent[]> {
+  private async syncEntries(
+    opts: { gated?: boolean; leafMove?: boolean } = {},
+  ): Promise<ServerEvent[]> {
     const gated = opts.gated ?? true;
     const current = this.caches.transcript;
     const since = current.entries.at(-1)?.id;
@@ -744,9 +758,17 @@ export class AgentPipeline {
       this.markSynced(ready);
       return [{ type: "entries_appended", entries: ready, leafId: last.id }];
     }
-    const expectedLeaf = fresh.at(-1)?.id ?? current.leafId;
-    if (data.leafId !== expectedLeaf) return this.resetTranscript();
-    if (fresh.length === 0) return [];
+    if (opts.leafMove) {
+      const leaf = data.leafId;
+      if (leaf !== null && !known.has(leaf) && !fresh.some((e) => e.id === leaf)) {
+        return this.resetTranscript();
+      }
+      if (fresh.length === 0 && leaf === current.leafId) return [];
+    } else {
+      const expectedLeaf = fresh.at(-1)?.id ?? current.leafId;
+      if (data.leafId !== expectedLeaf) return this.resetTranscript();
+      if (fresh.length === 0) return [];
+    }
     this.markSynced(fresh);
     return [{ type: "entries_appended", entries: fresh, leafId: data.leafId }];
   }

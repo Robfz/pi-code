@@ -14,7 +14,8 @@
  *   `bash` tool `hang-tool` and a queued steering message).
  * - `prompt "/pi-code-tree {json}"` (unless `MINI_PI_NO_EXT`): moves the leaf like pi's
  *   `navigateTree` (to the parent of a user message, whose text goes to `set_editor_text`), with a
- *   `branch_summary` when `summarize`; with `MINI_PI_TREE_FAIL` it emits `extension_error`
+ *   `branch_summary` when `summarize` (announced with `entry_appended` when
+ *   `MINI_PI_TREE_ENTRY_EVENT` is set); with `MINI_PI_TREE_FAIL` it emits `extension_error`
  *   instead; answers after.
  * - `fork`, `new_session`, `switch_session`, `get_*` queries.
  * - End of stdin: exits, saving the session first when `MINI_PI_SAVE_ON_EXIT` is set.
@@ -219,7 +220,8 @@ function prompt(cmd: Command, message: string) {
       target.type === "message" && (target.message as { role?: string }).role === "user";
     leafId = isUser ? target.parentId : target.id;
     if (args.summarize && fromId !== null) {
-      append({ type: "branch_summary", fromId, summary: "mini summary" });
+      const summary = append({ type: "branch_summary", fromId, summary: "mini summary" });
+      if (process.env.MINI_PI_TREE_ENTRY_EVENT) out({ type: "entry_appended", entry: summary });
     }
     if (isUser) {
       out({

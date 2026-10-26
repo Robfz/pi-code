@@ -943,6 +943,51 @@ describe("transcript_reset", () => {
   });
 });
 
+describe("entries_appended from tree navigation", () => {
+  const failed = reduceAll([
+    pi({ type: "tool_execution_start", toolCallId: "run", toolName: "bash", args: {} }),
+    pi({ type: "tool_execution_start", toolCallId: "fin", toolName: "bash", args: {} }),
+    pi({
+      type: "tool_execution_end",
+      toolCallId: "fin",
+      toolName: "bash",
+      result: {},
+      isError: false,
+    }),
+    { type: "bash_done", id: "b1", result: bashResult, command: "x" },
+    { type: "bash_output", id: "b2", delta: "y", command: "y" },
+  ]);
+  const settled: LiveState = { ...failed, run: { active: false, lastError: "boom" } };
+  const summary = {
+    type: "branch_summary",
+    id: "s",
+    parentId: "a",
+    timestamp: "",
+    fromId: "b",
+    summary: "",
+  } as SessionEntry;
+
+  it.each<[string, ServerEvent]>([
+    ["a plain move", { type: "entries_appended", entries: [], leafId: "a" }],
+    ["a move to the root", { type: "entries_appended", entries: [], leafId: null }],
+    ["a branch summary", { type: "entries_appended", entries: [summary], leafId: "s" }],
+  ])("%s drops a settled run's lastError, finished tools and bash runs", (_, event) => {
+    const s = reduceLive(settled, event);
+    expect(s.run).toEqual({ active: false });
+    expect(Object.keys(s.tools)).toEqual(["run"]);
+    expect(Object.keys(s.bash)).toEqual(["b2"]);
+  });
+
+  it("an ordinary append keeps them", () => {
+    const event: ServerEvent = {
+      type: "entries_appended",
+      entries: [messageEntry("u", user)],
+      leafId: "u",
+    };
+    expect(reduceLive(settled, event)).toBe(settled);
+  });
+});
+
 describe("live_reset", () => {
   it("drops everything the pi process had in flight; keeps extension UI and the last error", () => {
     const s = reduceAll([

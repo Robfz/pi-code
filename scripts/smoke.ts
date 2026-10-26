@@ -1181,7 +1181,23 @@ async function main() {
       summarize: false,
     });
     assert(a.status === 200 && a.json.cancelled === false, `navigate A → ${a.status} ${a.text}`);
-    await s.waitFor((e) => e.type === "transcript_reset", "reset after A", 10_000, from);
+    assert(a.json.leafId === user1.parentId, `navigate A leafId ${a.json.leafId}`);
+    const movedA = await s.waitFor(
+      (e) => e.type === "entries_appended" && e.leafId === user1.parentId,
+      "leaf move after A",
+      10_000,
+      from,
+    );
+    assert(
+      s.events[movedA]?.data.entries.length === 0,
+      `move after A: ${JSON.stringify(s.events[movedA]).slice(0, 300)}`,
+    );
+    const statsA = await s.waitFor((e) => e.type === "stats", "stats after A", 10_000, movedA + 1);
+    assert(
+      s.events[statsA]?.seq === a.json.seq,
+      `stats after A at seq ${s.events[statsA]?.seq} ≠ response seq ${a.json.seq}`,
+    );
+    assert(!s.data(from).some((e) => e.type === "transcript_reset"), "reset after A");
     let snap = await assertTranscriptConsistent(agentId);
     assert(
       snap.transcript.leafId === user1.parentId,
@@ -1201,11 +1217,24 @@ async function main() {
       customInstructions: "One short sentence.",
     });
     assert(b.status === 200 && b.json.cancelled === false, `navigate B → ${b.status} ${b.text}`);
-    await s.waitFor((e) => e.type === "transcript_reset", "reset after B", 10_000, from);
+    const movedB = await s.waitFor(
+      (e) => e.type === "entries_appended" && e.leafId === b.json.leafId,
+      "branch summary after B",
+      10_000,
+      from,
+    );
+    const appended = s.events[movedB]?.data.entries as Json[];
+    assert(
+      appended.length === 1 && appended[0]?.type === "branch_summary",
+      `appended after B: ${JSON.stringify(appended).slice(0, 300)}`,
+    );
+    await s.waitFor((e) => e.type === "stats", "stats after B", 10_000, movedB + 1);
+    assert(!s.data(from).some((e) => e.type === "transcript_reset"), "reset after B");
     snap = await assertTranscriptConsistent(agentId);
     const leaf = (snap.transcript.entries as Json[]).find((e) => e.id === snap.transcript.leafId);
     assert(
       leaf?.type === "branch_summary" &&
+        leaf.id === appended[0]?.id &&
         leaf.parentId === assistant1.id &&
         leaf.fromId === leafBefore,
       `leaf after B: ${JSON.stringify(leaf).slice(0, 300)}`,

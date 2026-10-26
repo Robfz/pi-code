@@ -54,7 +54,8 @@ import { formatRelative } from "@/lib/time";
 import { useIsDesktop } from "@/lib/use-media-query";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
-import { useConversation } from "@/store/context";
+import { useConversation, useConversationStore } from "@/store/context";
+import { waitForSeq } from "@/store/conversation-store";
 import { selectIsRunning, selectLabels } from "@/store/selectors";
 import {
   buildTreeModel,
@@ -73,6 +74,9 @@ const ICONS = {
 
 const NO_COLLAPSED: string[] = [];
 
+/** How long Go here waits for the stream to deliver the navigation before routing anyway. */
+const NAVIGATION_SYNC_TIMEOUT_MS = 1500;
+
 /** Go here's form: the summary choice, its optional instructions, Cancel and Go here. */
 function NavigateForm({
   item,
@@ -85,10 +89,19 @@ function NavigateForm({
   setBusy(busy: boolean): void;
   onClose(): void;
 }) {
+  const store = useConversationStore();
   const agentId = useConversation((s) => s.agentId);
   const navigate = useNavigate();
   const [summarize, setSummarize] = useState(false);
   const [instructions, setInstructions] = useState("");
+  // Whether the form is still on screen once the request (and `waitForSeq`) resolves.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   async function go() {
     setBusy(true);
@@ -104,6 +117,12 @@ function NavigateForm({
         setBusy(false);
         return;
       }
+      // Route once the moved leaf is in the store, so the conversation opens on the new branch.
+      if (result.seq !== undefined) {
+        await waitForSeq(store, result.seq, NAVIGATION_SYNC_TIMEOUT_MS);
+      }
+      // Routed away meanwhile: the user is elsewhere now, don't pull them back.
+      if (!mounted.current) return;
       onClose();
       void navigate({ to: "/agents/$agentId", params: { agentId } });
     } catch (error) {
@@ -118,6 +137,7 @@ function NavigateForm({
         <input
           type="checkbox"
           checked={summarize}
+          disabled={busy}
           onChange={(event) => setSummarize(event.target.checked)}
           className="mt-0.5 size-4 accent-primary"
         />
@@ -133,16 +153,23 @@ function NavigateForm({
           aria-label="Summary instructions (optional)"
           placeholder="Instructions for the summary (optional)"
           value={instructions}
+          disabled={busy}
           onChange={(event) => setInstructions(event.target.value)}
           className="min-h-20 text-base md:text-sm"
         />
+      )}
+      {busy && summarize && (
+        <p data-testid="navigate-progress" className="text-sm text-muted-foreground">
+          Summarizing the branch you're leaving — this can take a while.
+        </p>
       )}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" disabled={busy} onClick={onClose}>
           Cancel
         </Button>
         <Button disabled={busy} onClick={() => void go()}>
-          {busy && <LoaderIcon className="animate-spin" />} Go here
+          {busy && <LoaderIcon className="animate-spin" />}
+          {busy ? (summarize ? "Summarizing…" : "Moving…") : "Go here"}
         </Button>
       </div>
     </div>

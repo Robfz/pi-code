@@ -629,6 +629,42 @@ describe("transcript resets", () => {
     expect(reset.transcript.leafId).toBe("x2");
   });
 
+  it("resets when tree navigation lands on an entry the server doesn't have", async () => {
+    const h = await start();
+    const SESSION_STATS = { sessionId: "s1", totalMessages: 0 };
+    h.fixture = h.writeFixture("navigate-reset", [
+      ...query("q1", { type: "get_state" }, STATE),
+      ...query(
+        "qa",
+        { type: "get_entries" },
+        { entries: [entry("e1", null), entry("e2", "e1")], leafId: "e2" },
+      ),
+      ...query("qs", { type: "get_session_stats" }, SESSION_STATS),
+      ...query("qm", { type: "get_commands" }, { commands: [{ name: "pi-code-tree" }] }),
+      { t: 1, dir: "in", line: { id: "p1", type: "prompt", message: "/pi-code-tree" } },
+      { t: 1, dir: "out", line: { id: "p1", type: "response", command: "prompt", success: true } },
+      ...query("qc", { type: "get_entries", since: "e2" }, { entries: [], leafId: "unknown" }),
+    ]);
+    const agent = await h.open();
+    const before = await h.snapshot(agent.id);
+    const client = h.stream({ open: [[agent.id, before.seq]] });
+    const nav = await h.json("POST", `/api/agents/${agent.id}/tree/navigate`, {
+      entryId: "e1",
+      summarize: false,
+    });
+    expect(nav.status).toBe(200);
+    expect(nav.body).toEqual({ cancelled: false, leafId: "unknown", seq: seqOf(h, agent.id) });
+    await client.waitForSeq(agent.id, seqOf(h, agent.id));
+    const resets = eventsAfter(client, agent.id, before.seq, "transcript_reset");
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.transcript).toEqual({
+      entries: [entry("e1", null), entry("e2", "e1")],
+      leafId: "unknown",
+    });
+    expect(eventsAfter(client, agent.id, before.seq, "entries_appended")).toEqual([]);
+    expect(eventsAfter(client, agent.id, before.seq, "stats")).toHaveLength(1);
+  });
+
   it("resets when the leaf moved without new entries", async () => {
     const { reset } = await resetScenario(
       query("qc", { type: "get_entries", since: "e2" }, { entries: [], leafId: "e1" }),
