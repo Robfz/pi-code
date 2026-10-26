@@ -308,7 +308,9 @@ function Group({
  * worktree on repo groups, Remove worktree on linked ones and Stop or Delete on every row (`×`).
  * Group headers collapse, except the main checkout's; pins and collapsed groups are the server's
  * `sidebar` state. `action` sits alone in the titlebar row (the shell's toggle, the sheet's
- * close); `onSelect` runs whenever a row, `+`, Settings or a new conversation is picked.
+ * close); `onSelect` runs whenever a row, `+`, Settings or a new conversation is picked. Docked
+ * (`data-region="side"`), the titlebar row takes the chrome surface, so the title bar runs the
+ * window's width: under Window Controls Overlay the traffic lights sit on it, on `theme-color`.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
   const { loaded, agents, sessions, branches, sidebar } = useLive(
@@ -457,7 +459,7 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
   return (
     <nav aria-label="Conversations" className="flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-3 border-b pb-4">
-        <div className="titlebar flex items-center gap-1 px-4 pt-4 [--titlebar-pad:1rem]">
+        <div className="titlebar flex items-center gap-1 px-4 pt-4 [--titlebar-pad:1rem] in-data-[region=side]:bg-surface-chrome">
           {action}
         </div>
         <div className="mx-4 flex items-center gap-1">
