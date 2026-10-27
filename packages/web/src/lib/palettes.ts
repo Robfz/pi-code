@@ -12,10 +12,7 @@ export type Palette =
   | "sumi"
   | "deco"
   | "volt"
-  | "dusk"
-  | "zoned"
-  | "macos-zoned"
-  | "deco-zoned";
+  | "dusk";
 
 export const PALETTES: readonly Palette[] = [
   "neutral",
@@ -27,9 +24,6 @@ export const PALETTES: readonly Palette[] = [
   "deco",
   "volt",
   "dusk",
-  "zoned",
-  "macos-zoned",
-  "deco-zoned",
 ];
 
 export const PALETTE_LABEL: Record<Palette, string> = {
@@ -42,7 +36,4 @@ export const PALETTE_LABEL: Record<Palette, string> = {
   deco: "Deco",
   volt: "Volt",
   dusk: "Dusk",
-  zoned: "Zoned",
-  "macos-zoned": "macOS Zoned",
-  "deco-zoned": "Deco Zoned",
 };

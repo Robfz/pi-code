@@ -28,6 +28,13 @@ interface UiPrefs {
   setDiffFontSize(size: DiffFontSize): void;
 }
 
+/** Version 1's zoned palettes, each mapped to the palette it was based on. */
+const REMOVED_PALETTES: Record<string, Palette> = {
+  zoned: "neutral",
+  "macos-zoned": "macos",
+  "deco-zoned": "deco",
+};
+
 export const useUiPrefs = create<UiPrefs>()(
   persist(
     (set) => ({
@@ -41,13 +48,15 @@ export const useUiPrefs = create<UiPrefs>()(
     {
       name: "pi-code:ui-prefs",
       storage: createJSONStorage(() => localStorage),
-      version: 1,
+      version: 2,
       migrate: (persisted, version) => {
         if (version === 0) {
           const { toolsExpanded } = (persisted ?? {}) as { toolsExpanded?: unknown };
           return { density: toolsExpanded === true ? "detailed" : "balanced" };
         }
-        return persisted as UiPrefs;
+        const state = (persisted ?? {}) as Partial<UiPrefs>;
+        const palette = REMOVED_PALETTES[state.palette as string];
+        return (palette ? { ...state, palette } : state) as UiPrefs;
       },
     },
   ),
