@@ -1,8 +1,8 @@
 /**
  * The `theme-color` meta, which tints an installed app's title bar (and, under Window Controls
  * Overlay, the window controls' area beside the header), kept on `--surface-chrome`, the headers'
- * surface (the page's `--background` except in the zoned palettes), as the theme (`.dark`) and palette (`data-palette`) on <html> change. Watching
- * <html> instead of the stores catches every change after it's applied, whoever applies it.
+ * surface, as the theme (`.dark`) and palette (`data-palette`) on <html> change. Watching <html>
+ * instead of the stores catches every change after it's applied, whoever applies it.
  * Before the app starts the meta keeps `index.html`'s static colour.
  */
 

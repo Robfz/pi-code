@@ -82,11 +82,12 @@
   --rail-width: 2.75rem;
 }
 
-/* The neutral palette, which zoned shares; `palettes.css` holds the others. */
+/* The neutral palette; `palettes.css` holds the others. */
 :root,
-[data-palette="neutral"],
-[data-palette="zoned"] {
+[data-palette="neutral"] {
   --background: oklch(0.992 0 0);
+  --surface-side: oklch(0.98 0 0);
+  --surface-chrome: oklch(0.952 0 0);
   --foreground: oklch(0.21 0 0);
   --card: oklch(0.972 0 0);
   --card-foreground: oklch(0.21 0 0);
@@ -151,15 +152,13 @@
   --status-idle: var(--faint-foreground);
   --diff-add: var(--status-done);
   --diff-del: var(--status-error);
-  /* Region surfaces: the title bars and activity rail, and the side panels. Only zoned sets them. */
-  --surface-chrome: var(--background);
-  --surface-side: var(--background);
 }
 
 .dark,
-.dark [data-palette="neutral"],
-.dark [data-palette="zoned"] {
+.dark [data-palette="neutral"] {
   --background: oklch(0.16 0 0);
+  --surface-side: oklch(0.15 0 0);
+  --surface-chrome: oklch(0.125 0 0);
   --foreground: oklch(0.93 0 0);
   --card: oklch(0.188 0 0);
   --card-foreground: oklch(0.93 0 0);
