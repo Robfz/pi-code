@@ -842,15 +842,16 @@
   --surface-side: oklch(0.13 0 0);
 }
 
-/* macOS Zoned: macOS's window layering. In light the sidebar and toolbar sit under the white
- * content; in dark they sit above it, the toolbar highest. The side surface is macOS's sidebar. */
+/* macOS Zoned: macOS's window layering. In light the sidebar (macOS's) and toolbar sit under the
+ * white content; in dark they sit above it, the toolbar highest, the side panels barely off the
+ * page so the large surfaces read as one. */
 [data-palette="macos-zoned"] {
   --surface-chrome: oklch(0.925 0 0);
   --surface-side: oklch(0.949 0 0);
 }
 :is(.dark[data-palette="macos-zoned"], .dark [data-palette="macos-zoned"]) {
-  --surface-chrome: oklch(0.315 0 0);
-  --surface-side: oklch(0.285 0 0);
+  --surface-chrome: oklch(0.27 0 0);
+  --surface-side: oklch(0.245 0 0);
 }
 
 /* Deco Zoned: Deco, with deeper navy chrome and side panels under the page in dark and bluer
