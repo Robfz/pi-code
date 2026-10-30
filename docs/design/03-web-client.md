@@ -310,7 +310,7 @@ Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tab
 
 ## PWA
 
-**Manifest:** name "pi-code", standalone display with a `window-controls-overlay` display override, icons, theme colors, a `focus-existing` launch handler (launching focuses the open window and `useLaunchQueue` routes it in-app to the launch URL), a "New conversation" shortcut (`/?new=1`: `/` opens the project picker and strips the param), and
+**Manifest:** name "pi-code" ("pi-code - M3" with short name "M3" when built with `PI_CODE_INSTANCE=M3`; the page title, the Apple home-screen title and the Home heading follow), icons drawn at build time by `scripts/app-icons.ts` in the `PI_CODE_ICON` variant (`dark` or `light` tile), standalone display with a `window-controls-overlay` display override, theme colors, a `focus-existing` launch handler (launching focuses the open window and `useLaunchQueue` routes it in-app to the launch URL), a "New conversation" shortcut (`/?new=1`: `/` opens the project picker and strips the param), and
 
 ```json
 "share_target": { "action": "/share", "method": "GET", "params": { "title": "title", "text": "text", "url": "url" } }
