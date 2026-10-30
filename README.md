@@ -15,10 +15,9 @@ A small Node server on your Mac runs `pi --mode rpc` for each conversation and s
 ```sh
 mise install
 pnpm install
-pnpm build        # builds the web app into packages/web/dist
 ```
 
-When pi-code runs on more than one Mac, give each build its own name and icon so the installed apps are told apart, in the environment or in `packages/web/.env.local` (read by every build):
+When pi-code runs on more than one Mac, give each build its own name and icon so the installed apps are told apart, in the environment or in `.env.local` at the repo root (read by every build):
 
 ```sh
 PI_CODE_INSTANCE=M3   # app name "pi-code - M3", "M3" under the icon; unset: "pi-code"
@@ -29,22 +28,22 @@ An installed app keeps its name and icon until it's reinstalled (Chrome may offe
 
 ## Running
 
-Start the server (from the repo root; the server finds `packages/web/dist` relative to its own source):
-
 ```sh
-PI_CODE_HOSTNAME=<mac>.<tailnet>.ts.net pnpm --filter @pi-code/server start
+pnpm start
 ```
 
-Expose it on the tailnet (one-time; `--bg` keeps the config across reboots):
+This builds the web app into `packages/web/dist`, reads the tailnet hostname from `tailscale status` (unless `PI_CODE_HOSTNAME` is set), exposes the server on the tailnet and starts it:
 
 ```sh
 tailscale serve --bg --https=443  http://127.0.0.1:4180   # the app and API
 tailscale serve --bg --https=8443 http://127.0.0.1:4181   # the web-search curator proxy
 ```
 
+Both serve entries are removed when the script exits.
+
 Then open `https://<mac>.<tailnet>.ts.net` on the phone. On the Mac or a laptop, open the same URL in a browser tab: from 1024px wide the app docks a sidebar of every conversation (the live ones listed first under Active, then grouped by folder or repo, ordered by your last prompt, with search, collapsible groups and pinned repos shared across devices), and one tab follows all of them at once. The header's changes button opens a review pane beside the conversation with the project's git changes (uncommitted, or the branch against a base) and a file search; selecting lines adds an `@path:N` reference to the message, and references in messages open those lines. On the phone the same panel is a page, under Diff in the conversation menu.
 
-Stop the server with Ctrl-C (or SIGTERM): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
+Stop the server with Ctrl-C (or SIGTERM to the server process): it stops accepting requests, closes every pi process (stdin end, then SIGTERM after 5 s, SIGKILL after 10 s) and exits.
 
 ### Environment variables
 

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @pi-code/server --filter @pi-code/web dev",
+    "start": "bash scripts/start-tailnet.sh",
     "build": "pnpm -r --if-present build",
     "test": "vitest run",
     "test:watch": "vitest",
