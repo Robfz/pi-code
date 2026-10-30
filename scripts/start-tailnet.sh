@@ -23,4 +23,6 @@ trap 'tailscale serve --https=443 off || true; tailscale serve --https=8443 off 
 tailscale serve --bg --https=443 "http://127.0.0.1:$port"
 tailscale serve --bg --https=8443 "http://127.0.0.1:$curator_port"
 
-pnpm --filter @pi-code/server start
+# Not via `pnpm start`: pnpm forwards Ctrl-C's SIGINT to a child that already got it from the
+# terminal, and the server treats a second SIGINT as "exit now" with status 1.
+cd packages/server && node --import tsx src/main.ts
