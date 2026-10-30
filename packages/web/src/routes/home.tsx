@@ -139,7 +139,7 @@ export function HomeScreen() {
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 pt-[max(1rem,env(safe-area-inset-top),env(titlebar-area-height,0px))] pb-8">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">pi-code</h1>
+        <h1 className="text-xl font-semibold">{__APP_NAME__}</h1>
         <nav className="flex gap-1">
           <Button variant="ghost" size="icon" asChild>
             <Link to="/sessions" aria-label="Sessions">
