@@ -20,7 +20,34 @@ export function syncThemeColor(): () => void {
     attributes: true,
     attributeFilter: ["class", "data-palette"],
   });
-  return () => observer.disconnect();
+  const stopResend = resendAfterFirstPaint(meta, update);
+  return () => {
+    observer.disconnect();
+    stopResend();
+  };
+}
+
+/**
+ * Sends the colour again once the page has painted. Chromium drops theme-colour changes made
+ * before a page's first paint and, at that paint, sends the colour only if it differs from the
+ * last one it sent, which after a reload is the same colour from the previous page. Meanwhile the
+ * reload showed the static colour, which would stay until the next change. Clearing the meta for
+ * a frame and then setting it makes two changes Chromium can't skip.
+ */
+function resendAfterFirstPaint(meta: HTMLMetaElement, update: () => void): () => void {
+  if (!globalThis.PerformanceObserver?.supportedEntryTypes?.includes("paint")) return () => {};
+  let frame = 0;
+  const observer = new PerformanceObserver((list) => {
+    if (!list.getEntriesByName("first-contentful-paint").length) return;
+    observer.disconnect();
+    meta.removeAttribute("content");
+    frame = requestAnimationFrame(update);
+  });
+  observer.observe({ type: "paint", buffered: true });
+  return () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+  };
 }
 
 /**
