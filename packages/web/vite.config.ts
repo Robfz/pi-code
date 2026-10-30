@@ -36,13 +36,13 @@ const VENDOR_CHUNKS: Rolldown.CodeSplittingGroup[] = [
 ];
 
 /**
- * Per-instance build options, from the environment or `.env.local` (one install per host, each
- * its own installable app):
+ * Per-instance build options, from the environment or the repo root's `.env.local` (one install
+ * per host, each its own installable app):
  * - `PI_CODE_INSTANCE`: name shown after "pi-code" (`pi-code - M3`); alone as the short name.
  * - `PI_CODE_ICON`: icon variant, `dark` (default) or `light`.
  */
 function instanceOptions(mode: string): { name: string; shortName: string; icon: IconVariant } {
-  const env = loadEnv(mode, import.meta.dirname, "PI_CODE_");
+  const env = loadEnv(mode, fileURLToPath(new URL("../..", import.meta.url)), "PI_CODE_");
   const instance = env.PI_CODE_INSTANCE?.trim();
   const icon = env.PI_CODE_ICON?.trim() || "dark";
   if (!isIconVariant(icon)) {
