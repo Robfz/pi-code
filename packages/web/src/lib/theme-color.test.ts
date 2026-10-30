@@ -37,6 +37,7 @@ function addMeta(): HTMLMetaElement {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.head.querySelector('meta[name="theme-color"]')?.remove();
   document.documentElement.className = "";
   delete document.documentElement.dataset.palette;
@@ -60,6 +61,37 @@ describe("syncThemeColor", () => {
 
     document.documentElement.dataset.palette = "aurora";
     await vi.waitFor(() => expect(meta.content).toBe("#141628"));
+    stop();
+  });
+
+  it("clears the meta for a frame after the first paint, then sets it again", async () => {
+    let report: (names: string[]) => void = () => {};
+    class FakeObserver {
+      static supportedEntryTypes = ["paint"];
+      constructor(callback: PerformanceObserverCallback) {
+        report = (names) =>
+          callback(
+            { getEntriesByName: (name: string) => (names.includes(name) ? [{}] : []) } as never,
+            this as never,
+          );
+      }
+      observe() {}
+      disconnect() {
+        report = () => {};
+      }
+    }
+    vi.stubGlobal("PerformanceObserver", FakeObserver);
+    stubCanvas({ "oklch(0.992 0 0)": [253, 253, 253] });
+    stubChrome("oklch(0.992 0 0)");
+    const meta = addMeta();
+
+    const stop = syncThemeColor();
+    report(["first-paint"]);
+    expect(meta.content).toBe("#fdfdfd");
+
+    report(["first-contentful-paint"]);
+    expect(meta.hasAttribute("content")).toBe(false);
+    await vi.waitFor(() => expect(meta.content).toBe("#fdfdfd"));
     stop();
   });
 

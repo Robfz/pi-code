@@ -17,6 +17,15 @@ mise install
 pnpm install
 ```
 
+When pi-code runs on more than one Mac, give each build its own name and icon so the installed apps are told apart, in the environment or in `packages/web/.env.local` (read by every build):
+
+```sh
+PI_CODE_INSTANCE=M3   # app name "pi-code - M3", "M3" under the icon; unset: "pi-code"
+PI_CODE_ICON=light    # icon tile: dark (default) or light
+```
+
+An installed app keeps its name and icon until it's reinstalled (Chrome may offer to apply the update).
+
 ## Running
 
 ```sh

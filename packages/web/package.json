@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "vite build && node scripts/compress-dist.ts",
     "preview": "vite preview",
-    "icons": "node scripts/generate-icons.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.sw.json --noEmit"
   },
   "dependencies": {
