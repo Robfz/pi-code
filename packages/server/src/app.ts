@@ -8,6 +8,7 @@ import { errorEnvelope, isApiError } from "./errors.ts";
 import { agentsRoutes } from "./http/agents-routes.ts";
 import { catalogRoutes } from "./http/catalog-routes.ts";
 import { requestGuards } from "./http/guards.ts";
+import { prRoutes } from "./http/pr-routes.ts";
 import { pushRoutes } from "./http/push-routes.ts";
 import { reviewRoutes } from "./http/review-routes.ts";
 import { sessionsRoutes } from "./http/sessions-routes.ts";
@@ -16,6 +17,7 @@ import { spaHandler } from "./http/static.ts";
 import { type SseOptions, streamRoutes } from "./http/stream.ts";
 import { worktreesRoutes } from "./http/worktrees-routes.ts";
 import type { StreamHub } from "./live/stream-hub.ts";
+import type { PrService } from "./pr/pr-service.ts";
 import type { PushService } from "./push/push-service.ts";
 import type { SidebarStateStore } from "./store/sidebar-state.ts";
 
@@ -33,6 +35,8 @@ interface AppDeps {
   hub: StreamHub;
   /** Pins and collapsed groups (`PATCH /api/sidebar`); the hub broadcasts its changes. */
   sidebar: SidebarStateStore;
+  /** PR review (`/api/agents/:id/pr…`); the hub broadcasts its store's changes. */
+  prService: PrService;
   /** pi's version for `/api/health` (cached by the caller; see `piVersionProbe`). */
   piVersion: () => Promise<string>;
   /** Web Push (routes answer `not_found` without it). */
@@ -56,8 +60,14 @@ function apiRoutes(deps: AppDeps) {
     .get("/health", async (c) => c.json({ ok: true as const, piVersion: await deps.piVersion() }))
     .route("/", catalogRoutes(deps.catalog, deps.manager.home))
     .route("/sessions", sessionsRoutes(writeDeps))
-    .route("/agents", agentsRoutes(deps.manager))
-    .route("/agents", reviewRoutes(deps.manager))
+    .route(
+      "/agents",
+      agentsRoutes(deps.manager, {
+        onSessionCopied: (from, to) => deps.prService.store.copy(from, to),
+      }),
+    )
+    .route("/agents", reviewRoutes(deps.manager, deps.prService.store))
+    .route("/agents", prRoutes(deps.manager, deps.prService))
     .route("/worktrees", worktreesRoutes(writeDeps))
     .route("/sidebar", sidebarRoutes(deps.sidebar))
     .route("/stream", streamRoutes(deps.manager, deps.hub, deps.sse))

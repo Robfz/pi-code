@@ -18,6 +18,7 @@ All paths in this feature are relative to the agent's cwd, which is what the mod
 | Uncommitted (default) | `HEAD` (the empty tree without commits) | working tree | included |
 | Branch, uncommitted off (the toggle's default) | `merge-base(<base>, HEAD)` | `HEAD` | not included |
 | Branch, uncommitted on | `merge-base(<base>, HEAD)` | working tree | included |
+| PR ([`10-pr-review.md`](10-pr-review.md)), attached conversations only | the PR's pinned base | the PR's pinned head | not included |
 
 - Branch mode shows what the current branch changed since it left `<base>`, PR-style. `<base>` is picked from the branch list (local and `origin`), defaulting to the detected default branch (`GET git/branches`). The diff uses `origin/<base>` when it exists, else the local branch: worktrees start from `origin/main`, and a stale local `main` would add upstream commits to the diff. `POST git/fetch` (the Fetch button) updates the `origin/*` refs on demand.
 - The mode, base and toggle are per conversation, in the review state (Web client).
@@ -67,7 +68,7 @@ interface GitBranchesResponse {
 
 ### `POST /api/agents/:id/git/fetch`
 
-`fetchOrigin(cwd)` (`git/refs.ts`), after `requireWorkTree`: `git fetch origin` with a 60 s timeout. It never prompts: `runGit` sets `GIT_TERMINAL_PROMPT=0`, and ssh gets `-o BatchMode=yes` unless the user set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` (shared with worktree creation).
+`fetchOrigin(cwd)` (`git/refs.ts`), after `requireWorkTree`: `git fetch origin` with a 60 s timeout. It never prompts: `runGit` sets `GIT_TERMINAL_PROMPT=0`, and ssh gets `-o BatchMode=yes` unless the user set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` (shared with worktree creation and PR review, which passes refspecs: `git fetch --no-tags origin <refspec>…`).
 
 - → `204`. No `origin` remote, a network or an auth failure → `502 git_failed` "git fetch origin failed: <git's stderr>".
 - Outside a work tree → `404 not_a_git_repo`.
@@ -148,7 +149,8 @@ A reference names a version only when its lines may not match the file on disk:
 | Changes | old (deleted or old-side lines) | `@<oldRev>:./<oldPath ?? path>:N-M` |
 | Changes, new side is HEAD | new | `@<newRev>:./<path>:N-M` when the file has `worktreeChanged`, else `@<path>:N-M` |
 | Changes, new side is the working tree | new | `@<path>:N-M` |
-| File viewer | — | `@<path>:N-M` |
+| Changes, PR mode | new | `@<newRev>:./<path>:N-M` (the PR head isn't on disk) |
+| File viewer | — | `@<path>:N-M`; `@<rev>:./<path>:N-M` for a file opened at a version |
 | Transcript edit/write diff | either | `@<path>:N-M`, as shown, never versioned (F14) |
 
 A transcript tool diff's path is the tool's `path` argument, made cwd-relative when it is an absolute path inside the cwd. A path `formatCodeRef` can't write isn't inserted; a toast says so.
@@ -253,13 +255,13 @@ Transcript renderers (`tools/file-edits.tsx`) render `SelectableDiff` with the t
 interface ReviewState {
   paneOpen: boolean;                                   // desktop only
   tab: "changes" | "files" | "tree";                   // "tree": desktop pane only
-  diff: { mode: "uncommitted" | "branch"; base?: string; uncommitted: boolean };
-  files: { query: string; path?: string; target?: { start: number; end: number; nonce: number } };
+  diff: { mode?: "uncommitted" | "branch" | "pr"; base?: string; uncommitted: boolean }; // unset: `diffModeOf` (10-pr-review.md)
+  files: { query: string; path?: string; rev?: string; target?: { start: number; end: number; nonce: number } };
   tree: { collapsed: string[] };                       // session tree's collapsed branch points
 }
 ```
 
-`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes, uncommitted mode). Setters update the entry, among them `openPane(agentId, tab?)`, `togglePane`, `toggleTab(agentId, tab)` (opens the pane on `tab`, or closes it when it already shows `tab`) and `openFile(agentId, path, target?)`, which switches to the Files tab and gives `target` a fresh `nonce`, so opening the same lines again scrolls to them again.
+`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes, no mode picked: uncommitted, or PR mode for a conversation attached to a PR). Setters update the entry, among them `openPane(agentId, tab?)`, `togglePane`, `toggleTab(agentId, tab)` (opens the pane on `tab`, or closes it when it already shows `tab`) and `openFile(agentId, path, target?, rev?)`, which switches to the Files tab and gives `target` a fresh `nonce`, so opening the same lines again scrolls to them again.
 
 ### Changes tab
 
@@ -339,9 +341,9 @@ At ≥1024px (`useIsDesktop`), the conversation route renders the activity rail 
 
 `useOpenReference()` (`features/review/open-reference.ts`):
 
-1. `openFile(agentId, ref.path, { start, end })`, which switches to the Files tab.
+1. `openFile(agentId, ref.path, { start, end }, ref.rev)`, which switches to the Files tab.
 2. Desktop: `paneOpen = true`. Phone: navigate to `/agents/$agentId/diff`.
-3. A reference with `rev` opens the current file at those lines, with a toast: "That reference points at version <rev>; showing the current file."
+3. A reference with `rev` opens the file as committed in that version (`GET files/content?path&rev`, [`10-pr-review.md`](10-pr-review.md), "Version-named references"), with an `@<rev>` chip beside the path.
 
 The server resolves the path against the cwd, so absolute paths inside it work. Paths outside the project, missing files and non-git projects show the viewer's message.
 
@@ -380,7 +382,6 @@ Coverage per task is in [`../plan/07-code-review.md`](../plan/07-code-review.md)
 - The pane is usually below 1024px wide, so it shows unified diffs (F18). It can't be resized.
 - Nothing watches the working tree. Edits from an editor or a TUI pi show after the next agent turn, `!` command or Refresh (F12).
 - In agent replies, only `@path:N` is linked; bare `src/foo.ts:42` isn't (F17). References in fenced code blocks aren't linked. Each Markdown text node is scanned on its own, so a reference split by Markdown syntax outside inline code (`@pkg/__init__.py:3`, whose `__init__` becomes bold) isn't linked.
-- A version-named reference opens the current file; old versions aren't shown.
 - A conversation in a subfolder of a repo sees only that subtree's changes and files, while the header's dirty marker covers the whole repo.
 - Branch mode compares with `origin/<base>` as of the last fetch; nothing fetches automatically. Without `origin/<base>` it compares with the local branch, which may lag behind upstream.
 - Editing a reference's characters turns it into plain text; only deletions remove it whole (F8).

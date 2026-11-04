@@ -1,12 +1,14 @@
-import type { GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
+import type { GitDiffResponse, GitFileDiff, PrAttachment } from "@pi-code/protocol";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubCanvas } from "@/components/diff/testing";
 import { queryKeys } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
+import { makeAgent } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ChangesView, EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./changes-view";
 import { useReviewStore } from "./review-state";
@@ -18,6 +20,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
@@ -396,6 +399,128 @@ describe("ChangesView", () => {
       const row = await fileRow("a.ts");
       await tap(row, "new", 2);
       expect(draftText()).toBe("@a.ts:2 ");
+    });
+  });
+
+  describe("PR mode", () => {
+    const SESSION = "/sessions/s.jsonl";
+    const PR: PrAttachment = {
+      repo: "o/r",
+      number: 12,
+      title: "Speed up the parser",
+      url: "https://github.com/o/r/pull/12",
+      state: "open",
+      baseRefName: "main",
+      headRefName: "fast",
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      remoteHeadSha: "b".repeat(40),
+    };
+
+    /**
+     * The view for a conversation attached to `pr`; serves its diff and refresh, which answers
+     * `refreshed` (default: `pr`).
+     */
+    async function renderAttached(pr: PrAttachment, refreshed: [number, unknown] = [200, { pr }]) {
+      const fetched = stubFetch((call: FetchCall) => {
+        if (call.url === "/api/agents/a1/git/diff") {
+          return [200, { files: [file("a.ts")], oldRev: "aaaaaaa", newRev: "bbbbbbb" }];
+        }
+        if (call.url === "/api/agents/a1/pr/refresh") return refreshed;
+        if (call.url === "/api/agents/a1/git/branches") return [200, branches];
+        return undefined;
+      });
+      const store = hydratedStore({ agent: makeAgent({ id: "a1", sessionFile: SESSION }) });
+      const rendered = await renderWithStore(<ChangesView agentId="a1" />, store);
+      act(() => rendered.registry.live.setState({ prs: { [SESSION]: pr } }));
+      return { ...rendered, calls: fetched.calls };
+    }
+
+    it("is the default once attached, beside Uncommitted and Branch", async () => {
+      const { calls } = await renderAttached(PR);
+      expect(await fileRow("a.ts")).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "PR" })).toHaveAttribute("aria-checked", "true");
+      expect(diffSearches(calls)).toContain("?pr=1");
+      await userEvent.setup().click(screen.getByRole("radio", { name: "Uncommitted" }));
+      expect(screen.queryByTestId("pr-header")).toBeNull();
+      expect(useReviewStore.getState().reviews.a1?.diff.mode).toBe("uncommitted");
+    });
+
+    it("isn't offered without an attachment", async () => {
+      serve();
+      await renderView();
+      expect(await screen.findByText("The working tree is clean.")).toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: "PR" })).toBeNull();
+    });
+
+    it("heads the diff with the PR, a state chip only when merged or closed", async () => {
+      await renderAttached(PR);
+      const header = await screen.findByTestId("pr-header");
+      expect(within(header).getByRole("link", { name: "#12" })).toHaveAttribute("href", PR.url);
+      expect(header).toHaveTextContent("#12 Speed up the parser");
+      expect(header).not.toHaveTextContent(/Merged|Closed|Outdated/);
+    });
+
+    it.each([
+      ["merged", "Merged"],
+      ["closed", "Closed"],
+    ] as const)("shows a %s PR's state", async (state, label) => {
+      await renderAttached({ ...PR, state });
+      expect(await screen.findByTestId("pr-header")).toHaveTextContent(label);
+    });
+
+    it("shows Outdated · Refresh after newer pushes; Refresh re-pins the PR and reloads its diff", async () => {
+      const { calls, registry } = await renderAttached({ ...PR, remoteHeadSha: "c".repeat(40) });
+      const header = await screen.findByTestId("pr-header");
+      expect(header).toHaveTextContent("Outdated ·");
+      await fileRow("a.ts");
+      const prDiffs = () => diffSearches(calls).filter((search) => search === "?pr=1");
+      expect(prDiffs()).toHaveLength(1);
+      await userEvent.setup().click(within(header).getByRole("button", { name: "Refresh" }));
+      await waitFor(() =>
+        expect(calls.filter((call) => call.method === "POST").map((call) => call.url)).toEqual([
+          "/api/agents/a1/pr/refresh",
+        ]),
+      );
+      // The server's `prs` frame with the re-pinned commits.
+      const repinned = { ...PR, headSha: "c".repeat(40), remoteHeadSha: "c".repeat(40) };
+      act(() => registry.live.setState({ prs: { [SESSION]: repinned } }));
+      await waitFor(() => expect(prDiffs()).toHaveLength(2));
+      expect(screen.getByTestId("pr-header")).not.toHaveTextContent("Outdated");
+    });
+
+    it("toasts why a refresh failed, still Outdated", async () => {
+      const error = vi.spyOn(toast, "error").mockImplementation(() => "");
+      await renderAttached({ ...PR, remoteHeadSha: "c".repeat(40) }, [
+        502,
+        { error: { code: "gh_failed", message: "gh isn't logged in to GitHub" } },
+      ]);
+      const header = await screen.findByTestId("pr-header");
+      await userEvent.setup().click(within(header).getByRole("button", { name: "Refresh" }));
+      await waitFor(() =>
+        expect(error).toHaveBeenCalledWith("Couldn't refresh the PR: gh isn't logged in to GitHub"),
+      );
+      expect(header).toHaveTextContent("Outdated ·");
+      expect(within(header).getByRole("button", { name: "Refresh" })).toBeEnabled();
+    });
+
+    it("keeps the pinned PR diff when the review queries are invalidated", async () => {
+      const { calls, queryClient } = await renderAttached(PR);
+      await fileRow("a.ts");
+      const loaded = diffSearches(calls).length;
+      await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.review("a1") }));
+      expect(diffSearches(calls)).toHaveLength(loaded);
+    });
+
+    it("names the PR head in new-side references: it isn't on disk", async () => {
+      stubMatchMedia((query) => query === DESKTOP_QUERY);
+      await renderAttached(PR);
+      const row = await fileRow("a.ts");
+      await tap(row, "new", 2);
+      expect(draftText()).toBe("@bbbbbbb:./a.ts:2 ");
+      useDrafts.setState({ drafts: {} });
+      await tap(row, "old", 2);
+      expect(draftText()).toBe("@aaaaaaa:./a.ts:2 ");
     });
   });
 });

@@ -2,6 +2,8 @@ import {
   type AgentInfo,
   applySidebarPatch,
   initialLiveState,
+  type PrAttachment,
+  type PrAttachments,
   type RepoLayout,
   type SessionSummary,
   type SidebarPatch,
@@ -94,10 +96,11 @@ function baseline(
   sessions: SessionSummary[] = [],
   branches: Record<string, string> = {},
   state: Partial<SidebarView> = {},
+  prs: PrAttachments = {},
 ) {
   const sidebar = { pinned: [], collapsed: [], mains: {}, ...state };
   serverSidebar = sidebar;
-  sendFrame({ type: "baseline", agents, sessions, branches, sidebar });
+  sendFrame({ type: "baseline", agents, sessions, branches, sidebar, prs });
 }
 
 /**
@@ -193,6 +196,37 @@ describe("Sidebar", () => {
     expect(within(nav()).queryByText("stale")).toBeNull();
     // The agent's time is its session's last prompt, not its start or the agent's output.
     expect(within(row("Desktop design doc")).getByText("3m ago")).toBeInTheDocument();
+  });
+
+  it("shows the PR number of PR-attached conversations", async () => {
+    await renderSidebar();
+    const pr = (number: number): PrAttachment => ({
+      repo: "o/r",
+      number,
+      title: "t",
+      url: `https://github.com/o/r/pull/${number}`,
+      state: "open",
+      baseRefName: "main",
+      headRefName: "x",
+      baseSha: "a",
+      headSha: "b",
+      remoteHeadSha: "b",
+    });
+    baseline(
+      [makeAgent({ id: "a1", sessionName: "Live review", sessionFile: "f1" })],
+      [
+        session({ file: "f2", name: "Old review", lastPromptAt: recent(5) }),
+        session({ file: "f3", name: "Plain", lastPromptAt: recent(6) }),
+      ],
+      {},
+      {},
+      { f1: pr(123), f2: pr(45) },
+    );
+    expect(within(await findRow("Live review")).getByTestId("sidebar-row-pr")).toHaveTextContent(
+      "#123",
+    );
+    expect(within(row("Old review")).getByTestId("sidebar-row-pr")).toHaveTextContent("#45");
+    expect(within(row("Plain")).queryByTestId("sidebar-row-pr")).toBeNull();
   });
 
   it("marks rows per status", async () => {

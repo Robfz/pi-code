@@ -54,7 +54,7 @@ export async function listBranches(cwd: string): Promise<GitBranchesResponse> {
  * for the timeout; nothing when the user picked an ssh command (`GIT_SSH_COMMAND`, `GIT_SSH`,
  * `core.sshCommand`).
  */
-async function fetchEnv(cwd: string): Promise<Record<string, string>> {
+export async function fetchEnv(cwd: string): Promise<Record<string, string>> {
   if (process.env.GIT_SSH_COMMAND !== undefined || process.env.GIT_SSH !== undefined) return {};
   const { stdout } = await runGit(cwd, ["config", "--get", "core.sshCommand"], { okCodes: [0, 1] });
   return stdout.trim() === "" ? { GIT_SSH_COMMAND: "ssh -o BatchMode=yes" } : {};
@@ -62,11 +62,14 @@ async function fetchEnv(cwd: string): Promise<Record<string, string>> {
 
 /**
  * Runs `git fetch origin` in `cwd` without prompting for credentials (`runGit` sets
- * `GIT_TERMINAL_PROMPT=0`; ssh runs in batch mode). Throws `git_failed`, with git's stderr, when
- * there is no `origin` or the fetch fails.
+ * `GIT_TERMINAL_PROMPT=0`; ssh runs in batch mode). With `refspecs`, fetches only those, without
+ * tags and without updating the remote-tracking branches they name (`--refmap=`), so it never
+ * contends with another fetch for those refs. Throws `git_failed`, with git's stderr, when there
+ * is no `origin` or the fetch fails.
  */
-export async function fetchOrigin(cwd: string): Promise<void> {
-  const args = ["fetch", "origin"];
+export async function fetchOrigin(cwd: string, refspecs: readonly string[] = []): Promise<void> {
+  const only = refspecs.length > 0 ? ["--no-tags", "--refmap="] : [];
+  const args = ["fetch", ...only, "origin", ...refspecs];
   try {
     await runGit(cwd, args, { timeoutMs: FETCH_TIMEOUT_MS, env: await fetchEnv(cwd) });
   } catch (e) {

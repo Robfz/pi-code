@@ -12,6 +12,11 @@ const review = (agentId: string) => ["agent", agentId, "review"] as const;
 const gitDiffs = (agentId: string) => [...review(agentId), "diff"] as const;
 const fileSearches = (agentId: string) => ["agent", agentId, "files"] as const;
 const fileContents = (agentId: string) => [...review(agentId), "file"] as const;
+/**
+ * Content at fixed commits, which never changes: kept apart from `review`, so `git_status` events
+ * don't refetch it.
+ */
+const pinned = (agentId: string) => ["agent", agentId, "pinned"] as const;
 
 export const queryKeys = {
   health: ["health"] as const,
@@ -31,11 +36,18 @@ export const queryKeys = {
   gitDiffs,
   gitDiff: (agentId: string, mode: "uncommitted" | "branch", base?: string, uncommitted = false) =>
     [...gitDiffs(agentId), mode, base ?? null, uncommitted] as const,
+  /** The PR diff between its pinned commits. */
+  prDiff: (agentId: string, baseSha: string, headSha: string) =>
+    [...pinned(agentId), "diff", baseSha, headSha] as const,
   gitBranches: (agentId: string) => ["agent", agentId, "branches"] as const,
   /** Every `fileSearch` of the agent. */
   fileSearches,
   fileSearch: (agentId: string, q: string) => [...fileSearches(agentId), q] as const,
-  /** Every `fileContent` of the agent. */
+  /** Every `fileContent` of the agent's working tree. */
   fileContents,
-  fileContent: (agentId: string, path: string) => [...fileContents(agentId), path] as const,
+  /** A file in the working tree, or as committed in `rev`. */
+  fileContent: (agentId: string, path: string, rev?: string) =>
+    rev === undefined
+      ? ([...fileContents(agentId), path] as const)
+      : ([...pinned(agentId), "file", path, rev] as const),
 };

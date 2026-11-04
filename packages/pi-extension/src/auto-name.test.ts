@@ -51,6 +51,13 @@ describe("firstExchange", () => {
     expect(exchange?.assistant).toHaveLength(EXCERPT_MAX);
     expect(exchange?.assistant.startsWith("It parses input.")).toBe(true);
   });
+
+  it("keeps the start of a pi-code /pr prompt, where the PR's title is", () => {
+    const user = `<pr number="7" state="open" title="Add things" url="u" length="9">\nPull request o/r#7: Add things\n${"cmd ".repeat(EXCERPT_MAX)}\n</pr>\nGive me an overview`;
+    const exchange = firstExchange([message("user", user), message("assistant", text("ok"))]);
+    expect(exchange?.user).toHaveLength(EXCERPT_MAX);
+    expect(exchange?.user).toContain("Pull request o/r#7: Add things");
+  });
 });
 
 describe("cleanTitle", () => {

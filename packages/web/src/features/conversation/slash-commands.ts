@@ -62,6 +62,12 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
   { name: "session", description: "Show session info and stats", source: "builtin" },
   { name: "copy", description: "Copy last agent message to clipboard", source: "builtin" },
   { name: "diff", description: "Show the project's git diff", source: "builtin" },
+  {
+    name: "pr",
+    description: "Review a GitHub pull request with the agent",
+    argumentHint: "[url|number]",
+    source: "builtin",
+  },
   ...(
     [
       ["settings", "Open settings menu"],

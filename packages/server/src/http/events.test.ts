@@ -278,6 +278,7 @@ group("live stream", () => {
       sessions: [],
       branches: {},
       sidebar: { pinned: [], collapsed: [], mains: {} },
+      prs: {},
     });
     expect(client.retry).toBe(2000);
     expect(client.frames[0]?.id).toBe("");

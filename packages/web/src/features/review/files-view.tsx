@@ -87,6 +87,7 @@ export function FilesView({ agentId, onAdded }: { agentId: string; onAdded?(): v
       <FileViewer
         agentId={agentId}
         path={files.path}
+        {...(files.rev !== undefined && { rev: files.rev })}
         {...(files.target && { target: files.target })}
         onBack={() => useReviewStore.getState().closeFile(agentId)}
         {...(onAdded && { onAdded })}

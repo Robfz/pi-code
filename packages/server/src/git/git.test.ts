@@ -426,6 +426,29 @@ describe("gitDiff in branch mode", () => {
   });
 });
 
+describe("gitDiff of a range", () => {
+  it("diffs two commits, naming both, whatever is checked out", async () => {
+    writeFileSync(join(repo, "a.txt"), "one\n");
+    commit("one");
+    const from = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(repo, "a.txt"), "two\n");
+    commit("two");
+    const to = git("rev-parse", "HEAD").trim();
+    git("checkout", "-q", from);
+    const diff = await gitDiff(repo, { range: { from, to } });
+    expect(diff.files.map((f) => [f.status, f.path])).toEqual([["modified", "a.txt"]]);
+    expect(diff).toMatchObject({ oldRev: shortSha(from), newRev: shortSha(to) });
+  });
+
+  it("fails with git_failed when a commit is missing", async () => {
+    writeFileSync(join(repo, "a.txt"), "one\n");
+    commit("one");
+    const missing = "0123456789abcdef0123456789abcdef01234567";
+    const error = await diffError(repo, { range: { from: missing, to: "HEAD" } });
+    expect(isApiError(error, "git_failed")).toBe(true);
+  });
+});
+
 describe("gitStatus", () => {
   it("reports the branch and whether tracked files changed", async () => {
     writeFileSync(join(repo, "a.txt"), "a\n");

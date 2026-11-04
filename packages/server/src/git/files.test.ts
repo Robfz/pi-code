@@ -5,7 +5,7 @@ import fuzzysort from "fuzzysort";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "../errors.ts";
 import { git } from "../testing/layout-repo.ts";
-import { listProjectFiles, readProjectFile, searchFiles } from "./files.ts";
+import { listProjectFiles, readFileAtRev, readProjectFile, searchFiles } from "./files.ts";
 import { MAX_PATCH_BYTES } from "./git.ts";
 
 let root: string;
@@ -240,5 +240,61 @@ describe("readProjectFile", () => {
     expect(isApiError(await rejection(readProjectFile(folder, "a.txt")), "not_a_git_repo")).toBe(
       true,
     );
+  });
+});
+
+describe("readFileAtRev", () => {
+  it("reads a file as committed, whatever the working tree holds", async () => {
+    write({ "pkg/a.ts": "old\n", "pkg/keep.ts": "" });
+    commit();
+    const rev = git(repo, "rev-parse", "--short=7", "HEAD").trim();
+    write({ "pkg/a.ts": "new\n" });
+    commit();
+    git(repo, "rm", "-q", "pkg/a.ts");
+    const expected = { path: "pkg/a.ts", rev, content: "old\n", binary: false, tooLarge: false };
+    expect(await readFileAtRev(repo, "pkg/a.ts", rev)).toEqual(expected);
+    expect(await readFileAtRev(repo, join(repo, "pkg/a.ts"), rev)).toEqual(expected);
+    // From a subfolder cwd, paths are relative to it.
+    expect(await readFileAtRev(join(repo, "pkg"), "a.ts", rev)).toMatchObject({
+      path: "a.ts",
+      content: "old\n",
+    });
+  });
+
+  it("flags binary and too-large blobs without content", async () => {
+    write({
+      "image.bin": Buffer.concat([Buffer.alloc(10, "a"), Buffer.from([0])]),
+      "big.txt": "x".repeat(MAX_PATCH_BYTES + 1),
+    });
+    commit();
+    const rev = git(repo, "rev-parse", "HEAD").trim();
+    expect(await readFileAtRev(repo, "image.bin", rev)).toMatchObject({ binary: true });
+    expect(await readFileAtRev(repo, "big.txt", rev)).toMatchObject({ tooLarge: true });
+  });
+
+  it("validates the rev and the path", async () => {
+    write({ "a.ts": "a\n", "src/b.ts": "" });
+    commit();
+    const rev = git(repo, "rev-parse", "HEAD").trim();
+    for (const bad of ["HEAD", "main", "abc", "-1234567", `${rev}x`]) {
+      expect(isApiError(await rejection(readFileAtRev(repo, "a.ts", bad)), "invalid_body")).toBe(
+        true,
+      );
+    }
+    for (const path of ["../x", join(root, "x")]) {
+      expect(isApiError(await rejection(readFileAtRev(repo, path, rev)), "invalid_body")).toBe(
+        true,
+      );
+    }
+    for (const [path, at] of [
+      ["missing.ts", rev],
+      ["src", rev],
+      [".", rev],
+      ["a.ts", "0".repeat(40)],
+    ] as const) {
+      expect(isApiError(await rejection(readFileAtRev(repo, path, at)), "file_not_found")).toBe(
+        true,
+      );
+    }
   });
 });

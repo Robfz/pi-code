@@ -63,6 +63,8 @@ interface CommandContext {
   ownerOf(sessionFile: string, except: AgentId): AgentId | undefined;
   /** A session file's realpath, confined like `POST /api/agents { sessionFile }`. */
   resolveSessionFile(sessionFile: string): Promise<string>;
+  /** A `fork` or `clone` moved the agent from session file `from` to its copy `to`. */
+  onSessionCopied?(from: string, to: string): Promise<void>;
 }
 
 type CommandOutcome = { status: 200; data: unknown } | { status: 202; data: { id: string } };
@@ -119,8 +121,21 @@ export async function runCommand(
   const sessionChanging = SESSION_CHANGING_COMMANDS.has(command.type);
   const execute = async (): Promise<CommandOutcome> => {
     if (sessionChanging) pipeline.beginUiRefresh();
+    const before = agent.sessionFile;
     const data = await agent.host.send(command, sendOptions(command));
     await pipeline.afterCommand(command.type, data);
+    const after = agent.sessionFile;
+    if (
+      (command.type === "fork" || command.type === "clone") &&
+      before !== undefined &&
+      after !== undefined &&
+      after !== before
+    ) {
+      // The fork or clone is done either way; a failed copy shouldn't report it as failed.
+      await ctx.onSessionCopied?.(before, after).catch((e: unknown) => {
+        console.warn(`[agent ${agent.id}] onSessionCopied failed for ${after}:`, e);
+      });
+    }
     return {
       status: 200,
       data: command.type === "get_commands" ? withoutPiCodeCommands(data) : data,

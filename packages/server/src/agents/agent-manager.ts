@@ -59,7 +59,7 @@ export interface AgentManagerDeps {
    */
   agentDir?: string;
   /** Pipeline tuning (git status, debounce). */
-  pipeline?: Pick<PipelineOptions, "gitStatus" | "gitDebounceMs" | "curator">;
+  pipeline?: Pick<PipelineOptions, "gitStatus" | "gitDebounceMs" | "curator" | "onTurnEnd">;
   /** Observes every agent record; replaceable later with `setRecordHandler`. */
   onRecord?: AgentRecordHandler;
   /** Notification triggers (finished / failed / input), for push. */

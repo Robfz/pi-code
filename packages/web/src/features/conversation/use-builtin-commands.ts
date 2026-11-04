@@ -2,11 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import { draftPrPrompt } from "@/features/review/pr";
 import { useReviewStore } from "@/features/review/review-state";
-import { rpc } from "@/lib/api";
+import { attachPr, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { useIsDesktop } from "@/lib/use-media-query";
-import { useConversation } from "@/store/context";
+import { useConversation, useConversationStore } from "@/store/context";
 import { useOpenSheet } from "./action-sheets";
 import { useSessionActions } from "./session-actions";
 import { findBuiltin, THINKING_LEVELS } from "./slash-commands";
@@ -25,6 +26,7 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
   const actions = useSessionActions();
   const openSheet = useOpenSheet();
   const desktop = useIsDesktop();
+  const store = useConversationStore();
 
   return useCallback(
     async (name: string, args: string) => {
@@ -102,11 +104,37 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
           if (desktop) useReviewStore.getState().toggleTab(agentId, "changes");
           else void navigate({ to: "/agents/$agentId/diff", params: { agentId } });
           break;
+        case "pr":
+          try {
+            const pr = await attachPr(agentId, args);
+            const review = useReviewStore.getState();
+            review.setDiffMode(agentId, { mode: "pr" });
+            if (desktop) review.openPane(agentId, "changes");
+            toast.success(`Attached PR #${pr.number}`);
+          } catch (error) {
+            if (args !== "" || !isApiRequestError(error, "pr_not_found")) {
+              toast.error(errorMessage(error));
+              break;
+            }
+            // pi applies `streamingBehavior` only while the agent runs.
+            const createDraft = () => {
+              const message = draftPrPrompt(store.getState().gitStatus?.branch ?? null);
+              rpc(agentId, { type: "prompt", message, streamingBehavior: "steer" }).catch(
+                (e: unknown) => toast.error(errorMessage(e)),
+              );
+            };
+            toast.info("No PR for this branch", {
+              description: "The agent can push it and open a draft PR; then run /pr again.",
+              action: { label: "Create draft PR", onClick: createDraft },
+              duration: 15_000,
+            });
+          }
+          break;
         default:
           return false;
       }
       return true;
     },
-    [actions, agentId, cwd, desktop, navigate, openSheet, queryClient],
+    [actions, agentId, cwd, desktop, navigate, openSheet, queryClient, store],
   );
 }

@@ -34,7 +34,8 @@ function textOf(content: unknown): string {
  * (the first run's final reply). `undefined` until that reply has text.
  *
  * The user side keeps its end: attached files are prepended as `<file>` blocks, so the request
- * itself comes last. The reply keeps its start.
+ * itself comes last. A pi-code `/pr` prompt keeps its start instead: its leading `<pr>` block opens
+ * with the PR's title and description, and the long tail is commands. The reply keeps its start.
  */
 export function firstExchange(branch: SessionEntry[]): Exchange | undefined {
   let user: string | undefined;
@@ -50,7 +51,8 @@ export function firstExchange(branch: SessionEntry[]): Exchange | undefined {
     }
   }
   if (!user || !assistant) return undefined;
-  return { user: user.slice(-EXCERPT_MAX), assistant: assistant.slice(0, EXCERPT_MAX) };
+  const excerpt = user.startsWith("<pr ") ? user.slice(0, EXCERPT_MAX) : user.slice(-EXCERPT_MAX);
+  return { user: excerpt, assistant: assistant.slice(0, EXCERPT_MAX) };
 }
 
 /** First non-empty line, without wrapping quotes or trailing punctuation; `undefined` if empty. */

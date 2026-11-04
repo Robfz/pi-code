@@ -186,7 +186,7 @@ Specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Transcript"; in short:
 
 Assistant errors (`stopReason: error`) show the error message as a stop step; `aborted` shows "Stopped".
 
-**Line references.** `@path:N`, `@path:N-M`, `@"quoted path":N` and the version-named `@<sha>:./path:N` (syntax in [`07-code-review.md`](07-code-review.md), "References"; parsed by `findCodeRefs` from `@pi-code/protocol`) render clickable in the `link` colour: plain `text-link` text in user messages (`CodeRefText`, inline code included), and mono `text-link` chips on `bg-link/12` in assistant text blocks (the `rehypeCodeRefs` plugin, skipping code blocks and links). The pi-code extension asks the model to write them. A click or Enter opens the Files tab at those lines (`useOpenReference`): the pane on desktop, the review page on phone; a version-named reference opens the current file with a toast.
+**Line references.** `@path:N`, `@path:N-M`, `@"quoted path":N` and the version-named `@<sha>:./path:N` (syntax in [`07-code-review.md`](07-code-review.md), "References"; parsed by `findCodeRefs` from `@pi-code/protocol`) render clickable in the `link` colour: plain `text-link` text in user messages (`CodeRefText`, inline code included), and mono `text-link` chips on `bg-link/12` in assistant text blocks (the `rehypeCodeRefs` plugin, skipping code blocks and links). The pi-code extension asks the model to write them. A click or Enter opens the Files tab at those lines (`useOpenReference`): the pane on desktop, the review page on phone; a version-named reference opens the file as committed in that version, with an `@<sha>` chip beside the path.
 
 Markdown is untrusted (model output, fetched pages, extension messages), so it never loads remote resources on its own: `https:` images render as a placeholder (alt text + host) that loads the image on tap, inline `data:image/…` images render directly, and other image URLs never load. Raw HTML goes through Streamdown's sanitizer with `<picture>` / `<source>` removed, so `<img>` is the only resource-loading element left. Links rendered from tool or extension data are links only for `http(s)://` URLs (opened with `rel="noopener noreferrer"`), plain text otherwise.
 
@@ -240,7 +240,7 @@ Specified in [`09-ui-overhaul.md`](09-ui-overhaul.md), "Composer".
 - `!cmd` → `bash`; `!!cmd` → `bash { excludeFromContext: true }`.
 - File attach (any file type). Images are sent as `prompt.images` and rejected with a toast when the current model's `input` lacks `"image"` (attached images are dropped when the model changes to one without it). Other files are read as UTF-8 text (max 512 KB each; binary — a NUL byte or invalid UTF-8 — and empty files are rejected with a toast) and prepended to `message` as `<file name="…" length="…">\n…\n</file>\n` blocks (pi's CLI convention for `@file` arguments, plus a content length; see the API contract). Images over 2048 px on the long side, over 1.5 MB, or in formats other than PNG / JPEG / GIF / WebP are redrawn on a canvas (max 2048 px) and sent as JPEG (quality 0.85); anything still over 5 MB is rejected with a toast.
 - `set_editor_text` UI requests, fork and share replace the draft text.
-- Slash autocomplete: built-in commands implemented by the client (below) + `get_commands` (extension, skill, template), excluding pi-code's own extension commands.
+- Slash autocomplete: built-in commands implemented by the client (below) + `get_commands` (extension, skill, template), excluding pi-code's own extension commands. A built-in wins over a `get_commands` item of the same name: the menu lists it once, as the built-in, and typing it runs the built-in, so such an extension command, skill or template (a user's own `pr` template, say) can't be run from the web client; the pi TUI still runs it.
 
 Built-in commands:
 
@@ -258,6 +258,7 @@ Built-in commands:
 | `/session` | stats sheet (`get_session_stats`) |
 | `/copy` | copy last assistant text |
 | `/diff` | toggle the review pane on Changes (desktop); review page (phone) |
+| `/pr [url\|number]` | attach the conversation to a GitHub PR and send the agent its context (`POST /pr`, [`10-pr-review.md`](10-pr-review.md)) |
 | `/settings`, `/login`, `/logout`, `/trust`, `/export`, `/share`, `/import`, `/reload`, `/scoped-models`, `/hotkeys`, `/quit` … | "Use the TUI for this" |
 
 ### Extension UI
@@ -300,7 +301,7 @@ Actions are disabled while a run is active, with a notice sticking to the top of
 
 Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tabs, Refresh (Changes and Files) and the active tab, and renders as the desktop pane beside the conversation (Changes, Files, Tree) or as the phone's `/agents/$agentId/diff` page (Changes, Files):
 
-- **Changes**: `GET /git/diff` in uncommitted or branch mode (base from `GET /git/branches`, compared as `origin/<base>` when it exists, optional uncommitted changes; a Fetch button runs `POST /git/fetch` on demand and refreshes the diff and branches). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
+- **Changes**: `GET /git/diff` in uncommitted or branch mode, or PR mode for a conversation attached to a PR ([`10-pr-review.md`](10-pr-review.md)) (base from `GET /git/branches`, compared as `origin/<base>` when it exists, optional uncommitted changes; a Fetch button runs `POST /git/fetch` on demand and refreshes the diff and branches). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
 - **Files**: fuzzy search (`GET /files?q=`) and a file viewer (`GET /files/content`) with selectable lines.
 - **Tree** (pane only): the tree view (Tree screen).
 - Selecting lines inserts a reference into the composer: on desktop on mouse release, on phone through the Add to chat bar, which returns to the conversation.

@@ -79,7 +79,14 @@ class FakeServer {
       return { id, seq: replayable ? seq : undefined };
     });
     const agents = [...this.logs.keys()].map((id) => makeAgent({ id }));
-    this.send({ type: "baseline", agents, sessions: [], branches: {}, sidebar: noSidebar });
+    this.send({
+      type: "baseline",
+      agents,
+      sessions: [],
+      branches: {},
+      sidebar: noSidebar,
+      prs: {},
+    });
     for (const { id, seq } of starts) {
       if (seq === undefined) {
         this.connection.cursors.set(id, this.seq(id));
@@ -295,6 +302,7 @@ describe("LiveRegistry", () => {
         collapsed: [],
         mains: { "/home/me/repo": "/home/me/repo/main" },
       },
+      prs: {},
     });
     expect(registry.live.getState()).toMatchObject({
       loaded: true,
@@ -327,6 +335,7 @@ describe("LiveRegistry", () => {
       sessions: [session("s1")],
       branches: {},
       sidebar: noSidebar,
+      prs: {},
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
 
@@ -339,6 +348,35 @@ describe("LiveRegistry", () => {
     ]);
   });
 
+  it("takes the PR attachments from the baseline and prs frames", () => {
+    start();
+    latest().open();
+    const pr = {
+      repo: "o/r",
+      number: 7,
+      title: "Fix",
+      url: "https://github.com/o/r/pull/7",
+      state: "open" as const,
+      baseRefName: "main",
+      headRefName: "fix",
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      remoteHeadSha: "b".repeat(40),
+    };
+    latest().send({
+      type: "baseline",
+      agents: [],
+      sessions: [],
+      branches: {},
+      sidebar: noSidebar,
+      prs: { "/s/1.jsonl": pr },
+    });
+    expect(registry.live.getState().prs).toEqual({ "/s/1.jsonl": pr });
+    const outdated = { ...pr, remoteHeadSha: "c".repeat(40) };
+    latest().send({ type: "prs", prs: { "/s/1.jsonl": outdated, "/s/2.jsonl": pr } });
+    expect(registry.live.getState().prs).toEqual({ "/s/1.jsonl": outdated, "/s/2.jsonl": pr });
+  });
+
   it("follows sidebar frames and applies its own changes at once", async () => {
     start();
     latest().open();
@@ -348,6 +386,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: { pinned: [], collapsed: ["/a"], mains: {} },
+      prs: {},
     });
     const mains = { "/r": "/r/main" };
     const sidebar = { pinned: ["/r"], collapsed: ["/a", "/b"], mains };
@@ -394,6 +433,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: { pinned: [], collapsed: ["/repo", "/other"], mains: {} },
+      prs: {},
     });
     registry.expand(["/repo/wt", "/elsewhere"]);
     expect(deps.patchSidebar).not.toHaveBeenCalled();
@@ -839,6 +879,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: noSidebar,
+      prs: {},
     });
     expect(a1.getState().closed).toBe(true);
     expect(a2.getState().closed).toBe(false);

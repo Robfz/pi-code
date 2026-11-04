@@ -9,9 +9,11 @@ import {
   type AgentId,
   compareRecency,
   type ProjectSummary,
+  prBlockLabel,
   recencyOf,
   type SessionSummary,
   splitFileBlocks,
+  splitPrBlocks,
 } from "@pi-code/protocol";
 import { findGitDir } from "../git/branches.ts";
 import { isDirectory, layoutOf } from "./layout.ts";
@@ -123,9 +125,11 @@ function foldLines(state: ParseState, lines: string[]): ParseState {
       record.message.role === "user"
     ) {
       // Leading `<file>` blocks (attached text files) are left out; a message with nothing but
-      // files shows their names.
-      const { files, body } = splitFileBlocks(contentText(record.message.content));
+      // files shows their names. A `/pr` prompt shows its PR.
+      const { files, body: rest } = splitFileBlocks(contentText(record.message.content));
+      const { prs, body } = splitPrBlocks(rest);
       next.firstMessage =
+        (prs[0] && preview(prBlockLabel(prs[0]))) ??
         preview(body) ??
         (files.length > 0
           ? preview(`(file: ${files.map((f) => basename(f.name)).join(", ")})`)

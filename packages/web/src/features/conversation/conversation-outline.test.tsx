@@ -1,4 +1,4 @@
-import { initialLiveState, type SessionEntry } from "@pi-code/protocol";
+import { formatPrBlock, initialLiveState, type SessionEntry } from "@pi-code/protocol";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
@@ -64,6 +64,20 @@ describe("promptTitle", () => {
       "Review a.ts",
     );
     expect(promptTitle([{ type: "image", data: "AAAA", mimeType: "image/png" }])).toBe("");
+  });
+
+  it("names a PR review prompt by its PR", () => {
+    const pr = (update: boolean) =>
+      formatPrBlock({
+        number: 12,
+        title: "Speed up",
+        state: "open",
+        url: "https://github.com/o/r/pull/12",
+        update,
+        text: "Pull request o/r#12\n…",
+      });
+    expect(promptTitle(`${pr(false)}Give me an overview`)).toBe("#12 Speed up");
+    expect(promptTitle(`${pr(true)}Tell me what changed`)).toBe("#12 Speed up (updated)");
   });
 
   it("skips an expanded skill, else names it", () => {

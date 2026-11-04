@@ -81,6 +81,10 @@ describe("API errors", () => {
       "pi_error",
       "git_failed",
       "pi_timeout",
+      "not_a_github_repo",
+      "pr_not_found",
+      "pr_attached",
+      "gh_failed",
     ];
     expect(Object.keys(API_ERROR_STATUS).sort()).toEqual([...codes].sort());
     expect(API_ERROR_STATUS.streaming_behavior_required).toBe(400);

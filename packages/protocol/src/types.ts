@@ -168,6 +168,41 @@ export interface SidebarResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Pull requests (`docs/design/10-pr-review.md`)
+
+export type PrState = "open" | "closed" | "merged";
+
+/** The GitHub pull request a conversation is attached to, pinned to two commits. */
+export interface PrAttachment {
+  /** `owner/name` of the folder's `origin`. */
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  state: PrState;
+  baseRefName: string;
+  headRefName: string;
+  /** The diff's old side: the merge-base of the base branch (or, merged, of GitHub's recorded base) and the head. */
+  baseSha: string;
+  /** The PR head the pane and the agent are pinned to. */
+  headSha: string;
+  /** The PR head on `origin` as last polled; differs from `headSha` when newer pushes exist. */
+  remoteHeadSha: string;
+}
+
+/** Session file → its PR, for every attached conversation. */
+export type PrAttachments = Record<string, PrAttachment>;
+
+/** `POST /api/agents/:id/pr`: a PR URL or number; without one, the current branch's PR. */
+export interface AttachPrBody {
+  pr?: string;
+}
+
+export interface PrResponse {
+  pr: PrAttachment;
+}
+
+// ---------------------------------------------------------------------------
 // Agents
 
 export interface AgentsResponse {
@@ -274,6 +309,7 @@ export type StreamFrame =
       /** cwd → branch, for folders with a live agent inside a git work tree. */
       branches: Record<string, string>;
       sidebar: SidebarView;
+      prs: PrAttachments;
     }
   /** An opened agent's event; `seq` duplicates its pair in the SSE `id:`. */
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent }
@@ -286,6 +322,8 @@ export type StreamFrame =
   | { type: "catalog"; sessions: StreamedSession[] }
   /** The sidebar state changed; replaces the previous one. */
   | { type: "sidebar"; sidebar: SidebarView }
+  /** The PR attachments changed; replaces the previous ones. */
+  | { type: "prs"; prs: PrAttachments }
   /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
   | { type: "branch"; cwd: string; branch: string | null };
 
@@ -321,9 +359,9 @@ export interface NavigateResponse {
 
 export interface GitDiffResponse {
   files: GitFileDiff[];
-  /** Short sha of the old side (`HEAD` or the merge-base); absent without commits. */
+  /** Short sha of the old side (`HEAD`, the merge-base or the PR's base); absent without commits. */
   oldRev?: string;
-  /** Short sha of `HEAD` when it is the new side; absent when the new side is the working tree. */
+  /** Short sha of the new side when it is a commit (`HEAD`, the PR's head); absent for the working tree. */
   newRev?: string;
 }
 
@@ -341,6 +379,8 @@ export interface FileSearchResponse {
 export interface FileContentResponse {
   /** Cwd-relative, normalized. */
   path: string;
+  /** The commit the content was read from (as asked); absent for the working-tree copy. */
+  rev?: string;
   /** Absent when binary or too large. */
   content?: string;
   binary: boolean;

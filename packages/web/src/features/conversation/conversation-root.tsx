@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { agentLayout, agentSession } from "@/features/catalog/listing-groups";
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { useOpenAgent } from "@/features/catalog/use-open-agent";
+import { pollPr } from "@/lib/api";
 import { PlaceholderScreen } from "@/routes/placeholder";
 import {
   ConversationStoreProvider,
@@ -58,8 +59,8 @@ function ConversationClosed() {
  * The `/agents/$agentId` subtree (conversation, tree and diff) around the agent's store from
  * the live registry, marked as the conversation on screen (acked, not evicted) while mounted.
  * Key it by `agentId`.
- * Opening it uncollapses its sidebar groups, whatever led here. Once the agent is closed, the
- * subtree gives way to "Conversation closed".
+ * Opening it uncollapses its sidebar groups, whatever led here, and checks an attached PR for new
+ * pushes. Once the agent is closed, the subtree gives way to "Conversation closed".
  */
 export function ConversationRoot({ agentId, children }: { agentId: string; children: ReactNode }) {
   const registry = useLiveRegistry();
@@ -74,6 +75,11 @@ export function ConversationRoot({ agentId, children }: { agentId: string; child
   useEffect(() => {
     if (cwd !== undefined) registry.expand(repo === undefined ? [cwd] : [cwd, repo]);
   }, [registry, cwd, repo]);
+  const sessionFile = useStore(store, (s) => s.agent.sessionFile);
+  const attached = useLive((s) => sessionFile !== undefined && s.prs[sessionFile] !== undefined);
+  useEffect(() => {
+    if (attached) pollPr(agentId).catch(() => {});
+  }, [agentId, attached]);
   const closed = useStore(store, (s) => s.closed);
   return (
     <ConversationStoreProvider store={store}>

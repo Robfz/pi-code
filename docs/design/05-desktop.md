@@ -29,18 +29,19 @@ Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `
 type CursorList = string;
 
 type StreamFrame =
-  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarView }
+  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarView; prs: PrAttachments }
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent } // opened agents only
   | { type: "resync"; agentId: AgentId }                  // refetch that agent's snapshot
   | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
   | { type: "agent_closed"; agentId: AgentId }
   | { type: "catalog"; sessions: StreamedSession[] }      // every session, replaces the previous list
   | { type: "branch"; cwd: string; branch: string | null } // null: the folder is no longer tracked
-  | { type: "sidebar"; sidebar: SidebarView };            // pins, collapsed groups and pinned mains, replaces the previous state
+  | { type: "sidebar"; sidebar: SidebarView }             // pins, collapsed groups and pinned mains, replaces the previous state
+  | { type: "prs"; prs: PrAttachments };                  // PR attachments by session file (10-pr-review.md), replaces the previous ones
 ```
 
 - `ServerEvent` is the union from `02-api-contract.md` without `resync`, which exists only as a frame. `AgentInfo` is unchanged.
-- `baseline.sessions` and `catalog.sessions` hold every session, most recently prompted first (see Ordering), as `StreamedSession = Omit<SessionSummary, "ownedBy" | "updatedAt">`: `ownedBy` would go stale (clients match agents by `sessionFile`), and `updatedAt` moves on every write, so with it a turn would send a `catalog` frame on every rescan for nothing a client shows. `baseline.branches` maps cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar` is the sidebar state (see Sidebar state).
+- `baseline.sessions` and `catalog.sessions` hold every session, most recently prompted first (see Ordering), as `StreamedSession = Omit<SessionSummary, "ownedBy" | "updatedAt">`: `ownedBy` would go stale (clients match agents by `sessionFile`), and `updatedAt` moves on every write, so with it a turn would send a `catalog` frame on every rescan for nothing a client shows. `baseline.branches` maps cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar` is the sidebar state (see Sidebar state). `baseline.prs` maps session file → the PR its conversation is attached to ([`10-pr-review.md`](10-pr-review.md)).
 - `event.seq` duplicates the agent's pair in `id:` so the client never parses ids.
 
 ### Connection sequence

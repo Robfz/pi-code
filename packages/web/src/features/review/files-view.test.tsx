@@ -216,6 +216,24 @@ describe("FilesView viewer", () => {
     expect(await lineNumber(5)).toBe(span);
   });
 
+  it("keeps a file at a commit when the review queries are invalidated", async () => {
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        reads++;
+        return new Response(
+          JSON.stringify({ ...text("src/a.ts", lines(5).join("\n")), rev: "abc1234" }),
+        );
+      }),
+    );
+    useReviewStore.getState().openFile("a1", "src/a.ts", undefined, "abc1234");
+    const { queryClient } = await renderView();
+    await lineNumber(5);
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.review("a1") }));
+    expect(reads).toBe(1);
+  });
+
   it.each<[string, [number, unknown]]>([
     [
       "Binary file, not shown.",

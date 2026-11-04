@@ -11,13 +11,14 @@
  * - `prompt "<text>"`: answers on acceptance, then emits a minimal run (user + assistant
  *   entries, `turn_end`, `agent_end`, `agent_settled`). `prompt "crash"` exits with code 3 after
  *   `fatal: crashed` on stderr; `prompt "hang"` starts a run that never ends (with a running
- *   `bash` tool `hang-tool` and a queued steering message).
+ *   `bash` tool `hang-tool` and a queued steering message). During that run, like pi, a prompt
+ *   needs `streamingBehavior` and is only queued.
  * - `prompt "/pi-code-tree {json}"` (unless `MINI_PI_NO_EXT`): moves the leaf like pi's
  *   `navigateTree` (to the parent of a user message, whose text goes to `set_editor_text`), with a
  *   `branch_summary` when `summarize` (announced with `entry_appended` when
  *   `MINI_PI_TREE_ENTRY_EVENT` is set); with `MINI_PI_TREE_FAIL` it emits `extension_error`
  *   instead; answers after.
- * - `fork`, `new_session`, `switch_session`, `get_*` queries.
+ * - `fork`, `clone`, `new_session`, `switch_session`, `get_*` queries.
  * - End of stdin: exits, saving the session first when `MINI_PI_SAVE_ON_EXIT` is set.
  */
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,8 @@ let entries: Entry[] = [];
 let leafId: string | null = null;
 let nextId = 0;
 let ts = Date.parse("2026-01-01T00:00:00.000Z");
+/** The steering queue of the run `prompt "hang"` started, which never ends. */
+let steering: string[] | undefined;
 
 const out = (record: unknown) => process.stdout.write(`${JSON.stringify(record)}\n`);
 const stamp = () => {
@@ -118,7 +121,7 @@ function state() {
   return {
     model: { provider: "mini", id: "mini-1" },
     thinkingLevel: "off",
-    isStreaming: false,
+    isStreaming: steering !== undefined,
     isCompacting: false,
     steeringMode: "one-at-a-time",
     followUpMode: "one-at-a-time",
@@ -179,6 +182,14 @@ function run(cmd: Command) {
       save();
       return ok(cmd, { text: textOf(target), cancelled: false });
     }
+    case "clone": {
+      const kept = pathTo(leafId);
+      startSession(undefined, sessionFile);
+      entries = kept;
+      leafId = kept.at(-1)?.id ?? null;
+      save();
+      return ok(cmd, { cancelled: false });
+    }
     case "new_session":
       startSession(undefined, sessionFile);
       return ok(cmd, { cancelled: false });
@@ -193,13 +204,6 @@ function run(cmd: Command) {
 function prompt(cmd: Command, message: string) {
   if (message === "crash") {
     process.stderr.write("fatal: crashed\n", () => process.exit(3));
-    return;
-  }
-  if (message === "hang") {
-    ok(cmd);
-    out({ type: "agent_start" });
-    out({ type: "tool_execution_start", toolCallId: "hang-tool", toolName: "bash", args: {} });
-    out({ type: "queue_update", steering: ["queued"], followUp: [] });
     return;
   }
   const tree = /^\/pi-code-tree (.*)$/s.exec(message);
@@ -232,6 +236,26 @@ function prompt(cmd: Command, message: string) {
       });
     }
     return ok(cmd);
+  }
+  if (steering !== undefined) {
+    if (cmd.streamingBehavior === undefined) {
+      return fail(
+        cmd,
+        "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+      );
+    }
+    steering.push(message);
+    ok(cmd);
+    out({ type: "queue_update", steering, followUp: [] });
+    return;
+  }
+  if (message === "hang") {
+    steering = ["queued"];
+    ok(cmd);
+    out({ type: "agent_start" });
+    out({ type: "tool_execution_start", toolCallId: "hang-tool", toolName: "bash", args: {} });
+    out({ type: "queue_update", steering, followUp: [] });
+    return;
   }
   ok(cmd);
   const now = ts;

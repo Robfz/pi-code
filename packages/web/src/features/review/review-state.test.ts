@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_REVIEW, useReview, useReviewStore } from "./review-state";
+import { DEFAULT_REVIEW, diffModeOf, useReview, useReviewStore } from "./review-state";
 
 const review = (agentId: string) => useReviewStore.getState().reviews[agentId] ?? DEFAULT_REVIEW;
 const stored = () => JSON.parse(localStorage.getItem("pi-code:review") ?? "null")?.state;
@@ -19,10 +19,20 @@ describe("review state", () => {
     expect(result.current).toEqual({
       paneOpen: false,
       tab: "changes",
-      diff: { mode: "uncommitted", uncommitted: false },
+      diff: { uncommitted: false },
       files: { query: "" },
       tree: { collapsed: [] },
     });
+  });
+
+  it("defaults to PR mode when attached to a PR, else uncommitted; a picked mode stays", () => {
+    expect(diffModeOf({ uncommitted: false }, false)).toBe("uncommitted");
+    expect(diffModeOf({ uncommitted: false }, true)).toBe("pr");
+    expect(diffModeOf({ mode: "branch", uncommitted: false }, true)).toBe("branch");
+    expect(diffModeOf({ mode: "uncommitted", uncommitted: false }, true)).toBe("uncommitted");
+    expect(diffModeOf({ mode: "pr", uncommitted: false }, true)).toBe("pr");
+    // Not (or no longer known to be) attached.
+    expect(diffModeOf({ mode: "pr", uncommitted: false }, false)).toBe("uncommitted");
   });
 
   it("toggles the tree's collapsed branch points, without persisting them", () => {
@@ -59,6 +69,8 @@ describe("review state", () => {
     });
     openFile("a1", "src/a.ts", { start: 3, end: 4 });
     expect(review("a1").files.target?.nonce).not.toBe(first);
+    openFile("a1", "src/b.ts", { start: 1, end: 1 }, "3f2a9c1");
+    expect(review("a1").files).toMatchObject({ path: "src/b.ts", rev: "3f2a9c1" });
     openFile("a1", "src/b.ts");
     expect(review("a1").files).toEqual({ query: "gitts", path: "src/b.ts" });
     useReviewStore.getState().closeFile("a1");

@@ -7,7 +7,7 @@
  * model into rows with the connector guides of a git-graph-style gutter.
  */
 
-import { type SessionEntry, splitFileBlocks } from "@pi-code/protocol";
+import { prBlockLabel, type SessionEntry, splitFileBlocks, splitPrBlocks } from "@pi-code/protocol";
 import { baseName, contentText } from "@/lib/content";
 import { formatTokens } from "@/lib/time";
 
@@ -47,9 +47,11 @@ export function previewText(text: string): string {
   return `${line.slice(0, PREVIEW_CHARS).trimEnd()}…`;
 }
 
-/** A user message's typed text, else its attached file names, else "(image)". */
+/** A user message's PR, else its typed text, else its attached file names, else "(image)". */
 function userText(text: string): string {
-  const { files, body } = splitFileBlocks(text);
+  const { files, body: rest } = splitFileBlocks(text);
+  const { prs, body } = splitPrBlocks(rest);
+  if (prs[0] !== undefined) return `(PR ${prBlockLabel(prs[0])})`;
   if (body.trim() !== "") return body;
   if (files.length > 0) return `(file: ${files.map((f) => baseName(f.name)).join(", ")})`;
   return "(image)";

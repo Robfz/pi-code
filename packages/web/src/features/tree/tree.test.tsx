@@ -1,4 +1,9 @@
-import { initialLiveState, type NavigateResponse, type SessionEntry } from "@pi-code/protocol";
+import {
+  formatPrBlock,
+  initialLiveState,
+  type NavigateResponse,
+  type SessionEntry,
+} from "@pi-code/protocol";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
@@ -201,6 +206,19 @@ describe("tree model", () => {
       "(file: a.ts)",
       "(image)",
     ]);
+  });
+
+  it("names a PR review prompt by its PR", () => {
+    const block = formatPrBlock({
+      number: 12,
+      title: "Speed up",
+      state: "open",
+      url: "u",
+      update: false,
+      text: "context",
+    });
+    const model = buildTreeModel([user("u1", null, `${block}Give me an overview`)], "u1");
+    expect(model.items.get("u1")?.text).toBe("(PR #12 Speed up)");
   });
 
   it("maps a hidden leaf to its nearest shown ancestor", () => {

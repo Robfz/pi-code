@@ -35,7 +35,9 @@ function renderAgent(snapshotStatus = 200) {
   const acks = () => api.calls.filter((c) => c.method === "POST" && c.url === "/api/agents/a1/ack");
   const opens = () =>
     api.calls.filter((c) => c.method === "POST" && c.url === "/api/agents").map((c) => c.body);
-  return { router, acks, opens };
+  const polls = () =>
+    api.calls.filter((c) => c.method === "POST" && c.url === "/api/agents/a1/pr/poll");
+  return { router, acks, opens, polls };
 }
 
 function catalog(patch: Partial<StreamedSession> = {}) {
@@ -59,6 +61,37 @@ afterEach(() => {
 });
 
 describe("ConversationRoot", () => {
+  it("checks an attached PR for new pushes when the conversation opens", async () => {
+    const { polls } = renderAgent();
+    expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
+    expect(polls()).toHaveLength(0);
+    const pr = {
+      repo: "o/r",
+      number: 7,
+      title: "t",
+      url: "https://github.com/o/r/pull/7",
+      state: "open" as const,
+      baseRefName: "main",
+      headRefName: "x",
+      baseSha: "a",
+      headSha: "b",
+      remoteHeadSha: "b",
+    };
+    sendFrame({
+      type: "baseline",
+      agents: [makeAgent({ id: "a1", sessionFile: "/s/a1.jsonl" })],
+      sessions: [],
+      branches: {},
+      sidebar: { pinned: [], collapsed: [], mains: {} },
+      prs: { "/s/a1.jsonl": pr },
+    });
+    await waitFor(() => expect(polls()).toHaveLength(1));
+    // A poll's result (Outdated) doesn't poll again.
+    sendFrame({ type: "prs", prs: { "/s/a1.jsonl": { ...pr, remoteHeadSha: "c" } } });
+    await act(async () => {});
+    expect(polls()).toHaveLength(1);
+  });
+
   it("acks the conversation on mount, on visible, and on attention while focused", async () => {
     const { acks } = renderAgent();
     expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();

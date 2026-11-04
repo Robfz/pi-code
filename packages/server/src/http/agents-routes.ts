@@ -36,8 +36,13 @@ function parseTrustBody(value: unknown): TrustBody {
   throw new ApiError("invalid_body", "expected { trusted: boolean }");
 }
 
+interface AgentsRoutesDeps {
+  /** A `fork` or `clone` copied session `from` to `to` (PR attachments follow). */
+  onSessionCopied?(from: string, to: string): Promise<void>;
+}
+
 /** `/api/agents` routes. Chained so the route types reach `AppType`. */
-export function agentsRoutes(manager: AgentManager) {
+export function agentsRoutes(manager: AgentManager, deps: AgentsRoutesDeps = {}) {
   return new Hono()
     .get("/", (c) => c.json({ agents: manager.list() }, 200))
     .post(
@@ -103,6 +108,7 @@ export function agentsRoutes(manager: AgentManager) {
         const outcome = await runCommand(agent, c.req.valid("json"), {
           ownerOf: (file, except) => manager.ownerOf(file, except),
           resolveSessionFile: (file) => manager.resolveSessionFile(file),
+          ...(deps.onSessionCopied && { onSessionCopied: deps.onSessionCopied }),
         });
         return outcome.status === 202
           ? c.json({ data: outcome.data }, 202)

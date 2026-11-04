@@ -63,6 +63,7 @@ const Row = memo(function Row({
   title,
   agent,
   sessionFile,
+  pr,
   at,
   time,
   folder,
@@ -79,6 +80,8 @@ const Row = memo(function Row({
   agent: AgentInfo | undefined;
   /** The session file to resume from this row. */
   sessionFile: string | undefined;
+  /** The number of the PR the conversation is attached to. */
+  pr: number | undefined;
   /** The row's recency (epoch ms). */
   at: number;
   /** `at` as shown ("2m ago"). */
@@ -103,6 +106,15 @@ const Row = memo(function Row({
       <span data-testid="sidebar-row-title" className="min-w-0 flex-1 truncate">
         {title}
       </span>
+      {pr !== undefined && (
+        <span
+          data-testid="sidebar-row-pr"
+          title={`Attached to PR #${pr}`}
+          className="shrink-0 font-mono text-xs text-muted-foreground"
+        >
+          #{pr}
+        </span>
+      )}
       {project !== undefined && (
         <span
           className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"
@@ -292,13 +304,14 @@ function Group({
  * window's width: under Window Controls Overlay the traffic lights sit on it, on `theme-color`.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
-  const { loaded, agents, sessions, branches, sidebar } = useLive(
+  const { loaded, agents, sessions, branches, sidebar, prs } = useLive(
     useShallow((s) => ({
       loaded: s.loaded,
       agents: s.agents,
       sessions: s.sessions,
       branches: s.branches,
       sidebar: s.sidebar,
+      prs: s.prs,
     })),
   );
   const registry = useLiveRegistry();
@@ -405,30 +418,34 @@ export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: (
   );
 
   /** One row; `disabled` blocks opening only (a `missing` folder's), every row deletes. */
-  const rowItem = (row: SidebarRow, folder: string, disabled: boolean, project?: string) => (
-    <Row
-      key={row.key}
-      title={row.title}
-      agent={row.agent}
-      sessionFile={row.sessionFile}
-      at={row.recency.at}
-      time={formatRelative(row.recency.at, now)}
-      folder={folder}
-      project={project}
-      current={row.agent !== undefined && row.agent.id === currentId}
-      pending={
-        row.agent !== undefined
-          ? restart.isPending && restart.variables === row.agent.id
-          : pending !== undefined &&
-            "sessionFile" in pending &&
-            pending.sessionFile === row.sessionFile
-      }
-      disabled={busy || disabled}
-      onOpen={openSession}
-      onRestart={restartRow}
-      onSelect={select}
-    />
-  );
+  const rowItem = (row: SidebarRow, folder: string, disabled: boolean, project?: string) => {
+    const file = row.agent?.sessionFile ?? row.sessionFile;
+    return (
+      <Row
+        key={row.key}
+        title={row.title}
+        agent={row.agent}
+        sessionFile={row.sessionFile}
+        pr={file === undefined ? undefined : prs[file]?.number}
+        at={row.recency.at}
+        time={formatRelative(row.recency.at, now)}
+        folder={folder}
+        project={project}
+        current={row.agent !== undefined && row.agent.id === currentId}
+        pending={
+          row.agent !== undefined
+            ? restart.isPending && restart.variables === row.agent.id
+            : pending !== undefined &&
+              "sessionFile" in pending &&
+              pending.sessionFile === row.sessionFile
+        }
+        disabled={busy || disabled}
+        onOpen={openSession}
+        onRestart={restartRow}
+        onSelect={select}
+      />
+    );
+  };
 
   /** Rows of one folder; in a `missing` one only live agents open. */
   const rowList = (rows: SidebarRow[], folder: string, missing: boolean) => (
