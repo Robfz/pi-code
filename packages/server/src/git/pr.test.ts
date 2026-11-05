@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,6 +195,27 @@ describe("diffStat and commitsBetween", () => {
     expect(many?.commits).toHaveLength(50);
     expect(many?.total).toBe(62);
   }, 30_000);
+});
+
+describe("the agent's one-file diff command", () => {
+  /** `git diff <range> -- <pathspec>` through a shell, as the context message has the agent run it. */
+  const diff = (cwd: string, pathspec: string) =>
+    execFileSync("sh", ["-c", `git diff HEAD~1..HEAD -- ${pathspec}`], { cwd, encoding: "utf8" });
+
+  it("matches the named file literally, from a subfolder too", () => {
+    writeFileSync(join(clone, "a*b.ts"), "star\n");
+    writeFileSync(join(clone, "aXb.ts"), "x\n");
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "add a*b.ts and aXb.ts");
+    const sub = join(clone, "sub");
+    mkdirSync(sub);
+
+    const literal = diff(sub, "':(top,literal)a*b.ts'");
+    expect(literal).toContain("a*b.ts");
+    expect(literal).not.toContain("aXb.ts");
+    // Without `literal`, the name is a glob that matches both.
+    expect(diff(sub, ":/'a*b.ts'")).toContain("aXb.ts");
+  });
 });
 
 describe("syncPrRefs", () => {

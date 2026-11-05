@@ -202,13 +202,23 @@ describe("contextMessage", () => {
   it("gives commands with quoted paths from the repository root", () => {
     const text = splitPrBlocks(contextMessage(PR, VIEW, [], [], null)).prs[0]?.text ?? "";
     expect(text).toContain("paths are from the repository root");
-    expect(text).toContain(
-      "'<path>' is a path single-quoted for the shell, each ' in it written as '\\''",
-    );
-    expect(text).toContain(`git diff ${PR.baseSha}..${PR.headSha} -- :/'<path>'`);
+    const rule =
+      "- <path> is a path, always inside the single quotes around it for the shell, each ' in it written as '\\''";
+    expect(text).toContain(rule);
+    expect(text).toContain(`git diff ${PR.baseSha}..${PR.headSha} -- ':(top,literal)<path>'`);
     expect(text).toContain(`git show ${PR.headSha}:'<path>'`);
     expect(text).toContain(`-f path='<path>' -F line=<line>`);
-    expect(text).not.toMatch(/[^']<path>/);
+    // Every other <path> sits inside single quotes: an odd number of quotes precedes it in its
+    // command (the label before the command may hold an apostrophe).
+    const commands = text
+      .split("\n")
+      .filter((line) => line.includes("<path>") && !line.startsWith(rule))
+      .map((line) => line.slice(line.search(/\b(git|gh) /)));
+    expect(commands).toHaveLength(3);
+    for (const command of commands) {
+      const before = command.slice(0, command.indexOf("<path>"));
+      expect(before.split("'").length % 2, command).toBe(0);
+    }
   });
 
   it("keeps file paths and inline comment paths on their line", () => {

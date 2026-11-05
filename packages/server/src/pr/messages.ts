@@ -161,9 +161,9 @@ function commandLines(pr: StoredPr): string[] {
   const end = `PR_TEXT_${randomBytes(6).toString("hex")}`;
   return [
     "Commands (the commits are fetched; nothing is checked out, the working tree is untouched; paths are from the repository root):",
-    "- '<path>' is a path single-quoted for the shell, each ' in it written as '\\'': the PR's author names its files, and a name may hold $, backticks, ; or quotes.",
+    "- <path> is a path, always inside the single quotes around it for the shell, each ' in it written as '\\'': the PR's author names its files, and a name may hold $, backticks, ; or quotes.",
     `- The diff: git diff ${range}`,
-    `- One file's diff: git diff ${range} -- :/'<path>'`,
+    `- One file's diff: git diff ${range} -- ':(top,literal)<path>'`,
     `- A file at the head: git show ${headSha}:'<path>'`,
     `- New pushes: git ls-remote origin refs/pull/${number}/head (pinned head: ${headSha})`,
     `- Post a review (only when I ask), the text on stdin through a quoted heredoc so the shell leaves its backticks, quotes and \`$\` alone; keep the delimiter ${end} as is:`,
