@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useUiPrefs } from "@/store/ui-prefs";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { makeAgent } from "@/test/fixtures";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
 import { Composer } from "./composer";
@@ -271,6 +271,18 @@ describe("ConversationHeader on desktop", () => {
     expect(menuItems()).toEqual(["Clone", "Rename…", "New session", "Stop", "Delete"]);
   });
 
+  it("has no Fork for a conversation attached to a PR", async () => {
+    stubFetch(rpcHandler);
+    const { user, registry } = await renderHeader(makeAgent({ sessionFile: "/s/a1.jsonl" }));
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("button", { name: "Fork" })).toBeNull();
+    expect(within(header).getByRole("button", { name: "Compact" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await screen.findByRole("menu");
+    expect(menuItems()).toEqual(["Clone", "Rename…", "New session", "Stop", "Delete"]);
+  });
+
   it("Fork and Compact open their sheets", async () => {
     stubFetch(rpcHandler);
     const { user } = await renderHeader();
@@ -305,6 +317,23 @@ describe("ConversationHeader on phones", () => {
       "Tree",
       "Diff",
       "Fork…",
+      "Clone",
+      "Compact…",
+      "Rename…",
+      "New session",
+      "Stop",
+      "Delete",
+    ]);
+  });
+
+  it("drops Tree and Fork… from the menu for a conversation attached to a PR", async () => {
+    stubFetch();
+    const { user, registry } = await renderHeader(makeAgent({ sessionFile: "/s/a1.jsonl" }));
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await screen.findByRole("menu");
+    expect(menuItems()).toEqual([
+      "Diff",
       "Clone",
       "Compact…",
       "Rename…",

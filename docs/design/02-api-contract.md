@@ -248,7 +248,7 @@ type StreamFrame =
 - `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state. `baseline.prs`: the PR attachments by session file. Every `SidebarView` the server sends resolves `mains` (`mainCheckoutIn`) as it sends it.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
-- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `prs` when the PR attachments change (attach, refresh, a poll that sees a new head, a fork or clone, pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `prs` when the PR attachments change (attach, refresh, a poll that sees a new head, a clone, pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
 
 ## Events
 
@@ -299,6 +299,7 @@ Rules:
 - `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB. pi's `prompt` has no file field: the web client inlines attached text files into `message` as leading `<file name="…" length="…">\n…\n</file>\n` blocks: pi's CLI convention plus `length` (content UTF-16 length) so a `</file>` line in the content can't end a block early. The name is escaped (`&amp;`, `&quot;`, `&lt;`, `&#10;`).
 - Line references (`@path:N`, `@path:N-M`, `@"quoted path":N`, `@<sha>:./path:N`) are plain text in `message`, passed to the model verbatim. `@pi-code/protocol` exports their only parser and formatter, `findCodeRefs` and `formatCodeRef` (`code-refs.ts`; syntax in [`07-code-review.md`](07-code-review.md), "References").
 - `switch_session`: `sessionPath` is validated like `POST /api/agents { sessionFile }` (`400 invalid_body | outside_home`, `404 session_not_found`) and its realpath is sent to pi; a session owned by another agent → `409 session_owned`.
+- `fork`, or a `prompt` running the pi-code extension's `/pi-code-tree`, of a conversation attached to a PR → `409 pr_attached` ([`10-pr-review.md`](10-pr-review.md), "Store"); `clone` is allowed and copies the attachment.
 - `bash` returns `202 { data: { id } }` immediately; output streams as `bash_output` events and completion arrives as `bash_done`. Its `bashExecution` entry is committed like any other entry.
 - Commands on an `exited` agent → `409 agent_exited`.
 
@@ -323,7 +324,7 @@ interface NavigateBody {
   customInstructions?: string;     // for the summary
 }
 ```
-→ `200 { cancelled: boolean; leafId?: string | null; seq?: number }` once the navigation's events (`entries_appended` with the new leaf, see the event list, or `transcript_reset` on a fallback; then `stats`, published even when the leaf didn't move) are published: `cancelled` when the leaf didn't move, `leafId` the resulting leaf, `seq` the agent's seq after those events, so a client can wait for its store to reach it; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
+→ `200 { cancelled: boolean; leafId?: string | null; seq?: number }` once the navigation's events (`entries_appended` with the new leaf, see the event list, or `transcript_reset` on a fallback; then `stats`, published even when the leaf didn't move) are published: `cancelled` when the leaf didn't move, `leafId` the resulting leaf, `seq` the agent's seq after those events, so a client can wait for its store to reach it; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `409 pr_attached` (the conversation is attached to a PR, see [`10-pr-review.md`](10-pr-review.md)), `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
 
 ## Worktrees
 

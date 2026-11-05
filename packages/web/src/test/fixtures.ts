@@ -10,6 +10,7 @@ import {
   applyServerEventToCaches,
   initialLiveState,
   type LiveState,
+  type PrAttachment,
   reduceLive,
   type ServerEvent,
   type SessionCaches,
@@ -51,6 +52,22 @@ export function makeAgent(patch: Partial<AgentInfo> = {}): AgentInfo {
     isStreaming: false,
     attention: "none",
     startedAt: "2026-01-01T00:00:00.000Z",
+    ...patch,
+  };
+}
+
+export function makePr(patch: Partial<PrAttachment> = {}): PrAttachment {
+  return {
+    repo: "o/r",
+    number: 12,
+    title: "Speed up the parser",
+    url: "https://github.com/o/r/pull/12",
+    state: "open",
+    baseRefName: "main",
+    headRefName: "fast",
+    baseSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    remoteHeadSha: "b".repeat(40),
     ...patch,
   };
 }

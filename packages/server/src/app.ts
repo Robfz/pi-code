@@ -64,6 +64,7 @@ function apiRoutes(deps: AppDeps) {
       "/agents",
       agentsRoutes(deps.manager, {
         onSessionCopied: (from, to) => deps.prService.store.copy(from, to),
+        isPrAttached: (file) => deps.prService.store.get(file) !== undefined,
       }),
     )
     .route("/agents", reviewRoutes(deps.manager, deps.prService.store))

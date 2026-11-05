@@ -574,25 +574,109 @@ describe("Outdated and refresh", () => {
 });
 
 describe("attachments follow the session", () => {
-  it("copies the attachment to forks and clones", async () => {
+  it("copies the attachment to clones", async () => {
     const { h } = await start((r) => [OPEN(r)]);
     const agent = await h.open();
     await attach(h, agent.id, "7");
     const original = h.manager.require(agent.id).sessionFile as string;
-    const snapshot = await h.snapshot(agent.id);
-    const user = snapshot.transcript.entries.find(
-      (e) => e.type === "message" && e.message.role === "user",
-    );
 
     expect((await h.rpc(agent.id, { type: "clone" })).status).toBe(200);
     const cloned = h.manager.require(agent.id).sessionFile as string;
     expect(cloned).not.toBe(original);
     expect(h.prService.store.get(cloned)).toEqual(h.prService.store.get(original));
+  });
 
-    expect((await h.rpc(agent.id, { type: "fork", entryId: user?.id })).status).toBe(200);
-    const forked = h.manager.require(agent.id).sessionFile as string;
-    expect(forked).not.toBe(cloned);
-    expect(h.prService.store.get(forked)?.number).toBe(7);
+  it("refuses tree navigation and forks of an attached conversation", async () => {
+    const { h } = await start((r) => [OPEN(r)]);
+    const attached = await h.open();
+    const plain = await h.open();
+    await attach(h, attached.id, "7");
+    await promptAndSettle(h, plain.id, "hello");
+    const firstUser = async (id: string) =>
+      (await h.snapshot(id)).transcript.entries.find(
+        (e) => e.type === "message" && e.message.role === "user",
+      )?.id as string;
+    const navigate = async (id: string) =>
+      h.json<ErrorEnvelope>("POST", `/api/agents/${id}/tree/navigate`, {
+        entryId: await firstUser(id),
+        summarize: false,
+      });
+    const fork = async (id: string) =>
+      h.json<ErrorEnvelope>("POST", `/api/agents/${id}/rpc`, {
+        type: "fork",
+        entryId: await firstUser(id),
+      });
+
+    const navigatePrompt = async (id: string) =>
+      h.json<ErrorEnvelope>("POST", `/api/agents/${id}/rpc`, {
+        type: "prompt",
+        message: `/pi-code-tree ${JSON.stringify({ entryId: await firstUser(id) })}`,
+      });
+
+    const file = h.manager.require(attached.id).sessionFile;
+    const leafId = (await h.snapshot(attached.id)).transcript.leafId;
+    for (const res of [
+      await navigate(attached.id),
+      await navigatePrompt(attached.id),
+      await fork(attached.id),
+    ]) {
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("pr_attached");
+    }
+    expect(h.manager.require(attached.id).sessionFile).toBe(file);
+    expect((await h.snapshot(attached.id)).transcript.leafId).toBe(leafId);
+
+    expect((await navigate(plain.id)).status).toBe(200);
+    expect((await navigatePrompt(plain.id)).status).toBe(200);
+    expect((await fork(plain.id)).status).toBe(200);
+  });
+
+  it("refuses tree navigation and forks queued behind a switch to an attached session", async () => {
+    const { h } = await start((r) => [OPEN(r)]);
+    const owner = await h.open();
+    await attach(h, owner.id, "7");
+    const attachedFile = h.manager.require(owner.id).sessionFile as string;
+    expect((await h.rpc(owner.id, { type: "new_session" })).status).toBe(200);
+
+    const opened = await h.open();
+    await promptAndSettle(h, opened.id, "hello");
+    const agent = h.manager.require(opened.id);
+    const entryId = (await h.snapshot(opened.id)).transcript.entries.find(
+      (e) => e.type === "message" && e.message.role === "user",
+    )?.id as string;
+
+    // Holds the session lock until the switch and the requests behind it are queued.
+    const exclusive = vi.spyOn(agent.pipeline, "exclusive");
+    let release!: () => void;
+    const held = agent.pipeline.exclusive(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const switching = h.rpc(opened.id, { type: "switch_session", sessionPath: attachedFile });
+    await vi.waitFor(() => expect(exclusive).toHaveBeenCalledTimes(2));
+    const requests = [
+      h.json<ErrorEnvelope>("POST", `/api/agents/${opened.id}/tree/navigate`, {
+        entryId,
+        summarize: false,
+      }),
+      h.rpc(opened.id, {
+        type: "prompt",
+        message: `/pi-code-tree ${JSON.stringify({ entryId })}`,
+      }),
+      h.rpc(opened.id, { type: "fork", entryId }),
+    ];
+    await vi.waitFor(() => expect(exclusive).toHaveBeenCalledTimes(5));
+    release();
+    await held;
+
+    expect((await switching).status).toBe(200);
+    for (const res of await Promise.all(requests)) {
+      expect(res.status).toBe(409);
+      expect(res.body.error?.code).toBe("pr_attached");
+    }
+    expect(agent.sessionFile).toBe(attachedFile);
   });
 
   it("reports a clone as done even when copying the attachment fails", async () => {

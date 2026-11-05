@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useReviewStore } from "@/features/review/review-state";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { makeAgent } from "@/test/fixtures";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
 import { Composer } from "./composer";
@@ -112,7 +112,10 @@ const rpcBodies = (calls: FetchCall[]) =>
 
 async function setup(input: ("text" | "image")[] = ["text"]) {
   const fetchStub = stubFetch(handler);
-  const store = hydratedStore({ agent: makeAgent(), state: state(input) });
+  const store = hydratedStore({
+    agent: makeAgent({ sessionFile: "/s/a1.jsonl" }),
+    state: state(input),
+  });
   const result = await renderWithStore(
     <>
       <LiveSection />
@@ -173,6 +176,20 @@ describe("slash autocomplete", () => {
     expect(option("skill:review")).toHaveTextContent("skill");
     expect(option("commit")).toHaveTextContent("template");
     expect(option("new")).toHaveTextContent("built-in");
+  });
+
+  it("lists /tree and /fork unless the conversation is attached to a PR", async () => {
+    const { user, registry } = await setup();
+    await user.type(box(), "/");
+    const menu = await screen.findByRole("listbox", { name: "Commands" });
+    await within(menu).findByText("/mcp-auth");
+    expect(within(menu).getByText("/tree")).toBeInTheDocument();
+    expect(within(menu).getByText("/fork")).toBeInTheDocument();
+
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    await waitFor(() => expect(within(menu).queryByText("/tree")).toBeNull());
+    expect(within(menu).queryByText("/fork")).toBeNull();
+    expect(within(menu).getByText("/clone")).toBeInTheDocument();
   });
 
   it("lists /pr with its argument hint", async () => {

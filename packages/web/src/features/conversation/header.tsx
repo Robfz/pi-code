@@ -32,6 +32,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { agentLayout, agentSession } from "@/features/catalog/listing-groups";
+import { useConversationPr } from "@/features/review/pr";
 import { useStopOrDelete } from "@/features/sessions/stop-or-delete";
 import { conversationTitle } from "@/features/sidebar/sidebar-model";
 import { SidebarSheet } from "@/features/sidebar/sidebar-sheet";
@@ -170,8 +171,9 @@ function HeaderAction({ label, children }: { label: string; children: ReactEleme
  * Back to Home · the conversations sheet (below the desktop breakpoint) · breadcrumb and branch ·
  * connection and run state · Fork… and Compact… (desktop) · density · menu: Tree, Diff and Fork…
  * below the desktop breakpoint, then Clone, Compact… (below the breakpoint), Rename…, New
- * session, Stop and Delete. Session commands need a ready agent. `inert` while a scoped sheet
- * covers it. Under Window Controls Overlay it is the title bar (`titlebar`).
+ * session, Stop and Delete. Session commands need a ready agent. A conversation attached to a PR
+ * has no Fork… (the server refuses forks) and no Tree (it can't move between branches). `inert`
+ * while a scoped sheet covers it. Under Window Controls Overlay it is the title bar (`titlebar`).
  */
 export function ConversationHeader({ inert }: { inert?: boolean }) {
   const agentId = useConversation((s) => s.agentId);
@@ -184,6 +186,7 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
   const busy = stopOrDelete.pending({ agent });
   const openSheet = useOpenSheet();
   const desktop = useIsDesktop();
+  const prAttached = useConversationPr() !== undefined;
 
   return (
     <header
@@ -197,17 +200,19 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
       <RunState />
       {desktop && (
         <>
-          <HeaderAction label="Fork…">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Fork"
-              disabled={!ready}
-              onClick={() => openSheet("fork")}
-            >
-              <GitForkIcon />
-            </Button>
-          </HeaderAction>
+          {!prAttached && (
+            <HeaderAction label="Fork…">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Fork"
+                disabled={!ready}
+                onClick={() => openSheet("fork")}
+              >
+                <GitForkIcon />
+              </Button>
+            </HeaderAction>
+          )}
           <HeaderAction label="Compact…">
             <Button
               variant="ghost"
@@ -235,20 +240,24 @@ export function ConversationHeader({ inert }: { inert?: boolean }) {
         <DropdownMenuContent align="end">
           {!desktop && (
             <>
-              <DropdownMenuItem asChild>
-                <Link to="/agents/$agentId/tree" params={{ agentId }}>
-                  <ListTreeIcon /> Tree
-                </Link>
-              </DropdownMenuItem>
+              {!prAttached && (
+                <DropdownMenuItem asChild>
+                  <Link to="/agents/$agentId/tree" params={{ agentId }}>
+                    <ListTreeIcon /> Tree
+                  </Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem asChild>
                 <Link to="/agents/$agentId/diff" params={{ agentId }}>
                   <FileDiffIcon /> Diff
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("fork")}>
-                <GitForkIcon /> Fork…
-              </DropdownMenuItem>
+              {!prAttached && (
+                <DropdownMenuItem disabled={!ready} onSelect={() => openSheet("fork")}>
+                  <GitForkIcon /> Fork…
+                </DropdownMenuItem>
+              )}
             </>
           )}
           <DropdownMenuItem disabled={!ready} onSelect={() => void actions.clone()}>

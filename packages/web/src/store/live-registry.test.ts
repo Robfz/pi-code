@@ -13,7 +13,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "@/lib/api";
 import { FakeEventSource } from "@/test/fake-event-source";
-import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtures";
+import { fixtureEvents, makeAgent, makePr, makeSnapshot, reduceAll } from "@/test/fixtures";
 import type { ConversationStore } from "./conversation-store";
 import {
   FLUSH_TIMEOUT_MS,
@@ -351,18 +351,7 @@ describe("LiveRegistry", () => {
   it("takes the PR attachments from the baseline and prs frames", () => {
     start();
     latest().open();
-    const pr = {
-      repo: "o/r",
-      number: 7,
-      title: "Fix",
-      url: "https://github.com/o/r/pull/7",
-      state: "open" as const,
-      baseRefName: "main",
-      headRefName: "fix",
-      baseSha: "a".repeat(40),
-      headSha: "b".repeat(40),
-      remoteHeadSha: "b".repeat(40),
-    };
+    const pr = makePr();
     latest().send({
       type: "baseline",
       agents: [],

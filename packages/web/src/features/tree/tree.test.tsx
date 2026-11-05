@@ -13,6 +13,7 @@ import { useReviewStore } from "@/features/review/review-state";
 import { RELATIVE_TIME_TICK_MS } from "@/lib/use-now";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import {
   buildTreeModel,
@@ -754,5 +755,23 @@ describe("TreeScreen", () => {
     await u.click(within(row("u3")).getByText("Try plan B instead"));
     expect(within(row("u3")).getByRole("button", { name: /Go here/ })).toBeDisabled();
     expect(within(row("u3")).getByRole("button", { name: /Fork from here/ })).toBeDisabled();
+  });
+  it("has no Go here or Fork from here for a conversation attached to a PR", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    const { entries, leafId } = sampleTree();
+    const store = hydratedStore({
+      agent: makeAgent({ sessionFile: "/s/a1.jsonl" }),
+      transcript: { entries, leafId },
+    });
+    const { registry } = await renderWithStore(<TreeView />, store);
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    await u.click(within(row("u3")).getByText("Try plan B instead"));
+    expect(within(row("u3")).queryByRole("button", { name: /Go here/ })).toBeNull();
+    expect(within(row("u3")).queryByRole("button", { name: /Fork from here/ })).toBeNull();
+    // With no actions to swap in, the selected row keeps its timestamp.
+    expect(row("u3").querySelector("time")).not.toHaveClass("group-aria-selected/row:invisible");
+    await u.keyboard("{Enter}");
+    expect(screen.queryByTestId("navigate-sheet")).toBeNull();
   });
 });

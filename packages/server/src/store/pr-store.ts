@@ -131,7 +131,7 @@ export class PrStore {
     return this.enqueue(() => this.commit({ ...this.prs, [sessionFile]: pr }));
   }
 
-  /** Gives `to` (a fork or clone) the attachment of `from`, if it has one. */
+  /** Gives `to` (a clone) the attachment of `from`, if it has one. */
   copy(from: string, to: string): Promise<void> {
     return this.enqueue(async () => {
       const pr = this.prs[from];

@@ -8,7 +8,7 @@ import { createQueryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/router";
 import { LiveRegistry } from "@/store/live-registry";
 import { sendFrame } from "@/test/fake-event-source";
-import { makeAgent, makeSnapshot } from "@/test/fixtures";
+import { makeAgent, makePr, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
 
 function renderAgent(snapshotStatus = 200) {
@@ -65,18 +65,7 @@ describe("ConversationRoot", () => {
     const { polls } = renderAgent();
     expect(await screen.findByRole("heading", { name: "New conversation" })).toBeInTheDocument();
     expect(polls()).toHaveLength(0);
-    const pr = {
-      repo: "o/r",
-      number: 7,
-      title: "t",
-      url: "https://github.com/o/r/pull/7",
-      state: "open" as const,
-      baseRefName: "main",
-      headRefName: "x",
-      baseSha: "a",
-      headSha: "b",
-      remoteHeadSha: "b",
-    };
+    const pr = makePr();
     sendFrame({
       type: "baseline",
       agents: [makeAgent({ id: "a1", sessionFile: "/s/a1.jsonl" })],
@@ -87,7 +76,7 @@ describe("ConversationRoot", () => {
     });
     await waitFor(() => expect(polls()).toHaveLength(1));
     // A poll's result (Outdated) doesn't poll again.
-    sendFrame({ type: "prs", prs: { "/s/a1.jsonl": { ...pr, remoteHeadSha: "c" } } });
+    sendFrame({ type: "prs", prs: { "/s/a1.jsonl": { ...pr, remoteHeadSha: "c".repeat(40) } } });
     await act(async () => {});
     expect(polls()).toHaveLength(1);
   });

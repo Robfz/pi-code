@@ -8,7 +8,7 @@ import { queryKeys } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { makeAgent } from "@/test/fixtures";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ChangesView, EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./changes-view";
 import { useReviewStore } from "./review-state";
@@ -404,18 +404,7 @@ describe("ChangesView", () => {
 
   describe("PR mode", () => {
     const SESSION = "/sessions/s.jsonl";
-    const PR: PrAttachment = {
-      repo: "o/r",
-      number: 12,
-      title: "Speed up the parser",
-      url: "https://github.com/o/r/pull/12",
-      state: "open",
-      baseRefName: "main",
-      headRefName: "fast",
-      baseSha: "a".repeat(40),
-      headSha: "b".repeat(40),
-      remoteHeadSha: "b".repeat(40),
-    };
+    const PR = makePr();
 
     /**
      * The view for a conversation attached to `pr`; serves its diff and refresh, which answers

@@ -17,7 +17,7 @@ import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { ConversationStoreProvider, LiveRegistryProvider } from "@/store/context";
 import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { makeAgent } from "@/test/fixtures";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
@@ -233,18 +233,7 @@ describe("DiffScreen", () => {
   });
 
   it("shows an attached conversation's PR diff by default", async () => {
-    const pr = {
-      repo: "o/r",
-      number: 12,
-      title: "Speed up the parser",
-      url: "https://github.com/o/r/pull/12",
-      state: "open" as const,
-      baseRefName: "main",
-      headRefName: "fast",
-      baseSha: "a".repeat(40),
-      headSha: "b".repeat(40),
-      remoteHeadSha: "b".repeat(40),
-    };
+    const pr = makePr();
     const { calls } = stubFetch(() => [
       200,
       { files: [file({ patch: gitPatch() })], oldRev: "aaaaaaa", newRev: "bbbbbbb" },

@@ -2,7 +2,6 @@ import {
   type AgentInfo,
   applySidebarPatch,
   initialLiveState,
-  type PrAttachment,
   type PrAttachments,
   type RepoLayout,
   type SessionSummary,
@@ -28,7 +27,7 @@ import { createAppRouter } from "@/router";
 import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendFrame } from "@/test/fake-event-source";
-import { makeAgent, makeSnapshot } from "@/test/fixtures";
+import { makeAgent, makePr, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
 import { SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
 
@@ -200,18 +199,6 @@ describe("Sidebar", () => {
 
   it("shows the PR number of PR-attached conversations", async () => {
     await renderSidebar();
-    const pr = (number: number): PrAttachment => ({
-      repo: "o/r",
-      number,
-      title: "t",
-      url: `https://github.com/o/r/pull/${number}`,
-      state: "open",
-      baseRefName: "main",
-      headRefName: "x",
-      baseSha: "a",
-      headSha: "b",
-      remoteHeadSha: "b",
-    });
     baseline(
       [makeAgent({ id: "a1", sessionName: "Live review", sessionFile: "f1" })],
       [
@@ -220,7 +207,7 @@ describe("Sidebar", () => {
       ],
       {},
       {},
-      { f1: pr(123), f2: pr(45) },
+      { f1: makePr({ number: 123 }), f2: makePr({ number: 45 }) },
     );
     expect(within(await findRow("Live review")).getByTestId("sidebar-row-pr")).toHaveTextContent(
       "#123",
