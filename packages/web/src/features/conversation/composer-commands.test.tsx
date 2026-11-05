@@ -8,7 +8,10 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeAgent } from "@/test/fixtures";
+import { useReviewStore } from "@/features/review/review-state";
+import { DESKTOP_QUERY } from "@/lib/use-media-query";
+import { stubMatchMedia } from "@/test/dom-stubs";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import { ActionSheets } from "./action-sheets";
 import { Composer } from "./composer";
@@ -109,7 +112,10 @@ const rpcBodies = (calls: FetchCall[]) =>
 
 async function setup(input: ("text" | "image")[] = ["text"]) {
   const fetchStub = stubFetch(handler);
-  const store = hydratedStore({ agent: makeAgent(), state: state(input) });
+  const store = hydratedStore({
+    agent: makeAgent({ sessionFile: "/s/a1.jsonl" }),
+    state: state(input),
+  });
   const result = await renderWithStore(
     <>
       <LiveSection />
@@ -170,6 +176,31 @@ describe("slash autocomplete", () => {
     expect(option("skill:review")).toHaveTextContent("skill");
     expect(option("commit")).toHaveTextContent("template");
     expect(option("new")).toHaveTextContent("built-in");
+  });
+
+  it("lists /tree and /fork unless the conversation is attached to a PR", async () => {
+    const { user, registry } = await setup();
+    await user.type(box(), "/");
+    const menu = await screen.findByRole("listbox", { name: "Commands" });
+    await within(menu).findByText("/mcp-auth");
+    expect(within(menu).getByText("/tree")).toBeInTheDocument();
+    expect(within(menu).getByText("/fork")).toBeInTheDocument();
+
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    await waitFor(() => expect(within(menu).queryByText("/tree")).toBeNull());
+    expect(within(menu).queryByText("/fork")).toBeNull();
+    expect(within(menu).getByText("/clone")).toBeInTheDocument();
+  });
+
+  it("lists /pr with its argument hint", async () => {
+    const { user } = await setup();
+    await user.type(box(), "/pr");
+    const menu = await screen.findByRole("listbox", { name: "Commands" });
+    const option = within(menu)
+      .getAllByRole("option")
+      .find((o) => o.textContent?.startsWith("/pr")) as HTMLElement;
+    expect(option).toHaveTextContent("[url|number]");
+    expect(option).toHaveTextContent("built-in");
   });
 
   it("filters by the typed prefix", async () => {
@@ -407,6 +438,89 @@ describe("built-in commands", () => {
       expect(rpcBodies(calls)).toEqual([]);
     },
   );
+
+  it("/pr <number> attaches the PR and switches the Changes tab to it", async () => {
+    const { user } = await setup();
+    const { calls } = stubFetch((call) =>
+      call.url === "/api/agents/a1/pr" ? [200, { pr: { number: 12 } }] : handler(call),
+    );
+    await run(user, "/pr 12");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Attached PR #12"));
+    expect(calls.filter((c) => c.url === "/api/agents/a1/pr").map((c) => c.body)).toEqual([
+      { pr: "12" },
+    ]);
+    expect(useReviewStore.getState().reviews.a1?.diff.mode).toBe("pr");
+  });
+
+  it("/pr <number> on desktop opens the review pane on Changes, in PR mode", async () => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    useReviewStore.setState({ reviews: {} });
+    const { user } = await setup();
+    stubFetch((call) =>
+      call.url === "/api/agents/a1/pr" ? [200, { pr: { number: 12 } }] : handler(call),
+    );
+    await run(user, "/pr 12");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Attached PR #12"));
+    expect(useReviewStore.getState().reviews.a1).toMatchObject({
+      paneOpen: true,
+      tab: "changes",
+      diff: { mode: "pr" },
+    });
+  });
+
+  it("/pr toasts why it can't attach", async () => {
+    const { user } = await setup();
+    stubFetch((call) =>
+      call.url === "/api/agents/a1/pr"
+        ? [409, { error: { code: "pr_attached", message: "already attached" } }]
+        : handler(call),
+    );
+    await run(user, "/pr https://github.com/o/r/pull/3");
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("already attached"));
+  });
+
+  it("/pr <number> of a PR that doesn't exist toasts the error, without the draft offer", async () => {
+    const { user } = await setup();
+    stubFetch((call) =>
+      call.url === "/api/agents/a1/pr"
+        ? [404, { error: { code: "pr_not_found", message: "no such pull request" } }]
+        : handler(call),
+    );
+    await run(user, "/pr 99");
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("no such pull request"));
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it("/pr on a branch without a PR offers to have the agent open a draft", async () => {
+    const fetchStub = stubFetch((call) =>
+      call.url === "/api/agents/a1/pr"
+        ? [404, { error: { code: "pr_not_found", message: "No PR for this branch" } }]
+        : handler(call),
+    );
+    const store = hydratedStore({
+      agent: makeAgent(),
+      state: state(),
+      gitStatus: { branch: "feat/x", dirty: false },
+    });
+    await renderWithStore(<Composer />, store);
+    const user = userEvent.setup();
+    await run(user, "/pr");
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith("No PR for this branch", expect.anything()),
+    );
+    expect(fetchStub.calls.find((c) => c.url === "/api/agents/a1/pr")?.body).toEqual({});
+    const options = vi.mocked(toast.info).mock.calls[0]?.[1] as {
+      action: { label: string; onClick(): void };
+    };
+    expect(options.action.label).toBe("Create draft PR");
+    act(() => options.action.onClick());
+    await waitFor(() => expect(rpcBodies(fetchStub.calls)).toHaveLength(1));
+    const [prompt] = rpcBodies(fetchStub.calls) as [{ type: string; message: string }];
+    // Steering a running agent; pi starts a run when idle.
+    expect(prompt).toMatchObject({ type: "prompt", streamingBehavior: "steer" });
+    expect(prompt.message).toContain("git push -u origin 'feat/x'");
+    expect(prompt.message).toContain("gh pr create --draft");
+  });
 
   it("extension / skill / unknown commands go to pi as prompts", async () => {
     const { user, calls } = await setup();

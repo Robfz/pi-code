@@ -9,6 +9,7 @@ import {
   type LabelEntry,
   type SessionEntry,
   splitFileBlocks,
+  splitPrBlocks,
   type ToolResultMessage,
   type Transcript,
 } from "@pi-code/protocol";
@@ -71,8 +72,9 @@ export const selectActiveBranch = (s: ConversationState): SessionEntry[] => bran
 
 /**
  * The composer's prompt history, newest first: user message text without its `<file>` blocks,
- * and bash commands as `!cmd` (`!!cmd` when excluded from context). Blank entries are skipped
- * and consecutive duplicates collapsed.
+ * and bash commands as `!cmd` (`!!cmd` when excluded from context). Blank entries and PR review's
+ * prompts (`<pr>` blocks, which the user didn't type) are skipped, and consecutive duplicates
+ * collapsed.
  */
 export function promptHistory(branch: readonly SessionEntry[]): string[] {
   const history: string[] = [];
@@ -81,8 +83,10 @@ export function promptHistory(branch: readonly SessionEntry[]): string[] {
     if (entry?.type !== "message") continue;
     const { message } = entry;
     let text = "";
-    if (message.role === "user") text = splitFileBlocks(contentText(message.content)).body.trim();
-    else if (message.role === "bashExecution") {
+    if (message.role === "user") {
+      const { prs, body } = splitPrBlocks(splitFileBlocks(contentText(message.content)).body);
+      if (prs.length === 0) text = body.trim();
+    } else if (message.role === "bashExecution") {
       text = `${message.excludeFromContext ? "!!" : "!"}${message.command}`;
     }
     if (text !== "" && text !== history.at(-1)) history.push(text);

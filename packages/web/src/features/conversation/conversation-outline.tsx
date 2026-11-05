@@ -1,4 +1,4 @@
-import { splitFileBlocks, type UserMessage } from "@pi-code/protocol";
+import { prBlockLabel, splitFileBlocks, splitPrBlocks, type UserMessage } from "@pi-code/protocol";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { contentText } from "@/lib/content";
 import { cn } from "@/lib/utils";
@@ -19,11 +19,12 @@ interface Prompt {
 const SKILL_BLOCK = /^\s*<skill name="([^"]*)"[^>]*>[\s\S]*?<\/skill>/;
 
 /**
- * A prompt's outline title: the first non-blank line of its text after attached files and an
- * expanded skill, else `/skill:name`.
+ * A prompt's outline title: its PR for a `/pr` prompt or a PR update, else the first non-blank
+ * line of its text after attached files and an expanded skill, else `/skill:name`.
  */
 export function promptTitle(content: UserMessage["content"]): string {
-  const { body } = splitFileBlocks(contentText(content));
+  const { prs, body } = splitPrBlocks(splitFileBlocks(contentText(content)).body);
+  if (prs[0] !== undefined) return prBlockLabel(prs[0]);
   const skill = SKILL_BLOCK.exec(body);
   const text = skill ? body.slice(skill[0].length) : body;
   const line = text

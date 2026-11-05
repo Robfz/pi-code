@@ -2,7 +2,8 @@
  * The session tree (`docs/design/03-web-client.md`, "Tree screen"): one compact row per shown
  * entry with a git-graph-style gutter, as an ARIA tree with roving focus. The selected row (and
  * on hover-capable screens the hovered one) shows its Go here / Fork from here buttons in place
- * of its timestamp, in a slot as wide as either, so selecting never shifts the layout.
+ * of its timestamp, in a slot as wide as either, so selecting never shifts the layout. A
+ * conversation attached to a PR has neither: the server refuses both (design/10-pr-review.md).
  */
 
 import { useNavigate } from "@tanstack/react-router";
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useSessionActions } from "@/features/conversation/session-actions";
+import { useConversationPr } from "@/features/review/pr";
 import { useReviewStore } from "@/features/review/review-state";
 import { errorMessage, navigateTree } from "@/lib/api";
 import { formatRelative } from "@/lib/time";
@@ -324,6 +326,8 @@ interface RowProps {
   onPath: boolean;
   selected: boolean;
   disabled: boolean;
+  /** No Go here / Fork from here: the conversation is attached to a PR. */
+  prAttached: boolean;
   handlers: RowHandlers;
 }
 
@@ -356,6 +360,7 @@ const Row = memo(function Row({
   onPath,
   selected,
   disabled,
+  prAttached,
   handlers,
 }: RowProps) {
   const Icon = ICONS[kind];
@@ -464,45 +469,51 @@ const Row = memo(function Row({
         <time
           dateTime={timestamp}
           title={new Date(timestamp).toLocaleString()}
-          className={cn("text-[11px] text-muted-foreground tabular-nums", ACTIONS_HIDE)}
+          className={cn(
+            "text-[11px] text-muted-foreground tabular-nums",
+            !prAttached && ACTIONS_HIDE,
+          )}
         >
           {time}
         </time>
-        <span className={cn("flex items-center", ACTIONS_SHOWN)}>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Go here"
-            title={current ? "Already here" : "Go here"}
-            disabled={disabled || current}
-            onClick={() => handlers.goHere(id)}
-          >
-            <CornerDownRightIcon />
-          </Button>
-          {kind === "user" && (
+        {!prAttached && (
+          <span className={cn("flex items-center", ACTIONS_SHOWN)}>
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Fork from here"
-              title="Fork from here"
-              disabled={disabled}
-              onClick={() => handlers.fork(id)}
+              aria-label="Go here"
+              title={current ? "Already here" : "Go here"}
+              disabled={disabled || current}
+              onClick={() => handlers.goHere(id)}
             >
-              <GitForkIcon />
+              <CornerDownRightIcon />
             </Button>
-          )}
-        </span>
+            {kind === "user" && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Fork from here"
+                title="Fork from here"
+                disabled={disabled}
+                onClick={() => handlers.fork(id)}
+              >
+                <GitForkIcon />
+              </Button>
+            )}
+          </span>
+        )}
       </span>
     </div>
   );
 });
 
 /**
- * The session tree with Go here / Fork from here, without a header of its own: the tree screen's
- * body and the review pane's Tree tab. Built from the live store's transcript (every branch) and
- * labels, so it follows SSE updates without refetching. Collapsed branch points live in the
- * review store, so they survive switching tabs; the selection is local. It doesn't scroll by
- * itself; its host does, and the run notice sticks to the top of that scroll area.
+ * The session tree with Go here / Fork from here (not when attached to a PR), without a header of
+ * its own: the tree screen's body and the review pane's Tree tab. Built from the live store's
+ * transcript (every branch) and labels, so it follows SSE updates without refetching. Collapsed
+ * branch points live in the review store, so they survive switching tabs; the selection is
+ * local. It doesn't scroll by itself; its host does, and the run notice sticks to the top of that
+ * scroll area.
  */
 export function TreeView() {
   const agentId = useConversation((s) => s.agentId);
@@ -512,6 +523,7 @@ export function TreeView() {
   const entries = useConversation((s) => s.transcript.entries);
   const leafId = useConversation((s) => s.transcript.leafId);
   const labels = useConversation(selectLabels);
+  const prAttached = useConversationPr() !== undefined;
   const collapsedIds = useReviewStore((s) => s.reviews[agentId]?.tree.collapsed ?? NO_COLLAPSED);
   const actions = useSessionActions();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -544,9 +556,9 @@ export function TreeView() {
   }, [rows, selectedId, anchorId]);
 
   // What the stable row handlers act on, as of the last render.
-  const latest = useRef({ rows, model, disabled, agentId, actions });
+  const latest = useRef({ rows, model, disabled, prAttached, agentId, actions });
   useLayoutEffect(() => {
-    latest.current = { rows, model, disabled, agentId, actions };
+    latest.current = { rows, model, disabled, prAttached, agentId, actions };
   });
 
   const handlers = useMemo<RowHandlers>(() => {
@@ -558,9 +570,9 @@ export function TreeView() {
     const toggle = (id: string) =>
       useReviewStore.getState().toggleTreeBranch(latest.current.agentId, id);
     const goHere = (id: string) => {
-      const { model, disabled } = latest.current;
+      const { model, disabled, prAttached } = latest.current;
       const item = model?.items.get(id);
-      if (!item || disabled || id === model?.currentId) return;
+      if (!item || disabled || prAttached || id === model?.currentId) return;
       setNavigateTarget(item);
     };
     return {
@@ -687,6 +699,7 @@ export function TreeView() {
                 onPath={model?.activePath.has(row.item.id) === true}
                 selected={row.item.id === selected}
                 disabled={disabled}
+                prAttached={prAttached}
                 handlers={handlers}
               />
             ))}

@@ -13,6 +13,9 @@ import { SESSION_CHANGING_COMMANDS } from "./pipeline.ts";
 /** Prefix of the pi-code extension's own commands (hidden from `get_commands`). */
 const PI_CODE_COMMAND_PREFIX = "pi-code-";
 
+/** The pi-code extension's tree-navigation command (see packages/pi-extension). */
+const TREE_COMMAND = "pi-code-tree";
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -63,9 +66,27 @@ interface CommandContext {
   ownerOf(sessionFile: string, except: AgentId): AgentId | undefined;
   /** A session file's realpath, confined like `POST /api/agents { sessionFile }`. */
   resolveSessionFile(sessionFile: string): Promise<string>;
+  /** A `clone` moved the agent from session file `from` to its copy `to`. */
+  onSessionCopied?(from: string, to: string): Promise<void>;
+  /** Whether `sessionFile` has a PR attachment. */
+  isPrAttached?(sessionFile: string): boolean;
 }
 
 type CommandOutcome = { status: 200; data: unknown } | { status: 202; data: { id: string } };
+
+/**
+ * Rejects tree navigation and forks of a conversation attached to a PR: the attachment is per
+ * session file, but the agent's PR context is on one branch of its tree.
+ */
+function assertNotPrAttached(agent: Agent, isPrAttached?: (sessionFile: string) => boolean): void {
+  const file = agent.sessionFile;
+  if (file !== undefined && isPrAttached?.(file)) {
+    throw new ApiError(
+      "pr_attached",
+      "a conversation attached to a PR can't navigate its tree or fork; /clone it instead",
+    );
+  }
+}
 
 /** Rejects requests for agents that can't take them. */
 export function assertAcceptsInput(agent: Agent): void {
@@ -117,20 +138,35 @@ export async function runCommand(
   }
 
   const sessionChanging = SESSION_CHANGING_COMMANDS.has(command.type);
+  // `/pi-code-tree` moves the leaf like `POST /tree/navigate` (parsed like pi does).
+  const treePrompt =
+    command.type === "prompt" && command.message.split(" ", 1)[0] === `/${TREE_COMMAND}`;
   const execute = async (): Promise<CommandOutcome> => {
+    // Checked once the session lock is held: a queued session switch changes `sessionFile`.
+    if (command.type === "fork" || treePrompt) assertNotPrAttached(agent, ctx.isPrAttached);
     if (sessionChanging) pipeline.beginUiRefresh();
+    const before = agent.sessionFile;
     const data = await agent.host.send(command, sendOptions(command));
     await pipeline.afterCommand(command.type, data);
+    const after = agent.sessionFile;
+    if (
+      command.type === "clone" &&
+      before !== undefined &&
+      after !== undefined &&
+      after !== before
+    ) {
+      // The clone is done either way; a failed copy shouldn't report it as failed.
+      await ctx.onSessionCopied?.(before, after).catch((e: unknown) => {
+        console.warn(`[agent ${agent.id}] onSessionCopied failed for ${after}:`, e);
+      });
+    }
     return {
       status: 200,
       data: command.type === "get_commands" ? withoutPiCodeCommands(data) : data,
     };
   };
-  return sessionChanging ? pipeline.exclusive(execute) : execute();
+  return sessionChanging || treePrompt ? pipeline.exclusive(execute) : execute();
 }
-
-/** The pi-code extension's tree-navigation command (see packages/pi-extension). */
-const TREE_COMMAND = "pi-code-tree";
 
 /** Validates a `POST /tree/navigate` body. */
 export function parseNavigateBody(value: unknown): NavigateBody {
@@ -174,10 +210,16 @@ async function assertTreeCommand(agent: Agent): Promise<void> {
  * summary) is done; the server then syncs the moved leaf (`entries_appended`, see
  * `syncAfterNavigation`) and answers with the resulting `leafId` and the `seq` its events were
  * published up to. `cancelled` when the leaf didn't move. A failing navigation surfaces as pi's
- * `extension_error` → `pi_error`, after the sync.
+ * `extension_error` → `pi_error`, after the sync. `pr_attached` when the conversation is
+ * attached to a PR.
  */
-export async function navigateTree(agent: Agent, body: NavigateBody): Promise<NavigateResponse> {
+export async function navigateTree(
+  agent: Agent,
+  body: NavigateBody,
+  isPrAttached?: (sessionFile: string) => boolean,
+): Promise<NavigateResponse> {
   assertAcceptsInput(agent);
+  assertNotPrAttached(agent, isPrAttached);
   const pipeline = agent.pipeline;
   const assertIdle = () => {
     if (pipeline.isStreaming()) {
@@ -190,6 +232,7 @@ export async function navigateTree(agent: Agent, body: NavigateBody): Promise<Na
   }
   return pipeline.exclusive(async () => {
     assertAcceptsInput(agent);
+    assertNotPrAttached(agent, isPrAttached);
     assertIdle();
     await assertTreeCommand(agent);
     const host = agent.host;

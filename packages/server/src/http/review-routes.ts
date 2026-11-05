@@ -3,9 +3,10 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { etag } from "hono/etag";
 import type { AgentManager } from "../agents/agent-manager.ts";
 import { ApiError } from "../errors.ts";
-import { readProjectFile, searchFiles } from "../git/files.ts";
+import { readFileAtRev, readProjectFile, searchFiles } from "../git/files.ts";
 import { gitDiff, requireWorkTree } from "../git/git.ts";
 import { fetchOrigin, listBranches } from "../git/refs.ts";
+import type { PrStore } from "../store/pr-store.ts";
 
 /**
  * The review panel refetches its diff and open file after every git refresh, mostly unchanged.
@@ -22,13 +23,24 @@ const noStore: MiddlewareHandler = async (c, next) => {
 const conditional = etag({ weak: true });
 
 /**
- * The review panel's routes (design/07-code-review.md), mounted at `/api/agents`. Chained so the
- * route types reach `AppType`.
+ * The review panel's routes (design/07-code-review.md, design/10-pr-review.md), mounted at
+ * `/api/agents`. Chained so the route types reach `AppType`.
  */
-export function reviewRoutes(manager: AgentManager) {
+export function reviewRoutes(manager: AgentManager, prs: PrStore) {
   return new Hono()
     .get("/:id/git/diff", noStore, conditional, async (c) => {
       const agent = manager.require(c.req.param("id"));
+      if (c.req.query("pr") === "1") {
+        const file = agent.sessionFile;
+        const pr = file === undefined ? undefined : prs.get(file);
+        if (pr === undefined) {
+          throw new ApiError("invalid_body", "this conversation isn't attached to a PR");
+        }
+        return c.json(
+          await gitDiff(agent.cwd, { range: { from: pr.baseSha, to: pr.headSha } }),
+          200,
+        );
+      }
       const base = c.req.query("base");
       const uncommitted = c.req.query("uncommitted") === "1";
       return c.json(await gitDiff(agent.cwd, base === undefined ? {} : { base, uncommitted }), 200);
@@ -54,6 +66,11 @@ export function reviewRoutes(manager: AgentManager) {
       const agent = manager.require(c.req.param("id"));
       const path = c.req.query("path");
       if (!path) throw new ApiError("invalid_body", "path is required");
-      return c.json(await readProjectFile(agent.cwd, path), 200);
+      const rev = c.req.query("rev");
+      const file =
+        rev === undefined
+          ? await readProjectFile(agent.cwd, path)
+          : await readFileAtRev(agent.cwd, path, rev);
+      return c.json(file, 200);
     });
 }

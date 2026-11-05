@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { formatPrBlock } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import {
@@ -242,6 +243,23 @@ describe("parseSessionFile", () => {
     expect(withText?.firstMessage).toBe("review these");
     const filesOnly = parseSessionFile("/f.jsonl", `${header}\n${user(files)}\n`, "x");
     expect(filesOnly?.firstMessage).toBe("(file: a.ts, b.md)");
+  });
+
+  it("names the PR of a `/pr` prompt", () => {
+    const block = formatPrBlock({
+      number: 7,
+      title: "Add things",
+      state: "open",
+      url: "https://github.com/o/r/pull/7",
+      update: false,
+      text: "Pull request o/r#7: Add things\n…",
+    });
+    const s = parseSessionFile(
+      "/f.jsonl",
+      `${header}\n${user(`${block}Give me an overview`)}\n`,
+      "x",
+    );
+    expect(s?.firstMessage).toBe("#7 Add things");
   });
 
   it("rejects content whose first record isn't a header", () => {

@@ -62,6 +62,12 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
   { name: "session", description: "Show session info and stats", source: "builtin" },
   { name: "copy", description: "Copy last agent message to clipboard", source: "builtin" },
   { name: "diff", description: "Show the project's git diff", source: "builtin" },
+  {
+    name: "pr",
+    description: "Review a GitHub pull request with the agent",
+    argumentHint: "[url|number]",
+    source: "builtin",
+  },
   ...(
     [
       ["settings", "Open settings menu"],
@@ -87,6 +93,16 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
     }),
   ),
 ];
+
+/** The built-ins the server refuses for a conversation attached to a PR. */
+const BRANCHING_COMMANDS: ReadonlySet<string> = new Set(["tree", "fork"]);
+
+/** The built-ins to suggest: without `/tree` and `/fork` when attached to a PR. */
+export function builtinCommands(prAttached: boolean): readonly BuiltinCommand[] {
+  return prAttached
+    ? BUILTIN_COMMANDS.filter((c) => !BRANCHING_COMMANDS.has(c.name))
+    : BUILTIN_COMMANDS;
+}
 
 const builtinByName = new Map(BUILTIN_COMMANDS.map((c) => [c.name, c]));
 

@@ -1,4 +1,4 @@
-import type { GitFileDiff } from "@pi-code/protocol";
+import type { GitFileDiff, PrAttachments } from "@pi-code/protocol";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -14,9 +14,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { loadedDiff, stubCanvas } from "@/components/diff/testing";
 import { useReviewStore } from "@/features/review/review-state";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
-import { ConversationStoreProvider } from "@/store/context";
+import { ConversationStoreProvider, LiveRegistryProvider } from "@/store/context";
+import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { makeAgent } from "@/test/fixtures";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { DiffScreen } from "./diff-screen";
@@ -25,13 +26,21 @@ const editPatch = fixtureEditPatch;
 
 const gitPatch = () => `diff --git a/notes.txt b/notes.txt\nindex 1..2 100644\n${editPatch()}`;
 
-async function renderScreen(agentId = "a1") {
-  const store = hydratedStore({ agent: makeAgent({ id: agentId }) });
+/** The conversation's session file, which `prs` may attach to a PR. */
+const SESSION_FILE = "/sessions/s.jsonl";
+
+async function renderScreen(agentId = "a1", prs: PrAttachments = {}) {
+  const store = hydratedStore({ agent: makeAgent({ id: agentId, sessionFile: SESSION_FILE }) });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = new LiveRegistry(client);
+  registry.live.setState({ prs });
   const rootRoute = createRootRoute({
     component: () => (
-      <ConversationStoreProvider store={store}>
-        <Outlet />
-      </ConversationStoreProvider>
+      <LiveRegistryProvider registry={registry}>
+        <ConversationStoreProvider store={store}>
+          <Outlet />
+        </ConversationStoreProvider>
+      </LiveRegistryProvider>
     ),
   });
   const conversation = createRoute({
@@ -49,7 +58,6 @@ async function renderScreen(agentId = "a1") {
     history: createMemoryHistory({ initialEntries: [`/agents/${agentId}/diff`] }),
   });
   await router.load();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router as never} />
@@ -222,6 +230,21 @@ describe("DiffScreen", () => {
     expect(useReviewStore.getState().reviews.a1?.tab).toBe("files");
     await user.click(screen.getByRole("tab", { name: "Changes" }));
     expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+  });
+
+  it("shows an attached conversation's PR diff by default", async () => {
+    const pr = makePr();
+    const { calls } = stubFetch(() => [
+      200,
+      { files: [file({ patch: gitPatch() })], oldRev: "aaaaaaa", newRev: "bbbbbbb" },
+    ]);
+    await renderScreen("p1", { [SESSION_FILE]: pr });
+    expect(await screen.findByTestId("diff-file")).toBeInTheDocument();
+    expect(calls.map((call) => call.url + call.search)).toEqual(["/api/agents/p1/git/diff?pr=1"]);
+    expect(screen.getByRole("radio", { name: "PR" })).toHaveAttribute("aria-checked", "true");
+    const header = screen.getByTestId("pr-header");
+    expect(within(header).getByRole("link", { name: "#12" })).toHaveAttribute("href", pr.url);
+    expect(header).toHaveTextContent("Speed up the parser");
   });
 
   it("on desktop opens the review pane and replaces itself with the conversation", async () => {

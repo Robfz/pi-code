@@ -2,6 +2,7 @@ import {
   type AgentInfo,
   applySidebarPatch,
   initialLiveState,
+  type PrAttachments,
   type RepoLayout,
   type SessionSummary,
   type SidebarPatch,
@@ -26,7 +27,7 @@ import { createAppRouter } from "@/router";
 import { LiveRegistry } from "@/store/live-registry";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendFrame } from "@/test/fake-event-source";
-import { makeAgent, makeSnapshot } from "@/test/fixtures";
+import { makeAgent, makePr, makeSnapshot } from "@/test/fixtures";
 import { type FetchCall, stubFetch } from "@/test/render";
 import { SEARCH_DEBOUNCE_MS, Sidebar } from "./sidebar";
 
@@ -94,10 +95,11 @@ function baseline(
   sessions: SessionSummary[] = [],
   branches: Record<string, string> = {},
   state: Partial<SidebarView> = {},
+  prs: PrAttachments = {},
 ) {
   const sidebar = { pinned: [], collapsed: [], mains: {}, ...state };
   serverSidebar = sidebar;
-  sendFrame({ type: "baseline", agents, sessions, branches, sidebar });
+  sendFrame({ type: "baseline", agents, sessions, branches, sidebar, prs });
 }
 
 /**
@@ -193,6 +195,25 @@ describe("Sidebar", () => {
     expect(within(nav()).queryByText("stale")).toBeNull();
     // The agent's time is its session's last prompt, not its start or the agent's output.
     expect(within(row("Desktop design doc")).getByText("3m ago")).toBeInTheDocument();
+  });
+
+  it("shows the PR number of PR-attached conversations", async () => {
+    await renderSidebar();
+    baseline(
+      [makeAgent({ id: "a1", sessionName: "Live review", sessionFile: "f1" })],
+      [
+        session({ file: "f2", name: "Old review", lastPromptAt: recent(5) }),
+        session({ file: "f3", name: "Plain", lastPromptAt: recent(6) }),
+      ],
+      {},
+      {},
+      { f1: makePr({ number: 123 }), f2: makePr({ number: 45 }) },
+    );
+    expect(within(await findRow("Live review")).getByTestId("sidebar-row-pr")).toHaveTextContent(
+      "#123",
+    );
+    expect(within(row("Old review")).getByTestId("sidebar-row-pr")).toHaveTextContent("#45");
+    expect(within(row("Plain")).queryByTestId("sidebar-row-pr")).toBeNull();
   });
 
   it("marks rows per status", async () => {

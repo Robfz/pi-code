@@ -1,4 +1,9 @@
-import { initialLiveState, type NavigateResponse, type SessionEntry } from "@pi-code/protocol";
+import {
+  formatPrBlock,
+  initialLiveState,
+  type NavigateResponse,
+  type SessionEntry,
+} from "@pi-code/protocol";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
@@ -8,6 +13,7 @@ import { useReviewStore } from "@/features/review/review-state";
 import { RELATIVE_TIME_TICK_MS } from "@/lib/use-now";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
+import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
 import {
   buildTreeModel,
@@ -201,6 +207,19 @@ describe("tree model", () => {
       "(file: a.ts)",
       "(image)",
     ]);
+  });
+
+  it("names a PR review prompt by its PR", () => {
+    const block = formatPrBlock({
+      number: 12,
+      title: "Speed up",
+      state: "open",
+      url: "u",
+      update: false,
+      text: "context",
+    });
+    const model = buildTreeModel([user("u1", null, `${block}Give me an overview`)], "u1");
+    expect(model.items.get("u1")?.text).toBe("(PR #12 Speed up)");
   });
 
   it("maps a hidden leaf to its nearest shown ancestor", () => {
@@ -736,5 +755,23 @@ describe("TreeScreen", () => {
     await u.click(within(row("u3")).getByText("Try plan B instead"));
     expect(within(row("u3")).getByRole("button", { name: /Go here/ })).toBeDisabled();
     expect(within(row("u3")).getByRole("button", { name: /Fork from here/ })).toBeDisabled();
+  });
+  it("has no Go here or Fork from here for a conversation attached to a PR", async () => {
+    stubFetch(handler());
+    const u = userEvent.setup();
+    const { entries, leafId } = sampleTree();
+    const store = hydratedStore({
+      agent: makeAgent({ sessionFile: "/s/a1.jsonl" }),
+      transcript: { entries, leafId },
+    });
+    const { registry } = await renderWithStore(<TreeView />, store);
+    act(() => registry.live.setState({ prs: { "/s/a1.jsonl": makePr() } }));
+    await u.click(within(row("u3")).getByText("Try plan B instead"));
+    expect(within(row("u3")).queryByRole("button", { name: /Go here/ })).toBeNull();
+    expect(within(row("u3")).queryByRole("button", { name: /Fork from here/ })).toBeNull();
+    // With no actions to swap in, the selected row keeps its timestamp.
+    expect(row("u3").querySelector("time")).not.toHaveClass("group-aria-selected/row:invisible");
+    await u.keyboard("{Enter}");
+    expect(screen.queryByTestId("navigate-sheet")).toBeNull();
   });
 });

@@ -13,7 +13,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "@/lib/api";
 import { FakeEventSource } from "@/test/fake-event-source";
-import { fixtureEvents, makeAgent, makeSnapshot, reduceAll } from "@/test/fixtures";
+import { fixtureEvents, makeAgent, makePr, makeSnapshot, reduceAll } from "@/test/fixtures";
 import type { ConversationStore } from "./conversation-store";
 import {
   FLUSH_TIMEOUT_MS,
@@ -79,7 +79,14 @@ class FakeServer {
       return { id, seq: replayable ? seq : undefined };
     });
     const agents = [...this.logs.keys()].map((id) => makeAgent({ id }));
-    this.send({ type: "baseline", agents, sessions: [], branches: {}, sidebar: noSidebar });
+    this.send({
+      type: "baseline",
+      agents,
+      sessions: [],
+      branches: {},
+      sidebar: noSidebar,
+      prs: {},
+    });
     for (const { id, seq } of starts) {
       if (seq === undefined) {
         this.connection.cursors.set(id, this.seq(id));
@@ -295,6 +302,7 @@ describe("LiveRegistry", () => {
         collapsed: [],
         mains: { "/home/me/repo": "/home/me/repo/main" },
       },
+      prs: {},
     });
     expect(registry.live.getState()).toMatchObject({
       loaded: true,
@@ -327,6 +335,7 @@ describe("LiveRegistry", () => {
       sessions: [session("s1")],
       branches: {},
       sidebar: noSidebar,
+      prs: {},
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
 
@@ -339,6 +348,24 @@ describe("LiveRegistry", () => {
     ]);
   });
 
+  it("takes the PR attachments from the baseline and prs frames", () => {
+    start();
+    latest().open();
+    const pr = makePr();
+    latest().send({
+      type: "baseline",
+      agents: [],
+      sessions: [],
+      branches: {},
+      sidebar: noSidebar,
+      prs: { "/s/1.jsonl": pr },
+    });
+    expect(registry.live.getState().prs).toEqual({ "/s/1.jsonl": pr });
+    const outdated = { ...pr, remoteHeadSha: "c".repeat(40) };
+    latest().send({ type: "prs", prs: { "/s/1.jsonl": outdated, "/s/2.jsonl": pr } });
+    expect(registry.live.getState().prs).toEqual({ "/s/1.jsonl": outdated, "/s/2.jsonl": pr });
+  });
+
   it("follows sidebar frames and applies its own changes at once", async () => {
     start();
     latest().open();
@@ -348,6 +375,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: { pinned: [], collapsed: ["/a"], mains: {} },
+      prs: {},
     });
     const mains = { "/r": "/r/main" };
     const sidebar = { pinned: ["/r"], collapsed: ["/a", "/b"], mains };
@@ -394,6 +422,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: { pinned: [], collapsed: ["/repo", "/other"], mains: {} },
+      prs: {},
     });
     registry.expand(["/repo/wt", "/elsewhere"]);
     expect(deps.patchSidebar).not.toHaveBeenCalled();
@@ -839,6 +868,7 @@ describe("LiveRegistry", () => {
       sessions: [],
       branches: {},
       sidebar: noSidebar,
+      prs: {},
     });
     expect(a1.getState().closed).toBe(true);
     expect(a2.getState().closed).toBe(false);

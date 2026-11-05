@@ -23,12 +23,25 @@ export const TAB_LABEL: Record<ReviewTab, string> = {
 const isReviewTab = (value: unknown): value is ReviewTab =>
   REVIEW_TABS.includes(value as ReviewTab);
 
+export type DiffModeName = "uncommitted" | "branch" | "pr";
+
 export interface DiffMode {
-  mode: "uncommitted" | "branch";
+  /** Unset until one is picked: see `diffModeOf`. */
+  mode?: DiffModeName;
   /** The chosen base branch; the detected default applies until one is chosen. */
   base?: string;
   /** Branch mode: include uncommitted and untracked changes. */
   uncommitted: boolean;
+}
+
+/**
+ * The mode the Changes tab shows: the picked one, by default PR mode for a conversation attached
+ * to a PR (the mode lives in memory per agent id, so every reopen gets the default) and
+ * uncommitted otherwise. PR mode needs the attachment.
+ */
+export function diffModeOf(diff: DiffMode, attached: boolean): DiffModeName {
+  const mode = diff.mode ?? (attached ? "pr" : "uncommitted");
+  return mode === "pr" && !attached ? "uncommitted" : mode;
 }
 
 /** New-side lines to highlight; a new `nonce` scrolls to them again. */
@@ -43,7 +56,8 @@ export interface ReviewState {
   paneOpen: boolean;
   tab: ReviewTab;
   diff: DiffMode;
-  files: { query: string; path?: string; target?: FileTarget };
+  /** The open file, as committed in `rev` when set, else its working-tree copy. */
+  files: { query: string; path?: string; rev?: string; target?: FileTarget };
   /** Branch points collapsed in the session tree, by entry id. */
   tree: { collapsed: string[] };
 }
@@ -51,7 +65,7 @@ export interface ReviewState {
 export const DEFAULT_REVIEW: ReviewState = {
   paneOpen: false,
   tab: "changes",
-  diff: { mode: "uncommitted", uncommitted: false },
+  diff: { uncommitted: false },
   files: { query: "" },
   tree: { collapsed: [] },
 };
@@ -65,8 +79,8 @@ interface ReviewStore {
   toggleTab(agentId: string, tab: ReviewTab): void;
   setTab(agentId: string, tab: ReviewTab): void;
   setDiffMode(agentId: string, diff: Partial<DiffMode>): void;
-  /** Shows `path` in the Files tab, with `target` lines highlighted. */
-  openFile(agentId: string, path: string, target?: Omit<FileTarget, "nonce">): void;
+  /** Shows `path` (as committed in `rev`, if given) in the Files tab, `target` lines highlighted. */
+  openFile(agentId: string, path: string, target?: Omit<FileTarget, "nonce">, rev?: string): void;
   /** Back from the open file to the Files search. */
   closeFile(agentId: string): void;
   setFilesQuery(agentId: string, query: string): void;
@@ -97,12 +111,13 @@ export const useReviewStore = create<ReviewStore>()(
         setTab: (agentId, tab) => update(agentId, () => ({ tab })),
         setDiffMode: (agentId, diff) =>
           update(agentId, (review) => ({ diff: { ...review.diff, ...diff } })),
-        openFile: (agentId, path, target) =>
+        openFile: (agentId, path, target, rev) =>
           update(agentId, (review) => ({
             tab: "files",
             files: {
               query: review.files.query,
               path,
+              ...(rev !== undefined && { rev }),
               ...(target && { target: { ...target, nonce: nextNonce++ } }),
             },
           })),

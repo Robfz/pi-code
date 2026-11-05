@@ -1,6 +1,7 @@
 /**
  * The Files tab's viewer (`docs/design/07-code-review.md`, "Files tab"): a project file's
- * working-tree copy as an all-context unified diff whose lines send `@path:N-M` references, with
+ * working-tree copy, or its content in a commit (a version-named reference), as an all-context
+ * unified diff whose lines send `@path:N-M` references (`@rev:./path:N-M` for a commit's), with
  * an opened reference's lines highlighted and scrolled to.
  */
 
@@ -37,6 +38,7 @@ function Message({ children }: { children: ReactNode }) {
 export function FileViewer({
   agentId,
   path,
+  rev,
   target,
   onBack,
   onAdded,
@@ -44,14 +46,17 @@ export function FileViewer({
   agentId: string;
   /** As opened: cwd-relative or absolute. */
   path: string;
+  /** Show the file as committed here rather than its working-tree copy. */
+  rev?: string;
   target?: FileTarget;
   onBack(): void;
   onAdded?(): void;
 }) {
   const file = useQuery({
-    queryKey: queryKeys.fileContent(agentId, path),
-    queryFn: ({ client, queryKey }) => getFileContent(agentId, path, client.getQueryData(queryKey)),
-    staleTime: 0,
+    queryKey: queryKeys.fileContent(agentId, path, rev),
+    queryFn: ({ client, queryKey }) =>
+      getFileContent(agentId, path, rev, client.getQueryData(queryKey)),
+    staleTime: rev === undefined ? 0 : Number.POSITIVE_INFINITY,
     refetchOnWindowFocus: false,
     retry: retryServerErrors,
   });
@@ -77,7 +82,11 @@ export function FileViewer({
   if (isApiRequestError(file.error, "not_a_git_repo")) {
     body = <NotARepo />;
   } else if (isApiRequestError(file.error, "file_not_found")) {
-    body = <Message>This file no longer exists.</Message>;
+    body = (
+      <Message>
+        {rev === undefined ? "This file no longer exists." : `This file isn't in version ${rev}.`}
+      </Message>
+    );
   } else if (file.data) {
     const shown = file.data.path;
     if (file.data.binary) body = <Message>Binary file, not shown.</Message>;
@@ -92,7 +101,12 @@ export function FileViewer({
             fileName={shown}
             content={content}
             unified
-            toReference={({ start, end }) => ({ path: shown, start, end })}
+            toReference={({ start, end }) => ({
+              path: shown,
+              start,
+              end,
+              ...(rev !== undefined && { rev }),
+            })}
             {...(target && !pastTheEnd && { highlight: target })}
             {...(onAdded && { onAdded })}
           />
@@ -120,6 +134,14 @@ export function FileViewer({
         <h3 title={path} className="min-w-0 flex-1 truncate font-mono text-xs">
           {file.data?.path ?? path}
         </h3>
+        {rev !== undefined && (
+          <span
+            title={`As committed in ${rev}`}
+            className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+          >
+            @{rev}
+          </span>
+        )}
       </div>
       {body}
     </div>

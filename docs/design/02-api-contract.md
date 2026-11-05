@@ -13,11 +13,11 @@ Both sides share these types; the client calls the API through a small typed `fe
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree`, `session_not_listed` |
+| 400 | `invalid_body`, `outside_home`, `command_not_allowed`, `streaming_behavior_required`, `not_in_layout`, `not_a_worktree`, `session_not_listed`, `not_a_github_repo` |
 | 403 | `forbidden_origin`, `forbidden_host` |
-| 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found`, `file_not_found` |
-| 409 | `session_owned`, `agent_exited`, `agent_busy`, `worktree_exists`, `branch_exists`, `worktree_dirty` |
-| 502 | `pi_error` (pi answered `success: false`; message is pi's error), `git_failed` (message: the git command and its stderr) |
+| 404 | `agent_not_found`, `session_not_found`, `not_a_git_repo`, `dialog_not_found`, `file_not_found`, `pr_not_found` |
+| 409 | `session_owned`, `agent_exited`, `agent_busy`, `worktree_exists`, `branch_exists`, `worktree_dirty`, `pr_attached` |
+| 502 | `pi_error` (pi answered `success: false`; message is pi's error), `git_failed` (message: the git command and its stderr), `gh_failed` (`gh` missing, logged out or failing) |
 | 504 | `pi_timeout` (no response within 60 s; `prompt`-family commands only wait for acceptance) |
 
 ## Shared types
@@ -55,7 +55,7 @@ interface SessionSummary {
   id: string;
   cwd: string;
   name?: string;
-  firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks
+  firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks; `#12 Title` when it starts with a `<pr>` block (10-pr-review.md)
   createdAt: string;
   updatedAt: string;             // last entry timestamp
   lastPromptAt?: string;         // last user message's timestamp; absent before the first prompt
@@ -88,6 +88,22 @@ interface SidebarView extends SidebarState {
 }
 
 interface GitStatus { branch: string | null; dirty: boolean }
+
+/** A conversation's GitHub PR, pinned to two commits (10-pr-review.md). */
+interface PrAttachment {
+  repo: string;                  // owner/name of the folder's origin
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  baseRefName: string;
+  headRefName: string;
+  baseSha: string;               // pinned base: merge-base(origin's <base> as fetched, head), or for merged PRs merge-base(GitHub's base, head)
+  headSha: string;               // pinned head
+  remoteHeadSha: string;         // origin's head as last polled; ≠ headSha: Outdated
+}
+
+type PrAttachments = Record<string, PrAttachment>;  // session file → PR
 
 interface GitFileDiff {
   path: string;
@@ -205,7 +221,7 @@ Sets attention to `none`, except `input` while the agent has a pending dialog or
 GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
 ```
 
-- `open` (optional): the opened agents, each with the last `seq` the client holds (from its snapshot or the last applied event). Without it, only `baseline` and the frames every connection gets (`agent`, `agent_closed`, `catalog`, `branch`). Pairs without `:` or without an id are ignored, and so are ids of unknown agents.
+- `open` (optional): the opened agents, each with the last `seq` the client holds (from its snapshot or the last applied event). Without it, only `baseline` and the frames every connection gets (`agent`, `agent_closed`, `catalog`, `branch`, `sidebar`, `prs`). Pairs without `:` or without an id are ignored, and so are ids of unknown agents.
 - `Last-Event-ID`: the same `agentId:seq,…` format (EventSource sends the last `id:` on reconnect). `open` decides which agents are streamed; for each, a cursor from `Last-Event-ID` wins over the query's. Header cursors for agents not in `open` are ignored.
 - Per agent, a cursor replays the events after it when it is a non-negative integer, not ahead of the agent's log, and its successor is still in the log's ring buffer (a caught-up cursor replays nothing). Otherwise that agent gets a `resync` frame and streams live from the log's current `seq`; the other agents are unaffected.
 
@@ -218,20 +234,21 @@ Every frame is a default (`message`) event with `data: <StreamFrame JSON>` and `
 type CursorList = string;
 
 type StreamFrame =
-  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarView }
+  | { type: "baseline"; agents: AgentInfo[]; sessions: StreamedSession[]; branches: Record<string, string>; sidebar: SidebarView; prs: PrAttachments }
   | { type: "event"; agentId: AgentId; seq: number; event: ServerEvent } // opened agents only
   | { type: "resync"; agentId: AgentId }                  // the cursor can't be replayed: refetch the snapshot
   | { type: "agent"; agent: AgentInfo }                   // any agent's info changed (or a new agent)
   | { type: "agent_closed"; agentId: AgentId }
   | { type: "catalog"; sessions: StreamedSession[] }      // every session; replaces the previous list
   | { type: "branch"; cwd: string; branch: string | null } // null: no longer tracked
-  | { type: "sidebar"; sidebar: SidebarView };            // replaces the previous state
+  | { type: "sidebar"; sidebar: SidebarView }             // replaces the previous state
+  | { type: "prs"; prs: PrAttachments };                  // replaces the previous attachments
 ```
 
-- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state. Every `SidebarView` the server sends resolves `mains` (`mainCheckoutIn`) as it sends it.
+- `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state. `baseline.prs`: the PR attachments by session file. Every `SidebarView` the server sends resolves `mains` (`mainCheckoutIn`) as it sends it.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
-- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `prs` when the PR attachments change (attach, refresh, a poll that sees a new head, a clone, pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
 
 ## Events
 
@@ -282,6 +299,7 @@ Rules:
 - `prompt.images`: `ImageContent[]` (base64). Body limit 25 MB. pi's `prompt` has no file field: the web client inlines attached text files into `message` as leading `<file name="…" length="…">\n…\n</file>\n` blocks: pi's CLI convention plus `length` (content UTF-16 length) so a `</file>` line in the content can't end a block early. The name is escaped (`&amp;`, `&quot;`, `&lt;`, `&#10;`).
 - Line references (`@path:N`, `@path:N-M`, `@"quoted path":N`, `@<sha>:./path:N`) are plain text in `message`, passed to the model verbatim. `@pi-code/protocol` exports their only parser and formatter, `findCodeRefs` and `formatCodeRef` (`code-refs.ts`; syntax in [`07-code-review.md`](07-code-review.md), "References").
 - `switch_session`: `sessionPath` is validated like `POST /api/agents { sessionFile }` (`400 invalid_body | outside_home`, `404 session_not_found`) and its realpath is sent to pi; a session owned by another agent → `409 session_owned`.
+- `fork`, or a `prompt` running the pi-code extension's `/pi-code-tree`, of a conversation attached to a PR → `409 pr_attached` ([`10-pr-review.md`](10-pr-review.md), "Store"); `clone` is allowed and copies the attachment.
 - `bash` returns `202 { data: { id } }` immediately; output streams as `bash_output` events and completion arrives as `bash_done`. Its `bashExecution` entry is committed like any other entry.
 - Commands on an `exited` agent → `409 agent_exited`.
 
@@ -306,7 +324,7 @@ interface NavigateBody {
   customInstructions?: string;     // for the summary
 }
 ```
-→ `200 { cancelled: boolean; leafId?: string | null; seq?: number }` once the navigation's events (`entries_appended` with the new leaf, see the event list, or `transcript_reset` on a fallback; then `stats`, published even when the leaf didn't move) are published: `cancelled` when the leaf didn't move, `leafId` the resulting leaf, `seq` the agent's seq after those events, so a client can wait for its store to reach it; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
+→ `200 { cancelled: boolean; leafId?: string | null; seq?: number }` once the navigation's events (`entries_appended` with the new leaf, see the event list, or `transcript_reset` on a fallback; then `stats`, published even when the leaf didn't move) are published: `cancelled` when the leaf didn't move, `leafId` the resulting leaf, `seq` the agent's seq after those events, so a client can wait for its store to reach it; if the target is a user message, its text arrives as a `set_editor_text` UI request. Errors: `400 invalid_body` (malformed body, or `entryId` not in the transcript), `409 agent_busy` (streaming, or awaiting trust), `409 agent_exited`, `409 pr_attached` (the conversation is attached to a PR, see [`10-pr-review.md`](10-pr-review.md)), `500 internal` (pi lacks the pi-code extension's `pi-code-tree` command), `502 pi_error` (navigation failed; message is the extension's error).
 
 ## Worktrees
 
@@ -338,16 +356,16 @@ interface RemoveWorktreeBody {
 
 The review panel's routes; behavior, limits and rationale in [`07-code-review.md`](07-code-review.md). Each runs in the agent's cwd, with cwd-relative paths, and answers `404 not_a_git_repo` outside a git work tree.
 
-### `GET /api/agents/:id/git/diff?base=<branch>&uncommitted=1`
-Both optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a branch name, resolved to `origin/<base>` if it exists, else the local branch: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included.
+### `GET /api/agents/:id/git/diff?base=<branch>&uncommitted=1` · `?pr=1`
+All optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a branch name, resolved to `origin/<base>` if it exists, else the local branch: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included. With `pr=1` (which wins over `base`): the attached PR's pinned base to its pinned head, read from the object database ([`10-pr-review.md`](10-pr-review.md)).
 ```ts
 interface GitDiffResponse {
   files: GitFileDiff[];
-  oldRev?: string;               // short sha of the old side (HEAD or the merge-base); absent without commits
-  newRev?: string;               // short sha of HEAD when the new side is HEAD; absent when it is the working tree
+  oldRev?: string;               // short sha of the old side (HEAD, the merge-base or the PR's base); absent without commits
+  newRev?: string;               // short sha of the new side when it is a commit (HEAD, the PR's head); absent for the working tree
 }
 ```
-→ `200 GitDiffResponse`. `400 invalid_body`: `base` starts with `-`, is `HEAD`, or names neither `origin/<base>` nor a local branch as written ("unknown branch <base>"), the repo has no commits, or `<base>` and `HEAD` have no common commit.
+→ `200 GitDiffResponse`. `400 invalid_body`: `base` starts with `-`, is `HEAD`, or names neither `origin/<base>` nor a local branch as written ("unknown branch <base>"), the repo has no commits, `<base>` and `HEAD` have no common commit, or `pr=1` without an attached PR. `502 git_failed`: a pinned PR commit is missing.
 
 ### `GET /api/agents/:id/git/branches`
 ```ts
@@ -365,17 +383,38 @@ interface GitBranchesResponse {
 Fuzzy search over the cwd's tracked and untracked, non-ignored files. `q` is trimmed; empty → no results; over 200 characters → `400 invalid_body`.
 → `200 { files: string[] }` (`FileSearchResponse`), cwd-relative paths, best first (basename matches before path-only matches), at most 10.
 
-### `GET /api/agents/:id/files/content?path=<path>`
-Reads a working-tree file. `path` is cwd-relative or absolute.
+### `GET /api/agents/:id/files/content?path=<path>&rev=<sha>`
+Reads a working-tree file, or with `rev` (7–40 lowercase hex characters naming a commit) the file as committed there, read from the object database (`<rev>:./<path>`; it needn't exist on disk). `path` is cwd-relative or absolute.
 ```ts
 interface FileContentResponse {
   path: string;                  // cwd-relative, normalized
+  rev?: string;                  // as asked, when reading a commit
   content?: string;              // UTF-8; absent when binary or tooLarge
   binary: boolean;               // a NUL byte in the first 8000 bytes
   tooLarge: boolean;             // over 1 MB
 }
 ```
-→ `200 FileContentResponse`. `400 invalid_body` (missing `path`, or its realpath outside the cwd's), `404 file_not_found` (missing, or not a regular file).
+→ `200 FileContentResponse`. `400 invalid_body` (missing `path`; its realpath outside the cwd's, or with `rev` the path itself; a malformed `rev`), `404 file_not_found` (missing, or not a regular file; with `rev`, no such commit or no file at that path in it).
+
+## Pull requests
+
+PR review ([`10-pr-review.md`](10-pr-review.md)). Attachments are keyed by the agent's session file and reach clients through `baseline.prs` and `prs` frames.
+
+### `POST /api/agents/:id/pr`
+Attaches the conversation to a PR of the folder's `origin` and sends the agent the PR's context as a prompt (steering a running agent).
+```ts
+interface AttachPrBody {
+  pr?: string;                   // a number (`12`, `#12`) or a PR URL; absent or empty: the current branch's PR
+}
+interface PrResponse { pr: PrAttachment }
+```
+→ `200 PrResponse`. Errors: `400 invalid_body` (malformed body or argument; a PR of another repository), `400 not_a_github_repo` (no `origin`, or not on GitHub), `404 not_a_git_repo`, `404 pr_not_found` ("No PR for this branch" without a number), `409 pr_attached` (attachments are permanent), `409 agent_busy` (no session yet, awaiting trust, or the agent moved to another session while the PR was fetched), `409 agent_exited`, `502 gh_failed`, `502 git_failed`.
+
+### `POST /api/agents/:id/pr/refresh`
+Re-fetches the attached PR, re-pins its base and head, and sends the agent an update prompt (new commits, files, comments). → `200 PrResponse`. `400 invalid_body` when no PR is attached; otherwise the errors of attaching.
+
+### `POST /api/agents/:id/pr/poll`
+`git ls-remote origin refs/pull/<n>/head`; a head other than the stored `remoteHeadSha` is stored (a `prs` frame). Merged PRs and unattached conversations are skipped; failures are silent. → `204`.
 
 ### `GET /api/agents/:id/git/status`
 → `200 { status: GitStatus | null }` (`null` outside a repo).

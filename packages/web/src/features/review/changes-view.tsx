@@ -1,21 +1,23 @@
 /**
  * The Changes tab (`docs/design/07-code-review.md`, "Changes tab"): the git diff of the agent's
- * project in uncommitted or branch mode, as a toolbar, a compact file list and every file's patch
- * under a sticky header. Patch lines send references to the composer, versioned per "Version
- * naming".
+ * project in uncommitted or branch mode, or of the attached PR (`docs/design/10-pr-review.md`), as
+ * a toolbar, a compact file list and every file's patch under a sticky header. Patch lines send
+ * references to the composer, versioned per "Version naming".
  */
 
-import type { CodeRef, GitDiffResponse, GitFileDiff } from "@pi-code/protocol";
+import type { CodeRef, GitDiffResponse, GitFileDiff, PrAttachment } from "@pi-code/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRightIcon,
   CircleCheckIcon,
   GitBranchIcon,
   GitCompareIcon,
+  GitPullRequestIcon,
   LoaderIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { type ReactNode, useId, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { countPatchLines, type LineSelection } from "@/components/diff";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -28,13 +30,21 @@ import {
   getGitBranches,
   getGitDiff,
   isApiRequestError,
+  refreshPr,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { BranchPicker } from "./branch-picker";
 import { splitPath } from "./files-view";
+import { isOutdated, useConversationPr } from "./pr";
 import { LoadError, NotARepo, retryServerErrors } from "./query-states";
-import { type DiffMode, useReview, useReviewStore } from "./review-state";
+import {
+  type DiffMode,
+  type DiffModeName,
+  diffModeOf,
+  useReview,
+  useReviewStore,
+} from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
 const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; className: string }> =
@@ -64,19 +74,20 @@ interface FileEntry {
 }
 
 /**
- * The reference for lines of `file`: old-side lines name the old commit; new-side lines name
- * `HEAD` only when it is the new side and the working tree differs from it.
+ * The reference for lines of `file`: old-side lines name the old commit; new-side lines name the
+ * new commit when it isn't on disk (`pinned`, a PR's head) or the working tree differs from it.
  */
 function changeReference(
   file: GitFileDiff,
   { oldRev, newRev }: Pick<GitDiffResponse, "oldRev" | "newRev">,
   { side, start, end }: LineSelection,
+  pinned = false,
 ): CodeRef {
   const ref: CodeRef =
     side === "old"
       ? { path: file.oldPath ?? file.path, start, end }
       : { path: file.path, start, end };
-  const rev = side === "old" ? oldRev : file.worktreeChanged ? newRev : undefined;
+  const rev = side === "old" ? oldRev : pinned || file.worktreeChanged ? newRev : undefined;
   if (rev !== undefined) ref.rev = rev;
   return ref;
 }
@@ -254,11 +265,14 @@ function FileList({ entries, onPick }: { entries: FileEntry[]; onPick(key: strin
 function FileStack({
   entries,
   response,
+  pinned,
   expand,
   onAdded,
 }: {
   entries: FileEntry[];
   response: GitDiffResponse;
+  /** The new side is a commit that isn't on disk (PR mode). */
+  pinned: boolean;
   /** Whether files start expanded. */
   expand: boolean;
   onAdded?(): void;
@@ -289,7 +303,7 @@ function FileStack({
             if (element) sections.current.set(entry.key, element);
             else sections.current.delete(entry.key);
           }}
-          toReference={(selection) => changeReference(entry.file, response, selection)}
+          toReference={(selection) => changeReference(entry.file, response, selection, pinned)}
           {...(onAdded && { onAdded })}
         />
       ))}
@@ -364,26 +378,29 @@ function CompareButton({
 const MODES = [
   ["uncommitted", "Uncommitted"],
   ["branch", "Branch"],
+  ["pr", "PR"],
 ] as const;
 
-/** Uncommitted / Branch as a segmented control: one item is always on. */
+/** Uncommitted / Branch, and PR when attached, as a segmented control: one item is always on. */
 function ModeControl({
   value,
+  attached,
   onChange,
 }: {
-  value: DiffMode["mode"];
-  onChange(mode: DiffMode["mode"]): void;
+  value: DiffModeName;
+  attached: boolean;
+  onChange(mode: DiffModeName): void;
 }) {
   return (
     <ToggleGroup
       type="single"
       aria-label="Diff mode"
       value={value}
-      onValueChange={(next) => next && onChange(next as DiffMode["mode"])}
+      onValueChange={(next) => next && onChange(next as DiffModeName)}
       spacing={0.5}
       className="rounded-lg bg-chip p-0.5"
     >
-      {MODES.map(([mode, label]) => (
+      {MODES.filter(([mode]) => attached || mode !== "pr").map(([mode, label]) => (
         <ToggleGroupItem
           key={mode}
           value={mode}
@@ -396,9 +413,59 @@ function ModeControl({
   );
 }
 
+/**
+ * PR mode's header line: `#N title`, the number linking to the PR, a state chip once merged or
+ * closed, and "Outdated · Refresh" while the PR has pushes newer than the pinned head.
+ */
+function PrHeader({ agentId, pr }: { agentId: string; pr: PrAttachment }) {
+  const refresh = useMutation({
+    mutationFn: () => refreshPr(agentId),
+    onError: (error) => toast.error(`Couldn't refresh the PR: ${errorMessage(error)}`),
+  });
+  return (
+    <div data-testid="pr-header" className="flex h-9 items-center gap-2 border-b px-3 text-xs">
+      <GitPullRequestIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <p className="min-w-0 flex-1 truncate">
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono text-link hover:underline"
+        >
+          #{pr.number}
+        </a>{" "}
+        <span title={pr.title}>{pr.title}</span>
+      </p>
+      {pr.state !== "open" && (
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+          {pr.state === "merged" ? "Merged" : "Closed"}
+        </span>
+      )}
+      {isOutdated(pr) && (
+        <span className="flex shrink-0 items-center gap-1 text-status-input">
+          Outdated ·
+          <Button
+            size="xs"
+            variant="link"
+            disabled={refresh.isPending}
+            onClick={() => refresh.mutate()}
+            className="h-auto px-0"
+          >
+            {refresh.isPending && <LoaderIcon className="animate-spin" />}
+            Refresh
+          </Button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?(): void }) {
   const { diff: mode } = useReview(agentId);
-  const branchMode = mode.mode === "branch";
+  const pr = useConversationPr();
+  const modeName = diffModeOf(mode, pr !== undefined);
+  const branchMode = modeName === "branch";
+  const prMode = modeName === "pr" ? pr : undefined;
   const switchId = useId();
 
   const branches = useQuery({
@@ -407,17 +474,19 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
   });
   const base = mode.base ?? branches.data?.defaultBranch ?? undefined;
   const diff = useQuery({
-    queryKey: branchMode
-      ? queryKeys.gitDiff(agentId, "branch", base, mode.uncommitted)
-      : queryKeys.gitDiff(agentId, "uncommitted"),
+    queryKey: prMode
+      ? queryKeys.prDiff(agentId, prMode.baseSha, prMode.headSha)
+      : branchMode
+        ? queryKeys.gitDiff(agentId, "branch", base, mode.uncommitted)
+        : queryKeys.gitDiff(agentId, "uncommitted"),
     queryFn: ({ client, queryKey }) =>
       getGitDiff(
         agentId,
-        branchMode ? { base, uncommitted: mode.uncommitted } : {},
+        prMode ? { pr: true } : branchMode ? { base, uncommitted: mode.uncommitted } : {},
         client.getQueryData(queryKey),
       ),
     enabled: !branchMode || base !== undefined,
-    staleTime: 0,
+    staleTime: prMode ? Number.POSITIVE_INFINITY : 0,
     refetchOnWindowFocus: false,
     retry: retryServerErrors,
   });
@@ -456,7 +525,11 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
   const showDiff = !(branchMode && (branches.isError || base === undefined));
   const toolbar = (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
-      <ModeControl value={mode.mode} onChange={(next) => update({ mode: next })} />
+      <ModeControl
+        value={modeName}
+        attached={pr !== undefined}
+        onChange={(next) => update({ mode: next })}
+      />
       {branchMode && (
         <>
           <BranchPicker
@@ -518,7 +591,9 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
       </div>
     );
   } else if (!entries || entries.length === 0) {
-    body = branchMode ? (
+    body = prMode ? (
+      <EmptyState icon={<GitPullRequestIcon />} title="No changes in this PR" />
+    ) : branchMode ? (
       <EmptyState icon={<GitCompareIcon />} title={`No changes against ${base}`} />
     ) : (
       <EmptyState
@@ -539,9 +614,10 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
     const expand = entries.length <= EXPAND_MAX_FILES && additions + deletions <= EXPAND_MAX_LINES;
     body = (
       <FileStack
-        key={`${mode.mode}:${base}:${mode.uncommitted}`}
+        key={prMode ? `pr:${prMode.headSha}` : `${modeName}:${base}:${mode.uncommitted}`}
         entries={entries}
         response={diff.data}
+        pinned={prMode !== undefined}
         expand={expand}
         {...(onAdded && { onAdded })}
       />
@@ -551,6 +627,7 @@ export function ChangesView({ agentId, onAdded }: { agentId: string; onAdded?():
   return (
     <div className="flex flex-col">
       {toolbar}
+      {prMode && <PrHeader agentId={agentId} pr={prMode} />}
       {branchMode && fetching.isError && (
         <p role="alert" className="border-b px-3 py-1.5 text-xs text-destructive">
           Couldn't fetch: {errorMessage(fetching.error)}

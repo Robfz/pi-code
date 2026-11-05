@@ -1,3 +1,4 @@
+import { formatPrBlock } from "@pi-code/protocol";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -52,5 +53,41 @@ describe("UserMessageView", () => {
     );
     expect(screen.queryByTestId("file-attachment")).toBeNull();
     expect(screen.getByText("see <file> later")).toBeInTheDocument();
+  });
+
+  it("renders a leading PR block as a card that expands to the PR context", async () => {
+    const block = formatPrBlock({
+      number: 12,
+      title: "Speed up the parser",
+      state: "merged",
+      url: "https://github.com/o/r/pull/12",
+      update: false,
+      text: "Pull request o/r#12: Speed up the parser\nBase: main @ abc",
+    });
+    await renderWithStore(
+      <UserMessageView message={{ content: `${block}Give me an overview` }} />,
+      hydratedStore(),
+    );
+    const card = screen.getByTestId("pr-card");
+    const trigger = within(card).getByRole("button");
+    expect(trigger).toHaveTextContent("#12Speed up the parsermerged");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/Base: main/)).toBeNull();
+    expect(screen.getByText("Give me an overview")).toBeInTheDocument();
+    await userEvent.setup().click(trigger);
+    expect(within(card).getByText(/Base: main @ abc/)).toBeInTheDocument();
+  });
+
+  it("marks a PR update", async () => {
+    const block = formatPrBlock({
+      number: 12,
+      title: "Speed up the parser",
+      state: "open",
+      url: "https://github.com/o/r/pull/12",
+      update: true,
+      text: "updated",
+    });
+    await renderWithStore(<UserMessageView message={{ content: block }} />, hydratedStore());
+    expect(screen.getByTestId("pr-card")).toHaveTextContent("updated · open");
   });
 });

@@ -8,6 +8,7 @@ import type {
 import type { AgentManager } from "../agents/agent-manager.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { FolderBranches } from "../git/branches.ts";
+import { type PrStore, prsView } from "../store/pr-store.ts";
 import { type SidebarStateStore, sidebarView } from "../store/sidebar-state.ts";
 
 /** Statuses of an agent whose pi process is running. */
@@ -18,13 +19,14 @@ type BaselineFrame = Extract<StreamFrame, { type: "baseline" }>;
 /** Frames every connection receives, whatever it opened. */
 type HubFrame = Extract<
   StreamFrame,
-  { type: "agent" | "agent_closed" | "catalog" | "branch" | "sidebar" }
+  { type: "agent" | "agent_closed" | "catalog" | "branch" | "sidebar" | "prs" }
 >;
 
 interface StreamHubDeps {
   manager: AgentManager;
   catalog: SessionCatalog;
   sidebar: SidebarStateStore;
+  prs: PrStore;
 }
 
 /** Every session, in the catalog's order, as `StreamedSession`s. */
@@ -35,18 +37,20 @@ async function catalogListing(catalog: SessionCatalog): Promise<StreamedSession[
 }
 
 /**
- * The live stream's shared inputs: turns manager events, catalog rescans, folder branches and
- * sidebar state changes into frames for every connection, and keeps the session list, the branch
- * map and the sidebar state in memory, so baselines are built without I/O beyond resolving the
- * pinned repos' main checkouts (`sidebarView`).
+ * The live stream's shared inputs: turns manager events, catalog rescans, folder branches,
+ * sidebar state and PR attachment changes into frames for every connection, and keeps the session
+ * list, the branch map, the sidebar state and the PR attachments in memory, so baselines are built
+ * without I/O beyond resolving the pinned repos' main checkouts (`sidebarView`).
  */
 export class StreamHub {
-  /** Resolves once the first session list is computed and the sidebar state loaded. */
+  /** Resolves once the first session list is computed and the sidebar state and PRs loaded. */
   readonly ready: Promise<void>;
   private readonly manager: AgentManager;
   private readonly catalog: SessionCatalog;
   private readonly sidebar: SidebarStateStore;
+  private readonly prs: PrStore;
   private readonly unsubscribeSidebar: () => void;
+  private readonly unsubscribePrs: () => void;
   private sessions: StreamedSession[] = [];
   /** `sessions` as JSON, to compare rescans against. */
   private sessionsJson = "[]";
@@ -69,13 +73,19 @@ export class StreamHub {
     this.manager = deps.manager;
     this.catalog = deps.catalog;
     this.sidebar = deps.sidebar;
+    this.prs = deps.prs;
     this.branches = new FolderBranches((cwd, branch) =>
       this.broadcast({ type: "branch", cwd, branch }),
     );
     this.unsubscribeSidebar = deps.sidebar.subscribe((sidebar) =>
       this.broadcast({ type: "sidebar", sidebar: sidebarView(sidebar) }),
     );
-    this.ready = Promise.all([this.refreshCatalog(), deps.sidebar.ready]).then(() => {});
+    this.unsubscribePrs = deps.prs.subscribe((prs) =>
+      this.broadcast({ type: "prs", prs: prsView(prs) }),
+    );
+    this.ready = Promise.all([this.refreshCatalog(), deps.sidebar.ready, deps.prs.ready]).then(
+      () => {},
+    );
     deps.manager.on("agent", this.onAgent);
     deps.manager.on("closed", this.onClosed);
   }
@@ -87,12 +97,13 @@ export class StreamHub {
       sessions: this.sessions,
       branches: this.branches.current(),
       sidebar: sidebarView(this.sidebar.current()),
+      prs: prsView(this.prs.current()),
     };
   }
 
   /**
    * Rescans the sessions dir, broadcasting `catalog` when the list differs from the current one,
-   * and prunes the sidebar state of folders that are gone. Resolves once a rescan started after
+   * and prunes the sidebar state of folders that are gone and the PRs of deleted sessions. Resolves once a rescan started after
    * the call has finished; never rejects. One rescan runs at a time: calls made meanwhile share
    * one follow-up rescan, so a burst of changes costs at most two.
    */
@@ -118,6 +129,9 @@ export class StreamHub {
     void this.sidebar.prune().catch((e: unknown) => {
       console.warn(`[sidebar] prune failed: ${(e as Error).message}`);
     });
+    void this.prs.prune().catch((e: unknown) => {
+      console.warn(`[prs] prune failed: ${(e as Error).message}`);
+    });
     try {
       // The listing may predate the change that asked for this rescan.
       this.catalog.invalidate();
@@ -141,11 +155,15 @@ export class StreamHub {
     };
   }
 
-  /** Stops following the manager and the sidebar state, and closes the branch watches (shutdown). */
+  /**
+   * Stops following the manager, the sidebar state and the PRs, and closes the branch watches
+   * (shutdown).
+   */
   close(): void {
     this.manager.off("agent", this.onAgent);
     this.manager.off("closed", this.onClosed);
     this.unsubscribeSidebar();
+    this.unsubscribePrs();
     this.branches.close();
   }
 

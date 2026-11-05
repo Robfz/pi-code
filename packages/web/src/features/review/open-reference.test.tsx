@@ -56,15 +56,31 @@ const TRANSCRIPT = {
   leafId: "a1",
 };
 
+/** The `rev` of each file read, `null` for a working-tree copy. */
+let readRevs: (string | null)[] = [];
+
 /** The app at `/agents/a1` with a transcript holding references; every file has 6 lines. */
 async function renderApp({ desktop }: { desktop: boolean }) {
   stubMatchMedia((query) => desktop && query === DESKTOP_QUERY);
+  readRevs = [];
   stubFetch((call) => {
     if (call.url === "/api/agents/a1/snapshot")
       return [200, makeSnapshot({ agent: makeAgent({ id: "a1" }), transcript: TRANSCRIPT })];
     if (call.url === "/api/agents/a1/files/content") {
-      const path = new URLSearchParams(call.search).get("path") ?? "";
-      return [200, { path, content: "1\n2\n3\n4\n5\n6\n", binary: false, tooLarge: false }];
+      const params = new URLSearchParams(call.search);
+      const path = params.get("path") ?? "";
+      const rev = params.get("rev");
+      readRevs.push(rev);
+      return [
+        200,
+        {
+          path,
+          ...(rev !== null && { rev }),
+          content: "1\n2\n3\n4\n5\n6\n",
+          binary: false,
+          tooLarge: false,
+        },
+      ];
     }
     return undefined;
   });
@@ -88,7 +104,10 @@ function marked(): string[] {
 
 /** The Files tab is selected and shows `path` with `lines` marked. */
 async function expectFileOpen(root: HTMLElement, path: string, lines: string[]) {
-  expect(within(root).getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
+  expect(await within(root).findByRole("tab", { name: "Files" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   expect(await within(root).findByRole("heading", { name: path })).toBeInTheDocument();
   await waitFor(() => expect(marked()).toEqual(lines), { timeout: 5000 });
 }
@@ -129,7 +148,7 @@ describe("references in messages", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("Enter on a reference in a reply opens it; a version-named one shows a toast", async () => {
+  it("Enter on a reference in a reply opens it; a version-named one at its version", async () => {
     await renderApp({ desktop: true });
     const assistant = await screen.findByTestId("assistant-text");
     const versioned = await waitFor(() => {
@@ -141,9 +160,9 @@ describe("references in messages", () => {
     fireEvent.keyDown(versioned, { key: "Enter" });
     const pane = await screen.findByRole("complementary", { name: "Review" });
     await expectFileOpen(pane, "src/a.ts", ["4"]);
-    expect(toast).toHaveBeenCalledWith(
-      "That reference points at version 3f2a9c1; showing the current file.",
-    );
+    expect(within(pane).getByTitle("As committed in 3f2a9c1")).toHaveTextContent("@3f2a9c1");
+    expect(readRevs).toEqual(["3f2a9c1"]);
+    expect(toast).not.toHaveBeenCalled();
     expect(useReviewStore.getState().reviews.a1?.paneOpen).toBe(true);
   });
 

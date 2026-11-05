@@ -3,12 +3,12 @@
  * "GET files/content").
  */
 import { readFile, realpath, stat } from "node:fs/promises";
-import { basename, relative, resolve } from "node:path";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import type { FileContentResponse } from "@pi-code/protocol";
 import fuzzysort from "fuzzysort";
 import { ApiError } from "../errors.ts";
 import { isInside, realpathOrAncestor } from "../paths.ts";
-import { MAX_PATCH_BYTES, requireWorkTree, runGit } from "./git.ts";
+import { hasCommit, MAX_PATCH_BYTES, requireWorkTree, runGit } from "./git.ts";
 
 const MAX_QUERY_LENGTH = 200;
 const SEARCH_LIMIT = 10;
@@ -95,4 +95,46 @@ export async function readProjectFile(cwd: string, path: string): Promise<FileCo
   const bytes = await readFile(real);
   if (bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return { ...response, binary: true };
   return { ...response, content: bytes.toString("utf8") };
+}
+
+/** A commit id as references write it (`git rev-parse --short` output up to a full sha). */
+const REV = /^[0-9a-f]{7,40}$/;
+
+/**
+ * `path` (relative to `cwd`, or absolute inside it) as committed in `rev`, read from the object
+ * database, so the commit needn't be checked out. `rev` must be a commit id and `path` must stay
+ * inside `cwd`, else `invalid_body`; a commit or file that doesn't exist, or a path that isn't a
+ * file there, throws `file_not_found`; outside a work tree, `not_a_git_repo`.
+ */
+export async function readFileAtRev(
+  cwd: string,
+  path: string,
+  rev: string,
+): Promise<FileContentResponse> {
+  if (!REV.test(rev)) {
+    throw new ApiError(
+      "invalid_body",
+      "rev must be a commit id (7 to 40 lowercase hex characters)",
+    );
+  }
+  await requireWorkTree(cwd);
+  // The file needn't exist on disk, so it is confined by its path alone, against the cwd as
+  // given and as its realpath (an absolute path may use either).
+  const roots = [resolve(cwd), await realpath(cwd)];
+  const target = isAbsolute(path) ? resolve(path) : resolve(roots[1] as string, path);
+  const root = roots.find((dir) => isInside(dir, target));
+  if (root === undefined) throw outside(path);
+  const rel = relative(root, target);
+  if (!(await hasCommit(cwd, rev))) throw new ApiError("file_not_found", `no commit ${rev}`);
+  const spec = `${rev}:./${rel}`;
+  const type = await runGit(cwd, ["cat-file", "-t", spec], { okCodes: [0, 128] });
+  if (type.code !== 0 || type.stdout.trim() !== "blob") {
+    throw new ApiError("file_not_found", `${path} does not exist in ${rev}`);
+  }
+  const response: FileContentResponse = { path: rel, rev, binary: false, tooLarge: false };
+  const size = Number((await runGit(cwd, ["cat-file", "-s", spec])).stdout.trim());
+  if (size > MAX_PATCH_BYTES) return { ...response, tooLarge: true };
+  const { stdout } = await runGit(cwd, ["cat-file", "blob", spec]);
+  if (stdout.slice(0, BINARY_SNIFF_BYTES).includes("\0")) return { ...response, binary: true };
+  return { ...response, content: stdout };
 }

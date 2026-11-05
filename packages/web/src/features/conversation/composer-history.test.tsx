@@ -1,4 +1,4 @@
-import { formatFileBlock, type SessionEntry } from "@pi-code/protocol";
+import { formatFileBlock, formatPrBlock, type SessionEntry } from "@pi-code/protocol";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -78,6 +78,20 @@ describe("promptHistory", () => {
       ]),
     );
     expect(history).toEqual(["again", "once", "again"]);
+  });
+
+  it("skips PR review's prompts, which the user didn't type", () => {
+    const block = formatPrBlock({
+      number: 12,
+      title: "t",
+      state: "open",
+      url: "u",
+      update: false,
+      text: "context",
+    });
+    expect(promptHistory(chain([user("mine"), user(`${block}Give me an overview`)]))).toEqual([
+      "mine",
+    ]);
   });
 });
 

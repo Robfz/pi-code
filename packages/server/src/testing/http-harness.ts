@@ -29,6 +29,8 @@ import { CuratorRegistry } from "../curator/registry.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import type { SseOptions } from "../http/stream.ts";
 import { StreamHub } from "../live/stream-hub.ts";
+import type { GhRunner } from "../pr/github.ts";
+import { PrService } from "../pr/pr-service.ts";
 import { type PushSendOptions, PushService } from "../push/push-service.ts";
 import { SubscriptionStore } from "../push/subscriptions.ts";
 import { loadVapidDetails } from "../push/vapid.ts";
@@ -60,6 +62,8 @@ export interface HarnessOptions {
   watchSessions?: boolean;
   /** Trash command for session files (default `rm`, keeping test files out of the real Trash). */
   trashCommand?: string;
+  /** Stands in for `gh` (PR review); without it, `gh` calls fail. */
+  gh?: GhRunner;
 }
 
 /** A push message the harness's fake sender received. */
@@ -302,6 +306,7 @@ export class Harness {
   readonly catalog: SessionCatalog;
   readonly hub: StreamHub;
   readonly sidebar: SidebarStateStore;
+  readonly prService: PrService;
   /** pi-code's data dir (VAPID keys, push subscriptions). */
   readonly dataDir: string;
   push: PushService | undefined;
@@ -327,7 +332,17 @@ export class Harness {
     this.curators = opts.curator
       ? new CuratorRegistry({ hostname: HOSTNAME, proxyPort: 4181 })
       : undefined;
+    this.prService = new PrService({
+      dataDir: this.dataDir,
+      agents: () => this.manager,
+      gh:
+        opts.gh ??
+        (async () => {
+          throw new Error("no gh in this harness");
+        }),
+    });
     const pipeline = {
+      onTurnEnd: this.prService.onTurnEnd,
       ...opts.pipeline,
       ...(this.curators !== undefined ? { curator: this.curators } : {}),
     };
@@ -356,6 +371,7 @@ export class Harness {
       manager: this.manager,
       catalog: this.catalog,
       sidebar: this.sidebar,
+      prs: this.prService.store,
     });
     this.sessionsWatcher = opts.watchSessions
       ? watchSessions(join(this.agentDir, "sessions"), () => void this.hub.refreshCatalog())
@@ -401,6 +417,7 @@ export class Harness {
       catalog: this.catalog,
       hub: this.hub,
       sidebar: this.sidebar,
+      prService: this.prService,
       piVersion: async () => "test",
       ...(this.push !== undefined ? { push: this.push } : {}),
       ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
@@ -500,6 +517,7 @@ export class Harness {
   async close(): Promise<void> {
     await Promise.all(this.clients.map((c) => c.close()));
     this.sessionsWatcher?.close();
+    this.prService.close();
     await this.manager.closeAll();
     this.hub.close();
     await this.push?.idle();

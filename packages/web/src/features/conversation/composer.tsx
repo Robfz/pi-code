@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConversationPr } from "@/features/review/pr";
 import { errorMessage, rpc } from "@/lib/api";
 import { imageSrc } from "@/lib/content";
 import { queryKeys } from "@/lib/query-client";
@@ -25,7 +26,7 @@ import { type Attachment, prepareAttachment } from "./attachments";
 import { ComposerInput, selectionOf } from "./composer-input";
 import { ModelPicker } from "./model-picker";
 import {
-  BUILTIN_COMMANDS,
+  builtinCommands,
   commandItems,
   filterSlashItems,
   findBuiltin,
@@ -150,6 +151,7 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
   const editorText = useConversation(selectEditorText);
   const history = useConversation(selectPromptHistory);
   const supportsImages = useConversation((s) => s.state?.model?.input.includes("image") === true);
+  const prAttached = useConversationPr() !== undefined;
   const draft = useDrafts((s) => s.drafts[agentId] ?? EMPTY_DRAFT);
   const { text, attachments } = draft;
   const runBuiltin = useBuiltinCommands();
@@ -218,10 +220,10 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
       query === null
         ? []
         : filterSlashItems(
-            [...BUILTIN_COMMANDS, ...commandItems(commands.data?.commands ?? [])],
+            [...builtinCommands(prAttached), ...commandItems(commands.data?.commands ?? [])],
             query,
           ),
-    [query, commands.data],
+    [query, commands.data, prAttached],
   );
   const menuOpen = ready && query !== null && !menuDismissed && menuItems.length > 0;
   const activeIndex = Math.min(menuIndex, Math.max(0, menuItems.length - 1));

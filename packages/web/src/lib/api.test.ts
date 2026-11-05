@@ -85,6 +85,26 @@ describe("review reads", () => {
     expect(pathOf(1)).toBe("/api/agents/a1/files/content?path=src%2Fa%20b.ts");
   });
 
+  it("GETs the PR diff and a file at a commit", async () => {
+    const diff = { files: [], oldRev: "abc1234", newRev: "def5678" };
+    const content = {
+      path: "b.ts",
+      rev: "def5678",
+      content: "b\n",
+      binary: false,
+      tooLarge: false,
+    };
+    const { request } = stub(json(diff), json(content));
+    expect(await getGitDiff("a1", { pr: true, base: "main" })).toEqual(diff);
+    expect(await getFileContent("a1", "b.ts", "def5678")).toEqual(content);
+    const pathOf = (i: number) => {
+      const url = new URL(request(i).url);
+      return url.pathname + url.search;
+    };
+    expect(pathOf(0)).toBe("/api/agents/a1/git/diff?pr=1");
+    expect(pathOf(1)).toBe("/api/agents/a1/files/content?path=b.ts&rev=def5678");
+  });
+
   it("revalidates with the previous response's ETag and returns it as is on a 304", async () => {
     const { fetchMock, request } = stub(
       json({ files: [] }, { ETag: '"e1"' }),
@@ -119,7 +139,7 @@ describe("review reads", () => {
   it("sends no condition without an ETag to match", async () => {
     const content = { path: "a.txt", content: "a\n", binary: false, tooLarge: false };
     const { request } = stub(json(content));
-    expect(await getFileContent("a1", "a.txt", content)).toEqual(content);
+    expect(await getFileContent("a1", "a.txt", undefined, content)).toEqual(content);
     expect(request(0).headers.get("if-none-match")).toBeNull();
   });
 

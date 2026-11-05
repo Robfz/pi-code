@@ -29,12 +29,14 @@
  *   attention while the page is visible and focused.
  * - The sidebar state (pins, collapsed groups) lives on the server: `setSidebar` applies a change
  *   at once and sends it; `sidebar` frames, this tab's own changes included, replace it.
+ * - The PR attachments (session file → PR) come with the baseline; `prs` frames replace them.
  */
 
 import {
   type AgentId,
   type AgentInfo,
   applySidebarPatch,
+  type PrAttachments,
   type SequencedEvent,
   SIDEBAR_KEYS,
   type SidebarPatch,
@@ -81,6 +83,8 @@ export interface LiveOverview {
   /** cwd → branch, for folders with a live agent. */
   branches: Record<string, string>;
   sidebar: SidebarView;
+  /** Session file → the PR its conversation is attached to. */
+  prs: PrAttachments;
   connection: ConnectionState;
 }
 
@@ -144,6 +148,7 @@ export class LiveRegistry {
     sessions: [],
     branches: {},
     sidebar: { pinned: [], collapsed: [], mains: {} },
+    prs: {},
     connection: "connecting",
   }));
   private readonly queryClient: Pick<QueryClient, "invalidateQueries">;
@@ -368,6 +373,7 @@ export class LiveRegistry {
           sessions: frame.sessions,
           branches: frame.branches,
           sidebar: frame.sidebar,
+          prs: frame.prs,
         });
         // A hydrated store's snapshot predates this stream (every hydrate reconnects), so its
         // absence means the agent is gone. A refetching store may be newer than the stream; its
@@ -423,6 +429,9 @@ export class LiveRegistry {
       }
       case "sidebar":
         this.live.setState({ sidebar: frame.sidebar });
+        return;
+      case "prs":
+        this.live.setState({ prs: frame.prs });
         return;
     }
   }

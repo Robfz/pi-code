@@ -69,6 +69,8 @@ export interface PipelineOptions {
   gitDebounceMs?: number;
   /** Curator proxy registry (`details.curatorUrl` → `curator` event). */
   curator?: CuratorHook;
+  /** Called after every `turn_end` (PR review polls the attached PR's head). */
+  onTurnEnd?: (agentId: string) => void;
 }
 
 /** Synthetic `extension_ui_request` ids the server publishes to clear stale statuses/widgets. */
@@ -406,6 +408,7 @@ export class AgentPipeline {
       case "turn_end":
         events.push(...(await this.fetchStats()));
         this.scheduleGitStatus();
+        this.opts.onTurnEnd?.(this.agent.id);
         break;
       case "compaction_end":
         if (!event.aborted && event.errorMessage === undefined) {

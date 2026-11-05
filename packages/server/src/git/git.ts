@@ -144,6 +144,17 @@ async function hasHead(cwd: string): Promise<boolean> {
   return code === 0;
 }
 
+/** A full commit id, as git prints it. */
+export const FULL_SHA = /^[0-9a-f]{40}$/;
+
+/** Whether `sha` names a commit in the object database. */
+export async function hasCommit(cwd: string, sha: string): Promise<boolean> {
+  const { code } = await runGit(cwd, ["cat-file", "-e", `${sha}^{commit}`], {
+    okCodes: [0, 1, 128],
+  });
+  return code === 0;
+}
+
 /** `{ branch, dirty }`, or `null` outside a git work tree. */
 export async function gitStatus(cwd: string): Promise<GitStatus | null> {
   const top = await gitTopLevel(cwd);
@@ -384,6 +395,21 @@ async function worktreeChangedPaths(cwd: string): Promise<Set<string>> {
   return new Set(stdout.split("\0").filter((p) => p !== ""));
 }
 
+/** The changes under `cwd` from commit `from` to commit `to`, both named in the response. */
+async function rangeDiff(cwd: string, from: string, to: string): Promise<GitDiffResponse> {
+  for (const sha of [from, to]) {
+    if (!(await hasCommit(cwd, sha))) {
+      throw new ApiError("git_failed", `commit ${sha} is missing from the repository`);
+    }
+  }
+  const [files, oldRev, newRev] = await Promise.all([
+    trackedDiffs(cwd, from, to),
+    shortRev(cwd, from),
+    shortRev(cwd, to),
+  ]);
+  return { files, oldRev, newRev };
+}
+
 export interface GitDiffOptions {
   /**
    * Branch to diff against, from its merge-base with `HEAD` (branch mode): `origin/<base>` when
@@ -392,6 +418,8 @@ export interface GitDiffOptions {
   base?: string;
   /** Branch mode: diff the merge-base against the working tree, untracked files included. */
   uncommitted?: boolean;
+  /** PR mode: from one commit to another, both read from the object database; `base` is ignored. */
+  range?: { from: string; to: string };
 }
 
 /**
@@ -399,11 +427,13 @@ export interface GitDiffOptions {
  * Without `base`: tracked files against `HEAD` (the empty tree without commits), plus untracked
  * files as new-file patches. With `base` (`origin/<base>` when it exists, else the local
  * branch): from its merge-base with `HEAD` to the working tree
- * plus untracked files (`uncommitted`), or to `HEAD`. Throws `not_a_git_repo` outside a work
- * tree and `invalid_body` for an unusable `base`.
+ * plus untracked files (`uncommitted`), or to `HEAD`. With `range`: between two commits, which
+ * needn't be checked out (a PR). Throws `not_a_git_repo` outside a work tree, `invalid_body` for
+ * an unusable `base` and `git_failed` for a `range` commit that is missing.
  */
 export async function gitDiff(cwd: string, opts: GitDiffOptions = {}): Promise<GitDiffResponse> {
   await requireWorkTree(cwd);
+  if (opts.range !== undefined) return rangeDiff(cwd, opts.range.from, opts.range.to);
   const committed = await hasHead(cwd);
   if (opts.base === undefined) {
     const [tracked, untracked, oldRev] = await Promise.all([

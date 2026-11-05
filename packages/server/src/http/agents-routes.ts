@@ -36,8 +36,15 @@ function parseTrustBody(value: unknown): TrustBody {
   throw new ApiError("invalid_body", "expected { trusted: boolean }");
 }
 
+interface AgentsRoutesDeps {
+  /** A `clone` copied session `from` to `to` (PR attachments follow). */
+  onSessionCopied?(from: string, to: string): Promise<void>;
+  /** Whether `sessionFile` has a PR attachment (no tree navigation or fork then). */
+  isPrAttached?(sessionFile: string): boolean;
+}
+
 /** `/api/agents` routes. Chained so the route types reach `AppType`. */
-export function agentsRoutes(manager: AgentManager) {
+export function agentsRoutes(manager: AgentManager, deps: AgentsRoutesDeps = {}) {
   return new Hono()
     .get("/", (c) => c.json({ agents: manager.list() }, 200))
     .post(
@@ -73,7 +80,7 @@ export function agentsRoutes(manager: AgentManager) {
       validator("json", (value) => parseNavigateBody(value)),
       async (c) => {
         const agent = manager.require(c.req.param("id"));
-        return c.json(await navigateTree(agent, c.req.valid("json")), 200);
+        return c.json(await navigateTree(agent, c.req.valid("json"), deps.isPrAttached), 200);
       },
     )
     .get("/:id/git/status", async (c) => {
@@ -103,6 +110,8 @@ export function agentsRoutes(manager: AgentManager) {
         const outcome = await runCommand(agent, c.req.valid("json"), {
           ownerOf: (file, except) => manager.ownerOf(file, except),
           resolveSessionFile: (file) => manager.resolveSessionFile(file),
+          ...(deps.onSessionCopied && { onSessionCopied: deps.onSessionCopied }),
+          ...(deps.isPrAttached && { isPrAttached: deps.isPrAttached }),
         });
         return outcome.status === 202
           ? c.json({ data: outcome.data }, 202)

@@ -22,8 +22,10 @@ import type {
   NavigateBody,
   NavigateResponse,
   OpenAgentBody,
+  PrAttachment,
   ProjectSummary,
   ProjectsResponse,
+  PrResponse,
   RemoveWorktreeBody,
   RpcCommandBody,
   RpcCommandResult,
@@ -184,16 +186,18 @@ export function ackAgent(id: AgentId): Promise<void> {
 /**
  * The agent's project diff: uncommitted changes against `HEAD`, or with `base` the branch's changes
  * since its merge-base with `origin/<base>`, else the local branch (`uncommitted` adds the working
- * tree and untracked files). `not_a_git_repo` outside a repository. `previous` (the cached diff
- * of the same query) comes back as is when unchanged.
+ * tree and untracked files), or with `pr` the attached PR's pinned base to its pinned head.
+ * `not_a_git_repo` outside a repository. `previous` (the cached diff of the same query) comes back
+ * as is when unchanged.
  */
 export function getGitDiff(
   id: AgentId,
-  { base, uncommitted }: { base?: string; uncommitted?: boolean } = {},
+  { base, uncommitted, pr }: { base?: string; uncommitted?: boolean; pr?: boolean } = {},
   previous?: Revalidatable<GitDiffResponse>,
 ): Promise<Revalidatable<GitDiffResponse>> {
   const params = new URLSearchParams();
-  if (base !== undefined) {
+  if (pr) params.set("pr", "1");
+  else if (base !== undefined) {
     params.set("base", base);
     if (uncommitted) params.set("uncommitted", "1");
   }
@@ -219,15 +223,40 @@ export async function searchFiles(id: AgentId, q: string): Promise<string[]> {
 }
 
 /**
- * A project file's working-tree content (`file_not_found` when missing). `previous` (the cached
- * content of the same path) comes back as is when unchanged.
+ * A project file's working-tree content, or with `rev` its content in that commit
+ * (`file_not_found` when missing). `previous` (the cached content of the same path and rev) comes
+ * back as is when unchanged.
  */
 export function getFileContent(
   id: AgentId,
   path: string,
+  rev?: string,
   previous?: Revalidatable<FileContentResponse>,
 ): Promise<Revalidatable<FileContentResponse>> {
-  return getRevalidated(agentPath(id, `/files/content?path=${encodeURIComponent(path)}`), previous);
+  const query = `path=${encodeURIComponent(path)}${rev === undefined ? "" : `&rev=${encodeURIComponent(rev)}`}`;
+  return getRevalidated(agentPath(id, `/files/content?${query}`), previous);
+}
+
+// ---------------------------------------------------------------------------
+// Pull requests
+
+/**
+ * `/pr`: attaches the conversation to a PR (a URL or number; without one, the current branch's)
+ * and sends the agent its context. `pr_not_found`, `pr_attached`, `not_a_github_repo`, … when
+ * it can't.
+ */
+export async function attachPr(id: AgentId, pr?: string): Promise<PrAttachment> {
+  return (await request<PrResponse>("POST", agentPath(id, "/pr"), pr ? { pr } : {})).pr;
+}
+
+/** Re-pins the attached PR to its latest commits and sends the agent what changed. */
+export async function refreshPr(id: AgentId): Promise<PrAttachment> {
+  return (await request<PrResponse>("POST", agentPath(id, "/pr/refresh"), {})).pr;
+}
+
+/** Checks the attached PR for new pushes; the result arrives as a `prs` frame. */
+export function pollPr(id: AgentId): Promise<void> {
+  return request<void>("POST", agentPath(id, "/pr/poll"), {});
 }
 
 /** `GET /api/stream` URL opening each conversation in `cursors` (status and catalog only when empty). */

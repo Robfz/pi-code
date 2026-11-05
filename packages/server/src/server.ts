@@ -12,6 +12,7 @@ import { CuratorProxy } from "./curator/proxy.ts";
 import { CuratorRegistry } from "./curator/registry.ts";
 import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
+import { PrService } from "./pr/pr-service.ts";
 import { type PushSender, PushService } from "./push/push-service.ts";
 import { SubscriptionStore } from "./push/subscriptions.ts";
 import { loadVapidDetails } from "./push/vapid.ts";
@@ -59,11 +60,12 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   });
 
   let push: PushService | undefined;
-  const manager = new AgentManager({
+  const prService = new PrService({ dataDir: config.dataDir, agents: () => manager });
+  const manager: AgentManager = new AgentManager({
     home: config.home,
     command: piCommand(config.piBin, config.extensionPath),
     agentDir: config.agentDir,
-    pipeline: { curator: curators },
+    pipeline: { curator: curators, onTurnEnd: prService.onTurnEnd },
     onTrigger: (trigger) => void push?.notify(trigger),
   });
 
@@ -80,7 +82,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   });
 
   const sidebar = new SidebarStateStore(config.dataDir);
-  const hub = new StreamHub({ manager, catalog, sidebar });
+  const hub = new StreamHub({ manager, catalog, sidebar, prs: prService.store });
   // Started before the hub's first scan reads the dir (asynchronously), so later changes are
   // picked up once the watch is running.
   const sessionsWatcher = watchSessions(
@@ -95,6 +97,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     catalog,
     hub,
     sidebar,
+    prService,
     push,
     piVersion: piVersionProbe(config.piBin),
   });
@@ -123,6 +126,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
       const proxyClosed = proxy.close();
       sessionsWatcher?.close();
       stopIdleSweep();
+      prService.close();
       await manager.closeAll();
       hub.close();
       server.closeAllConnections();
