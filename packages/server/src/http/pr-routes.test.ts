@@ -157,6 +157,9 @@ describe("POST /api/agents/:id/pr", () => {
     expect(context?.text).toContain("gh pr review 7 --repo octo/repo");
     expect(context?.text).toContain("gh api repos/octo/repo/pulls/7/comments");
     expect(context?.text).toContain("- a.txt (+1 −1)");
+    expect(context?.text).toMatch(
+      /Commits \(newest first, merges counted once\):\n- [0-9a-f]{7,} add b\n- [0-9a-f]{7,} change a\n\nChanged files/,
+    );
     expect(context?.text).toContain("Author: @alice");
     expect(context?.text).toContain("Description:\n  The description.");
     expect(context?.text).toContain("@bob commented");

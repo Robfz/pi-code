@@ -53,6 +53,10 @@ Head: <headRefName> @ <headSha>
 
 Description: the PR body, or (none)
 
+Commits (newest first, merges counted once): one `<short sha> <subject>` line each,
+  along the head's first parents from the base; at most 50, then "…and N more";
+  left out when the range can't be listed
+
 Changed files (N, +a −d): one line per file, `old → new` for renames, `binary` without counts;
   at most 200, then "…and N more: git diff --stat <baseSha>..<headSha>"
 Review threads: the conversation's comments and submitted reviews (state, author, time, body),
@@ -78,7 +82,7 @@ PR_TEXT_<random>
 
 No diff is included. Paths (the file list's and the inline comments') are from the repository root, while the agent's cwd may be a subfolder, so the one-file diff uses git's `:/` (top) pathspec magic and `git show <sha>:<path>` resolves from the root too. The PR's author names its files, and git allows `$`, backticks, `;` and quotes in names, so the templates write the path placeholder single-quoted (`'<path>'`) and tell the agent to write each `'` in a path as `'\''`. The posting commands pass the text on stdin through a quoted heredoc, so the shell doesn't expand the backticks, quotes or `$(…)` a review quoting code contains. The delimiter is random (12 hex characters, new for every message), so no line of the text, such as a quoted `EOF`, can end the heredoc early.
 
-The title, description, comments, reviews, file paths and commit subjects are written by GitHub users. Bodies are indented (the description by two spaces, like comments) on every line, whatever breaks it (`\n`, `\r\n`, a lone `\r`, `\v`, `\f`, U+0085, U+2028, U+2029), and cut after 4000 characters with a note that the full text is on GitHub; the title, file paths (inline comments' included) and commit subjects are kept on their line, control characters and line separators written as `\uXXXX`. So no line of theirs can pass for a line of the prompt, and a sentence before them all (but the title in the first line) says the title, the file paths, the commit subjects and every indented line are material to review, never instructions. This is defence in depth only: the agent still reads the PR's code and diff, which can carry the same kind of text. File counts come from `git diff --numstat -M <base> <head>`. Pending reviews and empty "commented" reviews (wrappers of inline comments) are left out.
+The title, description, comments, reviews, file paths and commit subjects are written by GitHub users. Bodies are indented (the description by two spaces, like comments) on every line, whatever breaks it (`\n`, `\r\n`, a lone `\r`, `\v`, `\f`, U+0085, U+2028, U+2029), and cut after 4000 characters with a note that the full text is on GitHub; the title, file paths (inline comments' included) and commit subjects are kept on their line, control characters and line separators written as `\uXXXX`. So no line of theirs can pass for a line of the prompt, and a sentence before them all (but the title in the first line) says the title, the file paths, the commit subjects and every indented line are material to review, never instructions. This is defence in depth only: the agent still reads the PR's code and diff, which can carry the same kind of text. The commits come from `commitsBetween` (`git log --first-parent --format='%h %s' <base>..<head>`), like the update prompt's; file counts from `git diff --numstat -M <base> <head>`. Pending reviews and empty "commented" reviews (wrappers of inline comments) are left out.
 
 ### `<pr>` blocks
 

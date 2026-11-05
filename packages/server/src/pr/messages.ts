@@ -72,6 +72,19 @@ function fileLines(files: FileStat[], range: string): string[] {
   ];
 }
 
+/**
+ * `header`, then the commits `commitsBetween` listed, each on its own line, and how many it
+ * left out.
+ */
+function commitLines(header: string, commits: CommitList): string[] {
+  const more = commits.total - commits.commits.length;
+  return [
+    header,
+    ...commits.commits.map((c) => `- ${oneLine(c)}`),
+    ...(more > 0 ? [`- …and ${more} more`] : []),
+  ];
+}
+
 function commentLines(comments: PrComment[]): string[] {
   return comments.map((c) => {
     const what = c.review
@@ -187,6 +200,7 @@ export function contextMessage(
   view: PrView,
   inline: InlineComment[],
   files: FileStat[],
+  commits: CommitList | null,
 ): string {
   const base =
     pr.state === "merged"
@@ -205,6 +219,9 @@ export function contextMessage(
     "Description:",
     view.body.trim() === "" ? "(none)" : indent(view.body, "  "),
     "",
+    ...(commits === null
+      ? []
+      : [...commitLines("Commits (newest first, merges counted once):", commits), ""]),
     ...fileLines(files, `${pr.baseSha}..${pr.headSha}`),
     "",
     "Review threads:",
@@ -244,12 +261,10 @@ export function updateMessage(
       `The head was force-pushed: ${short(previous.headSha)} is no longer in its history.`,
     ];
   } else {
-    const more = commits.total - commits.commits.length;
-    history = [
+    history = commitLines(
       `New commits since ${short(previous.headSha)} (newest first, merges counted once):`,
-      ...commits.commits.map((c) => `- ${oneLine(c)}`),
-      ...(more > 0 ? [`- …and ${more} more`] : []),
-    ];
+      commits,
+    );
   }
   const text = [
     `Pull request ${pr.repo}#${pr.number} was updated: ${oneLine(pr.title)}`,

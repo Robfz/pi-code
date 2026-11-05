@@ -120,8 +120,12 @@ export class PrService {
         gitCommonDir(agent.cwd),
       ]);
       const pr = this.entry(fetched, repo, gitDir);
-      const files = await diffStat(agent.cwd, fetched.baseSha, fetched.headSha);
-      await this.deliver(agent, file, pr, contextMessage(pr, fetched.view, fetched.inline, files));
+      const [files, commits] = await Promise.all([
+        diffStat(agent.cwd, fetched.baseSha, fetched.headSha),
+        commitsBetween(agent.cwd, fetched.baseSha, fetched.headSha),
+      ]);
+      const message = contextMessage(pr, fetched.view, fetched.inline, files, commits);
+      await this.deliver(agent, file, pr, message);
       return prView(pr);
     });
   }
