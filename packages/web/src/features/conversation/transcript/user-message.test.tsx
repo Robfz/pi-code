@@ -1,9 +1,12 @@
-import { formatPrBlock } from "@pi-code/protocol";
+import { formatFileBlock, formatPrBlock } from "@pi-code/protocol";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { hydratedStore, renderWithStore } from "@/test/render";
 import { UserMessageView } from "./user-message";
+
+const skillBlock = (name: string) =>
+  `<skill name="${name}" location="/skills/${name}/SKILL.md">\nReferences are relative to /skills/${name}.\n\n# Steps\nRead the diff.\n</skill>`;
 
 describe("UserMessageView", () => {
   it("is a full-width box, not a right-aligned bubble", async () => {
@@ -89,5 +92,47 @@ describe("UserMessageView", () => {
     });
     await renderWithStore(<UserMessageView message={{ content: block }} />, hydratedStore());
     expect(screen.getByTestId("pr-card")).toHaveTextContent("updated · open");
+  });
+
+  it("renders an expanded skill as a collapsed card, its args as the text", async () => {
+    await renderWithStore(
+      <UserMessageView message={{ content: `${skillBlock("review")}\n\nfocus on tests` }} />,
+      hydratedStore(),
+    );
+    const card = screen.getByTestId("skill-invocation");
+    const trigger = within(card).getByRole("button");
+    expect(trigger).toHaveTextContent("/skill:review");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(card.querySelector(".text-ultraspawn")).toBeNull();
+    expect(screen.queryByText("Read the diff.")).toBeNull();
+    expect(screen.queryByText(/<skill/)).toBeNull();
+    expect(screen.getByText("focus on tests")).toBeInTheDocument();
+
+    await userEvent.setup().click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(await within(card).findByText("Read the diff.")).toBeInTheDocument();
+  });
+
+  it("colors ultraspawn's skill like ultraspawn tool rows", async () => {
+    await renderWithStore(
+      <UserMessageView message={{ content: skillBlock("ultraspawn") }} />,
+      hydratedStore(),
+    );
+    const card = screen.getByTestId("skill-invocation");
+    expect(within(card).getByText("/skill:ultraspawn")).toHaveClass("text-ultraspawn");
+    expect(card.querySelector("svg.lucide-bot")).toHaveClass("text-ultraspawn");
+  });
+
+  it("shows an expanded skill above its attached files", async () => {
+    const file = formatFileBlock({ name: "/repo/a.ts", text: "const a = 1;" });
+    await renderWithStore(
+      <UserMessageView message={{ content: `${skillBlock("review")}\n\n${file}check a.ts` }} />,
+      hydratedStore(),
+    );
+    const skill = screen.getByTestId("skill-invocation");
+    const row = screen.getByTestId("file-attachment");
+    expect(within(row).getByRole("button")).toHaveTextContent("a.ts");
+    expect(skill.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("check a.ts")).toBeInTheDocument();
   });
 });

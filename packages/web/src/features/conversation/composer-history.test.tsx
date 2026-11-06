@@ -93,6 +93,15 @@ describe("promptHistory", () => {
       "mine",
     ]);
   });
+
+  it("recalls an expanded skill as its command, without attached files", () => {
+    const skill = '<skill name="review" location="/s/SKILL.md">\nSteps\n</skill>';
+    const file = formatFileBlock({ name: "a.ts", text: "x" });
+    expect(promptHistory(chain([user(skill), user(`${skill}\n\n${file}check a.ts`)]))).toEqual([
+      "/skill:review check a.ts",
+      "/skill:review",
+    ]);
+  });
 });
 
 describe("Composer prompt history", () => {

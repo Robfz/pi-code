@@ -1,4 +1,9 @@
-import { formatPrBlock, initialLiveState, type SessionEntry } from "@pi-code/protocol";
+import {
+  formatFileBlock,
+  formatPrBlock,
+  initialLiveState,
+  type SessionEntry,
+} from "@pi-code/protocol";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
@@ -84,6 +89,13 @@ describe("promptTitle", () => {
     const skill = '<skill name="review" location="/s/SKILL.md">\n# Review\nSteps\n</skill>';
     expect(promptTitle(`${skill}\n\nCheck the diff`)).toBe("Check the diff");
     expect(promptTitle(skill)).toBe("/skill:review");
+  });
+
+  it("skips an expanded skill's attached files", () => {
+    const skill = '<skill name="review" location="/s/SKILL.md">\n# Review\n</skill>';
+    const file = formatFileBlock({ name: "a.ts", text: "const a = 1;" });
+    expect(promptTitle(`${skill}\n\n${file}Check a.ts`)).toBe("Check a.ts");
+    expect(promptTitle(`${skill}\n\n${file.trimEnd()}`)).toBe("/skill:review");
   });
 });
 

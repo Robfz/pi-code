@@ -1,4 +1,10 @@
-import { prBlockLabel, splitFileBlocks, splitPrBlocks, type UserMessage } from "@pi-code/protocol";
+import {
+  prBlockLabel,
+  splitFileBlocks,
+  splitPrBlocks,
+  splitSkillBlock,
+  type UserMessage,
+} from "@pi-code/protocol";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { contentText } from "@/lib/content";
 import { cn } from "@/lib/utils";
@@ -15,23 +21,19 @@ interface Prompt {
   title: string;
 }
 
-/** pi expands `/skill:name args` into the skill's text in this block, followed by the args. */
-const SKILL_BLOCK = /^\s*<skill name="([^"]*)"[^>]*>[\s\S]*?<\/skill>/;
-
 /**
  * A prompt's outline title: its PR for a `/pr` prompt or a PR update, else the first non-blank
- * line of its text after attached files and an expanded skill, else `/skill:name`.
+ * line of its text after an expanded skill and attached files, else `/skill:name`.
  */
 export function promptTitle(content: UserMessage["content"]): string {
-  const { prs, body } = splitPrBlocks(splitFileBlocks(contentText(content)).body);
+  const { skill, body: args } = splitSkillBlock(contentText(content));
+  const { prs, body } = splitPrBlocks(splitFileBlocks(args).body);
   if (prs[0] !== undefined) return prBlockLabel(prs[0]);
-  const skill = SKILL_BLOCK.exec(body);
-  const text = skill ? body.slice(skill[0].length) : body;
-  const line = text
+  const line = body
     .split("\n")
     .find((line) => line.trim() !== "")
     ?.trim();
-  return line ?? (skill ? `/skill:${skill[1]}` : "");
+  return line ?? (skill ? `/skill:${skill.name}` : "");
 }
 
 /** The active branch's prompts with text, the pending one last. */

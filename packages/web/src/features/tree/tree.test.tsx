@@ -209,6 +209,17 @@ describe("tree model", () => {
     ]);
   });
 
+  it("shows an expanded skill as its command", () => {
+    const skill = '<skill name="review" location="/s/SKILL.md">\nSteps\n</skill>';
+    const block = '<file name="a.ts">\nx\n</file>\n';
+    const entries = [user("u1", null, skill), user("u2", "u1", `${skill}\n\n${block}check it`)];
+    const model = buildTreeModel(entries, "u2");
+    expect(["u1", "u2"].map((id) => model.items.get(id)?.text)).toEqual([
+      "/skill:review",
+      "/skill:review check it",
+    ]);
+  });
+
   it("names a PR review prompt by its PR", () => {
     const block = formatPrBlock({
       number: 12,
