@@ -19,3 +19,16 @@ export async function prepareAttachment(file: File, supportsImages: boolean): Pr
   }
   return { key, name: file.name, kind: "text", text: await readTextFile(file) };
 }
+
+/**
+ * The prompt message for `typed` text with attached files' `<file>` blocks: the blocks first,
+ * except after a `/skill:name` command, which pi expands only at the start of the message and
+ * names up to the first space. The command stays first, so pi sends the skill ahead of the files
+ * and the args.
+ */
+export function composePromptMessage(typed: string, fileBlocks: string): string {
+  const skill = /^(\/skill:\S+)\s*([\s\S]*)$/.exec(typed);
+  if (!skill) return fileBlocks + typed;
+  const rest = fileBlocks + (skill[2] as string);
+  return rest === "" ? (skill[1] as string) : `${skill[1]} ${rest}`;
+}
