@@ -22,7 +22,7 @@ import { useConversation, useConversationStore } from "@/store/context";
 import type { ConversationStore } from "@/store/conversation-store";
 import { caretAt, type DraftSelection, EMPTY_DRAFT, useDrafts } from "@/store/drafts";
 import { selectEditorText, selectIsRunning, selectPromptHistory } from "@/store/selectors";
-import { type Attachment, prepareAttachment } from "./attachments";
+import { type Attachment, composePromptMessage, prepareAttachment } from "./attachments";
 import { ComposerInput, selectionOf } from "./composer-input";
 import { ModelPicker } from "./model-picker";
 import {
@@ -294,12 +294,12 @@ export function Composer({ onSubmit }: { onSubmit?: () => void } = {}) {
     }
 
     const images: ImageContent[] = [];
-    let message = "";
+    let fileBlocks = "";
     for (const attachment of attachments) {
       if (attachment.kind === "image") images.push(attachment.image);
-      else message += formatFileBlock({ name: attachment.name, text: attachment.text });
+      else fileBlocks += formatFileBlock({ name: attachment.name, text: attachment.text });
     }
-    message += typed;
+    const message = composePromptMessage(typed, fileBlocks);
     useDrafts.getState().clear(agentId);
     const base = images.length > 0 ? { message, images } : { message };
     try {

@@ -667,6 +667,23 @@ describe("file attach", () => {
     );
   });
 
+  it("keeps a skill command ahead of attached text files", async () => {
+    const { user, calls } = await setup(["text"]);
+    await user.upload(fileInput(), [txt("notes", "todo")]);
+    const list = await screen.findByRole("list", { name: "Attachments" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(1));
+    await user.type(box(), "/skill:review check it");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(rpcBodies(calls)).toEqual([
+        {
+          type: "prompt",
+          message: '/skill:review <file name="notes" length="4">\ntodo\n</file>\ncheck it',
+        },
+      ]),
+    );
+  });
+
   it("attaches text files when the model doesn't accept images, and rejects images", async () => {
     const { user, calls } = await setup(["text"]);
     await user.upload(fileInput(), [png(), txt("a.md", "# A")]);

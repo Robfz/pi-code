@@ -8,4 +8,5 @@ export * from "./pr-blocks.ts";
 export * from "./recency.ts";
 export * from "./rpc.ts";
 export * from "./sidebar.ts";
+export * from "./skill-blocks.ts";
 export type * from "./types.ts";

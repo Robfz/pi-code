@@ -1,7 +1,15 @@
-import { type PrBlock, splitFileBlocks, splitPrBlocks, type UserMessage } from "@pi-code/protocol";
-import { FileTextIcon, GitPullRequestIcon } from "lucide-react";
+import {
+  type PrBlock,
+  type SkillBlock,
+  splitFileBlocks,
+  splitPrBlocks,
+  splitSkillBlock,
+  type UserMessage,
+} from "@pi-code/protocol";
+import { BotIcon, FileTextIcon, GitPullRequestIcon, SparklesIcon } from "lucide-react";
 import { useState } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
+import { Markdown } from "@/components/markdown";
 import { CodeRefText } from "@/features/review/code-ref-text";
 import { baseName, contentImages, contentText, imageSrc } from "@/lib/content";
 import { cn } from "@/lib/utils";
@@ -32,10 +40,35 @@ function PrCard({ pr }: { pr: PrBlock }) {
 }
 
 /**
- * A full-width box: image thumbnails, then leading `<file>` blocks (attached text files) as
- * collapsed rows that expand to the file's content, then leading `<pr>` blocks (PR review's
- * context) as PR cards, then the text (content may be a string or a content array). Line
- * references in the text are clickable.
+ * An expanded `/skill:name` command as a row that expands to the skill's text. Ultraspawn's skill
+ * takes the look of ultraspawn tool rows.
+ */
+function SkillCard({ skill }: { skill: SkillBlock }) {
+  const ultraspawn = skill.name === "ultraspawn";
+  const Icon = ultraspawn ? BotIcon : SparklesIcon;
+  return (
+    <CollapsibleRow
+      data-testid="skill-invocation"
+      icon={<Icon className={cn(ultraspawn && "text-ultraspawn")} />}
+      label={
+        <span title={skill.location} className={cn("truncate", ultraspawn && "text-ultraspawn")}>
+          /skill:{skill.name}
+        </span>
+      }
+    >
+      <div className="mt-0.5 mb-1 max-h-64 overflow-auto rounded-lg border bg-card px-3 py-2">
+        <Markdown text={skill.content} />
+      </div>
+    </CollapsibleRow>
+  );
+}
+
+/**
+ * A full-width box: image thumbnails, then a leading `<skill>` block (an expanded `/skill:name`)
+ * as a skill card, then leading `<file>` blocks (attached text files) as collapsed rows that
+ * expand to the file's content, then leading `<pr>` blocks (PR review's context) as PR cards, then
+ * the text (content may be a string or a content array). Line references in the text are
+ * clickable.
  */
 export function UserMessageView({
   message,
@@ -44,7 +77,9 @@ export function UserMessageView({
   message: Pick<UserMessage, "content">;
   pending?: boolean;
 }) {
-  const { files, body: rest } = splitFileBlocks(contentText(message.content));
+  // The composer keeps a skill command ahead of attached files, so pi's skill block comes first.
+  const { skill, body: args } = splitSkillBlock(contentText(message.content));
+  const { files, body: rest } = splitFileBlocks(args);
   const { prs, body } = splitPrBlocks(rest);
   const images = contentImages(message.content);
   const [zoomed, setZoomed] = useState<number | null>(null);
@@ -78,6 +113,7 @@ export function UserMessageView({
           ))}
         </div>
       )}
+      {skill && <SkillCard skill={skill} />}
       {files.map((file, index) => (
         <CollapsibleRow
           // biome-ignore lint/suspicious/noArrayIndexKey: file blocks have no id
