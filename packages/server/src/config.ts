@@ -21,6 +21,10 @@ export interface Config {
   staticDir: string;
   /** The pi-code pi extension, passed to pi with `--extension`. */
   extensionPath: string;
+  /** The PR guide job's extension (`submit_guide`), passed only to guide jobs with `-e`. */
+  guideExtensionPath: string;
+  /** The PR guide job's model, as pi's `--model` takes it. */
+  guideModel: string;
 }
 
 export class ConfigError extends Error {
@@ -78,5 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     home,
     staticDir: fileURLToPath(new URL("../../web/dist", import.meta.url)),
     extensionPath: fileURLToPath(new URL("../../pi-extension/src/index.ts", import.meta.url)),
+    guideExtensionPath: fileURLToPath(new URL("../../pi-extension/src/guide.ts", import.meta.url)),
+    guideModel: env.PI_CODE_GUIDE_MODEL?.trim() || "anthropic/claude-opus-5-5",
   };
 }

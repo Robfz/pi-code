@@ -2,6 +2,8 @@
 
 A small pi extension loaded **only** into server-spawned pi processes (`pi --mode rpc --extension <path>`). The TUI never loads it. Source: `packages/pi-extension/src/index.ts` (pi loads TypeScript directly).
 
+The package has a second entry, the PR guide job's extension (`src/guide.ts`, section 5), loaded only into guide jobs; conversations never see its tool.
+
 It fills two gaps in pi's RPC mode, adds one prompt guideline and names conversations, using documented extension APIs. Trust and tree navigation were verified in `docs/spikes/e1-e2.md`.
 
 It is typed against `@earendil-works/pi-coding-agent` `1.4.0` (dev dependency, type-only imports), the installed pi's version, for `BeforeAgentStartEvent.systemPromptOptions` (section 3). The protocol package keeps its own pin.
@@ -83,6 +85,22 @@ pi.on("before_agent_start", (event) => {
 - Sessions resumed without a name are named after their next run.
 - The title request's cost isn't added to the session's usage.
 
+## 5. PR guide job: `submit_guide`
+
+**Problem.** The PR guide job ([`11-pr-guide.md`](11-pr-guide.md)) is a `pi --mode json` run that must hand the server a structured guide, validated before the server reads it.
+
+**Mechanism.** A separate entry, `packages/pi-extension/src/guide.ts` (`config.guideExtensionPath`), passed with `-e` only to guide jobs, so conversation agents never get the tool. It registers `submit_guide` with a TypeBox schema:
+
+```ts
+{ sections: [{ title: string; explanation: string; hunks: string[] /* ≥ 1 */ }] /* ≥ 1 */ }
+```
+
+- pi validates a call's arguments against the schema; a rejected call goes back to the model as an error, so it can try again.
+- `execute` returns "Guide submitted." with `terminate: true`, so the run ends on the call without another model turn, and the validated arguments as the result's `details`.
+- The server reads the guide from that `details` in the job's event stream (`tool_execution_end` reporting no error): pi coerces arguments while validating them, so the raw arguments `tool_execution_start` carries may not match the schema. The tool itself keeps nothing.
+- The tool name (`GUIDE_TOOL`) is also defined in the server (`pr/guide-prompt.ts`); the guide job's tests check they match.
+- `typebox` is a dev dependency for types and tests; inside pi the import resolves to pi's own copy.
+
 ## Non-goals
 
-No tool registration, no rendering, no persisted state. Anything that must also work in the TUI does not belong here.
+No tool registration in the conversation extension, no rendering, no persisted state. Anything that must also work in the TUI does not belong here.

@@ -53,7 +53,8 @@ Stop the server with Ctrl-C (or SIGTERM to the server process): it stops accepti
 | `PI_CODE_PORT` | `4180` | Main listener (`127.0.0.1` only) |
 | `PI_CODE_CURATOR_PORT` | `4181` | Curator proxy listener (`127.0.0.1` only) |
 | `PI_CODE_PI_BIN` | `pi` | pi executable |
-| `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys (`vapid.json`), push subscriptions (`push-subscriptions.json`), the sidebar's pins and collapsed groups (`sidebar.json`) and the conversations' PRs (`prs.json`) |
+| `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys (`vapid.json`), push subscriptions (`push-subscriptions.json`), the sidebar's pins and collapsed groups (`sidebar.json`), the conversations' PRs (`prs.json`) and the PR guides (`guides/`) |
+| `PI_CODE_GUIDE_MODEL` | `anthropic/claude-opus-5-5` | Model of the PR guide job, as pi's `--model` takes it |
 | `PI_AGENT_DIR` | `~/.pi/agent` | pi's agent dir: sessions, `trust.json`. Read-only, except that deleting a conversation or removing a worktree deletes session files |
 
 ## Installing the PWA on Android

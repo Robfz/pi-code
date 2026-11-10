@@ -357,7 +357,7 @@ interface RemoveWorktreeBody {
 The review panel's routes; behavior, limits and rationale in [`07-code-review.md`](07-code-review.md). Each runs in the agent's cwd, with cwd-relative paths, and answers `404 not_a_git_repo` outside a git work tree.
 
 ### `GET /api/agents/:id/git/diff?base=<branch>&uncommitted=1` · `?pr=1`
-All optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a branch name, resolved to `origin/<base>` if it exists, else the local branch: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included. With `pr=1` (which wins over `base`): the attached PR's pinned base to its pinned head, read from the object database ([`10-pr-review.md`](10-pr-review.md)).
+All optional. Without `base`: the working tree against `HEAD` (the empty tree without commits), untracked files included; `uncommitted` is ignored. With `base`, a branch name, resolved to `origin/<base>` if it exists, else the local branch: the changes since `merge-base(<base>, HEAD)`, up to `HEAD`, or with `uncommitted=1` up to the working tree, untracked files included. With `pr=1` (which wins over `base`): the attached PR's pinned base to its pinned head, read from the object database, with the hunk options pinned rather than taken from the user's git config ([`10-pr-review.md`](10-pr-review.md), [`11-pr-guide.md`](11-pr-guide.md)).
 ```ts
 interface GitDiffResponse {
   files: GitFileDiff[];

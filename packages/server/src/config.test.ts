@@ -12,9 +12,11 @@ describe("loadConfig", () => {
       dataDir: "/home/u/.config/pi-code",
       agentDir: "/home/u/.pi/agent",
       home: "/home/u",
+      guideModel: "anthropic/claude-opus-5-5",
     });
     expect(c.staticDir).toMatch(/packages\/web\/dist$/);
     expect(c.extensionPath).toMatch(/packages\/pi-extension\/src\/index\.ts$/);
+    expect(c.guideExtensionPath).toMatch(/packages\/pi-extension\/src\/guide\.ts$/);
   });
 
   it("reads overrides", () => {
@@ -26,6 +28,7 @@ describe("loadConfig", () => {
       PI_CODE_PI_BIN: "/opt/pi",
       PI_CODE_DATA_DIR: "~/data",
       PI_AGENT_DIR: "/abs/agent",
+      PI_CODE_GUIDE_MODEL: "openai/gpt-6",
     });
     expect(c).toMatchObject({
       port: 5000,
@@ -33,6 +36,7 @@ describe("loadConfig", () => {
       piBin: "/opt/pi",
       dataDir: "/home/u/data",
       agentDir: "/abs/agent",
+      guideModel: "openai/gpt-6",
     });
   });
 

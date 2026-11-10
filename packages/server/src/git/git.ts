@@ -263,13 +263,34 @@ function toDiff(file: ChangedFile, patch: string | undefined, tooLarge: boolean)
 const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-textconv", "-M", "--relative"] as const;
 
 /**
+ * The PR diff's flags: its hunks are what the PR guide's hunk ids number (design/11-pr-guide.md),
+ * so the options that shape them are pinned rather than left to the user's git config
+ * (`diff.context`, `diff.algorithm`, `diff.interHunkContext`, `diff.indentHeuristic`, and
+ * `diff.renameLimit`, past which an edited rename becomes a deletion and an addition; 1000 is
+ * git's default).
+ */
+const PR_DIFF_FLAGS = [
+  ...DIFF_FLAGS,
+  "-U3",
+  "--diff-algorithm=myers",
+  "--inter-hunk-context=0",
+  "--indent-heuristic",
+  "-l1000",
+] as const;
+
+/**
  * Tracked changes under `cwd` from `from` to `to`, or to the working tree without `to`. Paths
  * are relative to `cwd`; changes outside its subtree are left out.
  */
-async function trackedDiffs(cwd: string, from: string, to?: string): Promise<GitFileDiff[]> {
+async function trackedDiffs(
+  cwd: string,
+  from: string,
+  to?: string,
+  flags: readonly string[] = DIFF_FLAGS,
+): Promise<GitFileDiff[]> {
   const revs = to === undefined ? [from] : [from, to];
   const listed = parseNameStatus(
-    (await runGit(cwd, ["diff", ...DIFF_FLAGS, "--name-status", "-z", ...revs])).stdout,
+    (await runGit(cwd, ["diff", ...flags, "--name-status", "-z", ...revs])).stdout,
   );
   if (listed.length === 0) return [];
 
@@ -284,7 +305,7 @@ async function trackedDiffs(cwd: string, from: string, to?: string): Promise<Git
     ).flat(),
   );
   const exclude = [...large].map((path) => `:(exclude,literal)${path}`);
-  const patchArgs = ["diff", ...DIFF_FLAGS, "--patch", ...revs, "--", ".", ...exclude];
+  const patchArgs = ["diff", ...flags, "--patch", ...revs, "--", ".", ...exclude];
   const chunks = splitPatch((await runGit(cwd, patchArgs)).stdout);
   const withPatch = listed.filter((f) => !large.has(f.path));
 
@@ -302,7 +323,7 @@ async function trackedDiffs(cwd: string, from: string, to?: string): Promise<Git
     const { stdout } = await runGit(cwd, [
       "--literal-pathspecs",
       "diff",
-      ...DIFF_FLAGS,
+      ...flags,
       "--patch",
       ...revs,
       "--",
@@ -403,7 +424,7 @@ async function rangeDiff(cwd: string, from: string, to: string): Promise<GitDiff
     }
   }
   const [files, oldRev, newRev] = await Promise.all([
-    trackedDiffs(cwd, from, to),
+    trackedDiffs(cwd, from, to, PR_DIFF_FLAGS),
     shortRev(cwd, from),
     shortRev(cwd, to),
   ]);
@@ -418,7 +439,10 @@ export interface GitDiffOptions {
   base?: string;
   /** Branch mode: diff the merge-base against the working tree, untracked files included. */
   uncommitted?: boolean;
-  /** PR mode: from one commit to another, both read from the object database; `base` is ignored. */
+  /**
+   * PR mode: from one commit to another, both read from the object database, with the hunk
+   * options pinned (`PR_DIFF_FLAGS`); `base` is ignored.
+   */
   range?: { from: string; to: string };
 }
 

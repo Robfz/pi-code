@@ -203,6 +203,41 @@ export interface PrResponse {
 }
 
 // ---------------------------------------------------------------------------
+// PR guide (`docs/design/11-pr-guide.md`)
+
+/** One section of a PR guide: a group of hunks and why they exist. */
+export interface PrGuideSection {
+  title: string;
+  /** Markdown. */
+  explanation: string;
+  /** Hunk ids (`guideHunkId`) in display order; a hunk may appear in several sections. */
+  hunks: string[];
+}
+
+/** The ordered, explained grouping of one PR diff's hunks (`base..head`). */
+export interface PrGuide {
+  /** Format version; a guide of another version is outdated. */
+  version: number;
+  /** `owner/name`. */
+  repo: string;
+  number: number;
+  baseSha: string;
+  headSha: string;
+  sections: PrGuideSection[];
+  /**
+   * "Other changes": the ids no section claims, in diff order, including the file-level ids
+   * (`guideFileId`) of files without hunks.
+   */
+  other: string[];
+}
+
+/** A PR diff's guide as the server reports it. */
+export type PrGuideStatus =
+  | { state: "generating" }
+  | { state: "ready"; guide: PrGuide }
+  | { state: "failed"; error: string };
+
+// ---------------------------------------------------------------------------
 // Agents
 
 export interface AgentsResponse {

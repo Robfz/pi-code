@@ -24,6 +24,7 @@ src/
 | `PI_CODE_HOSTNAME` | required | Tailnet hostname, e.g. `mac.tail1234.ts.net`; used for the Host allowlist and origin checks |
 | `PI_CODE_PI_BIN` | `pi` on `PATH` | pi executable |
 | `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys, push subscriptions |
+| `PI_CODE_GUIDE_MODEL` | `anthropic/claude-opus-5-5` | The PR guide job's model, as pi's `--model` takes it ([`11-pr-guide.md`](11-pr-guide.md)) |
 | `PI_AGENT_DIR` | `~/.pi/agent` | Sessions, trust.json; read-only except session deletion and worktree removal, which delete session files |
 
 Tailscale setup (documented in the README, not automated):

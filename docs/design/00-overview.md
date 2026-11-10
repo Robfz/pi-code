@@ -10,12 +10,13 @@ Decisions and their rationale live in [`../../maps/2026-09-26-origin.md`](../../
 | `01-server.md` | The Node server: pi process management, event pipeline, catalog, git, push, curator proxy |
 | `02-api-contract.md` | HTTP + SSE contract between web client and server (including the live stream), shared protocol package |
 | `03-web-client.md` | The React PWA |
-| `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) |
+| `04-pi-extension.md` | The pi-code pi extension (project trust, tree navigation) and the PR guide job's `submit_guide` extension |
 | `05-desktop.md` | Desktop and concurrent conversations: multiplexed stream, sidebar, idle policy, wide layout |
 | `06-worktrees.md` | Git worktrees: repo grouping on every listing, creating and removing worktrees |
 | [`07-code-review.md`](07-code-review.md) | Code review: the project's changes and files beside the conversation, `@path:N` line references in the composer and transcript |
 | [`08-delete-sessions.md`](08-delete-sessions.md) | Deleting sessions: `DELETE /api/sessions`, Stop and Delete on every listing and the header menu |
 | [`09-ui-overhaul.md`](09-ui-overhaul.md) | UI overhaul (phase 1): tokens, typography, motion, the status vocabulary, transcript turns, tool rows, thinking, exploration groups, density, the composer's model picker |
+| [`11-pr-guide.md`](11-pr-guide.md) | PR guide: the pinned PR diff, hunk ids, the guide format and store, the guide job (temporary worktree, `pi --mode json`, `submit_guide`) and the service running it |
 
 ## Goals
 
@@ -33,7 +34,7 @@ MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call appr
 
 - Single user; reachable only over the owner's tailnet.
 - pi runs on the host with the owner's full permissions (accepted risk).
-- Integration is `pi --mode rpc` only — pi's documented, stable protocol. The server never imports pi internals; it imports pi's exported **types** only.
+- Integration is through pi's documented, stable protocols only: `pi --mode rpc` for conversations, and `pi --mode json` for the one-off PR guide jobs ([`11-pr-guide.md`](11-pr-guide.md)). The server never imports pi internals; it imports pi's exported **types** only.
 - Everything runs on one Mac. Server started by hand.
 
 ## Topology
@@ -57,7 +58,7 @@ MCP Apps and MCP URL elicitation on mobile, an embedded terminal, tool-call appr
 | Server | `packages/server` | Hono on Node. Spawns and supervises pi RPC processes, owns live state and the event logs, serves the API, the live stream (StreamHub: agent info, session catalog from the session watcher, folder branches), SPA, push, curator proxy; serves the agent's git diff, branches and project files for review; creates and removes git worktrees; deletes sessions; closes agents idle for 7 days (idle sweep). |
 | Protocol | `packages/protocol` | Shared TypeScript: API/SSE types and the **live-state reducer** used by both server (snapshots) and client (live UI). |
 | Web client | `packages/web` | React + Vite SPA, installable PWA with service worker (push, badge, share target). One live stream per tab (`LiveRegistry`); docked sidebar at ≥1024px; review pane beside the conversation (`07-code-review.md`). |
-| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command, the line-reference guideline in every run's system prompt. |
+| pi extension | `packages/pi-extension` | Loaded with `--extension` into server-spawned pi processes only: records the web's project-trust decision, in-place tree navigation command, the line-reference guideline in every run's system prompt. A second entry (`guide.ts`) gives PR guide jobs, and only them, the `submit_guide` tool. |
 
 ## Core concepts
 

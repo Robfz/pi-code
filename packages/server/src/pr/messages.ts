@@ -4,7 +4,7 @@
  * them, followed by the request.
  */
 import { randomBytes } from "node:crypto";
-import { formatPrBlock } from "@pi-code/protocol";
+import { formatPrBlock, oneLine } from "@pi-code/protocol";
 import type { CommitList, FileStat } from "../git/pr.ts";
 import type { StoredPr } from "../store/pr-store.ts";
 import type { InlineComment, PrComment, PrView } from "./github.ts";
@@ -22,21 +22,10 @@ const MAX_COMMENTS = 100;
 const when = (iso: string) => iso.slice(0, 16).replace("T", " ");
 
 /**
- * Third-party text kept on its line: control characters and line separators (a file name may hold
- * a newline) written as `\uXXXX`.
- */
-function oneLine(text: string): string {
-  return text.replace(
-    /[\p{Cc}\p{Zl}\p{Zp}]/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
-}
-
-/**
  * Third-party text indented by `prefix` on every line, whatever breaks it (a lone `\r` or a
  * Unicode line separator included), and cut at `MAX_TEXT` characters.
  */
-function indent(text: string, prefix: string): string {
+export function indent(text: string, prefix: string): string {
   const trimmed = text.trim();
   const clipped =
     trimmed.length > MAX_TEXT
