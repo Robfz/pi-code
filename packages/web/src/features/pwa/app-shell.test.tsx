@@ -1,8 +1,8 @@
 import type { AgentInfo } from "@pi-code/protocol";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
 import { createQueryClient } from "@/lib/query-client";
 import { DESKTOP_QUERY } from "@/lib/use-media-query";
@@ -11,6 +11,7 @@ import { stubMatchMedia } from "@/test/dom-stubs";
 import { sendBaseline } from "@/test/fake-event-source";
 import { makeAgent, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
+import { stubUserAgent, USER_AGENTS } from "@/test/user-agents";
 
 const alpha = makeAgent({ id: "a1", cwd: "/home/me/alpha", sessionName: "Alpha work" });
 const beta = makeAgent({ id: "a2", cwd: "/home/me/beta", sessionName: "Beta work" });
@@ -37,7 +38,19 @@ const toggle = () => screen.getByRole("button", { name: "Toggle sidebar" });
 const active = (container: HTMLElement) =>
   within(container).findByRole("group", { name: "Active" });
 
-afterEach(() => vi.unstubAllGlobals());
+/** A keydown on the focused element; whether it went through (wasn't `preventDefault`ed). */
+const press = (init: KeyboardEventInit) =>
+  fireEvent.keyDown(document.activeElement ?? document.body, init);
+const leaderB = () => {
+  press({ key: "j", code: "KeyJ", metaKey: true });
+  return press({ key: "b", code: "KeyB" });
+};
+const cmdB = () => press({ key: "b", code: "KeyB", metaKey: true });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("desktop shell (≥1024px)", () => {
   it("docks the sidebar on load and shows the pick-a-conversation screen at /", async () => {
@@ -137,6 +150,53 @@ describe("desktop shell (≥1024px)", () => {
     expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
   });
 
+  describe("sidebar shortcut", () => {
+    beforeEach(() => stubUserAgent(USER_AGENTS.macChrome));
+
+    it("hides and shows the sidebar with ⌘J B and ⌘B", async () => {
+      renderApp("/settings", { desktop: true });
+      await screen.findByRole("heading", { name: "Settings" });
+      expect(leaderB()).toBe(false);
+      expect(sidebar()).toBeNull();
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      expect(leaderB()).toBe(false);
+      expect(sidebar()).toBeInTheDocument();
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
+      expect(cmdB()).toBe(false);
+      expect(sidebar()).toBeNull();
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      expect(cmdB()).toBe(false);
+      expect(sidebar()).toBeInTheDocument();
+      expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("leaves focus outside the sidebar where it is", async () => {
+      renderApp("/", { desktop: true });
+      const main = (await screen.findByRole("heading", { name: /Pick a conversation/ }))
+        .parentElement as HTMLElement;
+      const newConversation = within(main).getByRole("button", { name: "New conversation" });
+      newConversation.focus();
+      cmdB();
+      expect(sidebar()).toBeNull();
+      expect(newConversation).toHaveFocus();
+      cmdB();
+      expect(sidebar()).toBeInTheDocument();
+      expect(newConversation).toHaveFocus();
+    });
+
+    it("moves focus inside the sidebar to the toggle", async () => {
+      renderApp("/settings", { desktop: true });
+      const nav = await screen.findByRole("navigation", { name: "Conversations" });
+      within(nav).getByRole("link", { name: "Settings" }).focus();
+      cmdB();
+      expect(sidebar()).toBeNull();
+      expect(toggle()).toHaveFocus();
+      cmdB();
+      expect(sidebar()).toBeInTheDocument();
+      expect(toggle()).toHaveFocus();
+    });
+  });
+
   it("has no back-to-Home chevron on settings and sessions", async () => {
     renderApp("/settings", { desktop: true });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
@@ -205,6 +265,15 @@ describe("phone shell (<1024px)", () => {
     expect(sidebar()).toBeNull();
     expect(screen.queryByRole("button", { name: /sidebar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Keyboard shortcuts" })).toBeNull();
+  });
+
+  it("has no sidebar shortcut", async () => {
+    stubUserAgent(USER_AGENTS.macChrome);
+    renderApp("/settings", { desktop: false });
+    await screen.findByRole("heading", { name: "Settings" });
+    expect(cmdB()).toBe(true);
+    expect(leaderB()).toBe(false);
+    expect(screen.getByRole("status")).toHaveTextContent("⌘J B: not a command");
   });
 
   it("has back-to-Home chevrons on settings and sessions", async () => {

@@ -165,14 +165,26 @@ describe("keymapFor", () => {
       command: "conversation.goTo",
       position: 3,
     });
-    expect(keymapFor("app", true).direct.size).toBe(0);
-    expect(keymapFor("tab", false).direct.size).toBe(0);
+    expect([...keymapFor("app", true).direct.keys()]).toEqual(["b"]);
+    expect([...keymapFor("tab", false).direct.keys()]).toEqual(["b"]);
     for (const keymap of [keymapFor("app", false), keymapFor("tab", true)]) {
       expect(keymap.leader.get("c")?.command).toBe("conversation.new");
       expect(keymap.leader.get("p")?.command).toBe("conversation.previous");
       expect(keymap.leader.get("n")?.command).toBe("conversation.next");
+      expect(keymap.leader.get("b")?.command).toBe("sidebar.toggle");
       expect(keymap.leader.get("h")?.command).toBe("help.toggle");
       expect(keymap.leader.get("9")).toEqual({ command: "conversation.goTo", position: 9 });
+    }
+  });
+
+  it("takes ⌘B directly in every context", () => {
+    for (const keymap of [
+      keymapFor("app", false),
+      keymapFor("app", true),
+      keymapFor("tab", false),
+      keymapFor("tab", true),
+    ]) {
+      expect(keymap.direct.get("b")).toEqual({ command: "sidebar.toggle" });
     }
   });
 
@@ -186,6 +198,18 @@ describe("keymapFor", () => {
     ]);
     expect(shortcutsFor("conversation.goTo", keymapFor("tab", false), "other")).toEqual([
       ["Ctrl+J", "1–9"],
+    ]);
+    expect(shortcutsFor("sidebar.toggle", keymapFor("tab", false), "apple")).toEqual([
+      ["⌘J", "B"],
+      ["⌘B"],
+    ]);
+    expect(shortcutsFor("sidebar.toggle", keymapFor("app", false), "apple")).toEqual([
+      ["⌘J", "B"],
+      ["⌘B"],
+    ]);
+    expect(shortcutsFor("sidebar.toggle", keymapFor("tab", false), "other")).toEqual([
+      ["Ctrl+J", "B"],
+      ["Ctrl+B"],
     ]);
   });
 });

@@ -18,6 +18,7 @@ function Commands() {
   useCommand("conversation.new", () => ran("new"));
   useCommand("conversation.next", () => ran("next"));
   useCommand("conversation.goTo", (position) => ran(`goTo ${position}`));
+  useCommand("sidebar.toggle", () => ran("sidebar"));
   return null;
 }
 
@@ -39,6 +40,7 @@ const press = (init: KeyboardEventInit & { keyCode?: number }) =>
 const leader = { key: "j", code: "KeyJ", metaKey: true };
 const C = { key: "c", code: "KeyC" };
 const H = { key: "h", code: "KeyH" };
+const cmdB = { key: "b", code: "KeyB", metaKey: true };
 const pill = () => screen.queryByRole("status");
 const help = () => screen.queryByRole("dialog", { name: "Keyboard shortcuts" });
 
@@ -305,6 +307,34 @@ describe("direct digits", () => {
   });
 });
 
+describe("direct ⌘B", () => {
+  it("toggles the sidebar in a tab, in the app context and under Safari rules", () => {
+    renderKeyboard();
+    expect(press(cmdB)).toBe(false);
+    stubMatchMedia((query) => query === APP_QUERY);
+    expect(press(cmdB)).toBe(false);
+    stubUserAgent(USER_AGENTS.macSafari);
+    expect(press(cmdB)).toBe(false);
+    expect(ran.mock.calls).toEqual([["sidebar"], ["sidebar"], ["sidebar"]]);
+    expect(composerKeys).not.toHaveBeenCalled();
+  });
+
+  it("uses Ctrl+B on Windows and Linux", () => {
+    stubUserAgent(USER_AGENTS.windowsEdge);
+    renderKeyboard();
+    expect(press(cmdB)).toBe(true);
+    expect(press({ ...cmdB, metaKey: false, ctrlKey: true })).toBe(false);
+    expect(ran.mock.calls).toEqual([["sidebar"]]);
+  });
+
+  it("needs the modifier alone", () => {
+    renderKeyboard();
+    expect(press({ ...cmdB, shiftKey: true })).toBe(true);
+    expect(press({ key: "b", code: "KeyB" })).toBe(true);
+    expect(ran).not.toHaveBeenCalled();
+  });
+});
+
 describe("while an overlay is open", () => {
   const overlays: Array<[string, ReactNode]> = [
     [
@@ -350,6 +380,7 @@ describe("while an overlay is open", () => {
     expect(ran).not.toHaveBeenCalled();
     expect(pill()).toHaveTextContent("⌘J C is off while a dialog is open");
     expect(press({ key: "2", code: "Digit2", metaKey: true })).toBe(true);
+    expect(press(cmdB)).toBe(true);
     expect(ran).not.toHaveBeenCalled();
 
     press(leader);
@@ -438,6 +469,11 @@ describe("help screen", () => {
     await openHelp();
     const dialog = help() as HTMLElement;
     expect(dialog).toHaveTextContent("Press ⌘J, then a key, with or without ⌘ held. Esc cancels.");
+    expect(
+      within(dialog)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Conversations", "View", "Help"]);
     const conversations = within(dialog).getByRole("table", { name: "Conversations" });
     expect(
       within(conversations)
@@ -450,15 +486,19 @@ describe("help screen", () => {
       "Go to conversation 1–9⌘J 1–9⌘1–9",
     ]);
     expect(
+      within(within(dialog).getByRole("table", { name: "View" })).getByRole("row"),
+    ).toHaveTextContent("Toggle sidebar⌘J B⌘B");
+    expect(
       within(within(dialog).getByRole("table", { name: "Help" })).getByRole("row"),
     ).toHaveTextContent("Keyboard shortcuts⌘J H");
     expect(dialog).not.toHaveTextContent("without ⌘:");
   });
 
-  it("leaves direct digits out of a tab", async () => {
+  it("leaves direct digits out of a tab, but not ⌘B", async () => {
     renderKeyboard();
     await openHelp();
     expect(keysOf("Go to conversation 1–9")).toBe("⌘J 1–9");
+    expect(keysOf("Toggle sidebar")).toBe("⌘J B⌘B");
   });
 
   it("labels Ctrl on Windows and Linux", async () => {
@@ -471,6 +511,7 @@ describe("help screen", () => {
     expect(help()).toHaveTextContent("Press Ctrl+J, then a key, with or without Ctrl held.");
     expect(keysOf("New conversation")).toBe("Ctrl+J C");
     expect(keysOf("Go to conversation 1–9")).toBe("Ctrl+J 1–9Ctrl+1–9");
+    expect(keysOf("Toggle sidebar")).toBe("Ctrl+J BCtrl+B");
   });
 
   it("has the digit note under Safari rules, even in the app context", async () => {
@@ -479,6 +520,7 @@ describe("help screen", () => {
     renderKeyboard();
     await openHelp();
     expect(keysOf("Go to conversation 1–9")).toBe("⌘J 1–9");
+    expect(keysOf("Toggle sidebar")).toBe("⌘J B⌘B");
     expect(help()).toHaveTextContent(
       "After ⌘J, press the digit without ⌘: this browser keeps ⌘1–9 for itself.",
     );

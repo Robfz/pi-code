@@ -85,6 +85,7 @@ function baseline(agents: AgentInfo[] = everyAgent) {
     ],
     branches: {},
     sidebar: { pinned: [], collapsed: [], mains: {} },
+    prs: {},
   });
 }
 
