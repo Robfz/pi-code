@@ -121,6 +121,22 @@ describe("desktop shell (≥1024px)", () => {
     expect(toggle()).toHaveFocus();
   });
 
+  it("has the keyboard shortcuts button beside the toggle, docked and in the rail", async () => {
+    renderApp("/settings", { desktop: true });
+    await screen.findByRole("heading", { name: "Settings" });
+    const shortcuts = () => screen.getByRole("button", { name: "Keyboard shortcuts" });
+    expect(shortcuts()).toHaveAttribute("title", "Keyboard shortcuts");
+    expect(shortcuts().parentElement).toBe(toggle().parentElement);
+    expect(toggle().nextElementSibling).toBe(shortcuts());
+    expect(shortcuts()).toHaveClass("ml-auto");
+
+    const user = userEvent.setup();
+    await user.click(toggle());
+    expect(toggle().nextElementSibling).toBe(shortcuts());
+    await user.click(shortcuts());
+    expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  });
+
   it("has no back-to-Home chevron on settings and sessions", async () => {
     renderApp("/settings", { desktop: true });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
@@ -183,11 +199,12 @@ describe("phone shell (<1024px)", () => {
     expect(screen.getByRole("heading", { name: "pi-code", hidden: true })).toBeInTheDocument();
   });
 
-  it("has no sidebar toggle on other routes", async () => {
+  it("has no sidebar toggle or keyboard shortcuts button on other routes", async () => {
     renderApp("/settings", { desktop: false });
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(sidebar()).toBeNull();
     expect(screen.queryByRole("button", { name: /sidebar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keyboard shortcuts" })).toBeNull();
   });
 
   it("has back-to-Home chevrons on settings and sessions", async () => {
@@ -223,6 +240,7 @@ describe("phone shell (<1024px)", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Conversations" }));
     const sheet = await screen.findByRole("dialog", { name: "Conversations" });
+    expect(within(sheet).queryByRole("button", { name: "Keyboard shortcuts" })).toBeNull();
     await user.click(within(sheet).getByRole("button", { name: "Close conversations" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });

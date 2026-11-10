@@ -47,7 +47,9 @@ A pending flag in the keyboard provider, with no timeout: the indicator and Esc 
 | Pending | Esc | Swallowed, so it doesn't also dismiss the composer's slash menu or an open dialog; idle |
 | Pending | a bound key, with or without ⌘ | Swallowed; idle; the command runs (but see [When shortcuts are off](#when-shortcuts-are-off)) |
 | Pending | an unbound key | Swallowed; idle; the notice reads "⌘J X: not a command" |
-| Pending | a bare modifier keydown (`Meta`, `Control`, `Shift`, `Alt`), or a repeat of ⌘J (`event.repeat`) | Ignored; still pending |
+| Pending | a bare modifier keydown (`Meta`, `Control`, `Shift`, `Alt`) | Ignored; still pending |
+| Pending | a repeat of ⌘J (`event.repeat`) | Swallowed, so a held Ctrl+J doesn't reach Chrome's Downloads; still pending |
+| Idle, after a second key | repeats of that key (`event.repeat`, same `code`) | Swallowed, so a held ⌘J P doesn't reach the browser's print |
 | Pending | window `blur` | Idle |
 | Pending | a keydown with `isComposing` or `keyCode === 229` | Not swallowed (the IME keeps it); idle |
 
@@ -73,7 +75,7 @@ While a modal, sheet, popover or menu is open, the leader still arms but the onl
 | File | Holds |
 |---|---|
 | `commands.ts` | The static command list `{ id, title, section }` (the Keymap table), read by the help screen and a later palette |
-| `keymap.ts` | Bindings per context (`app`, `tab`): leader keys to command ids for both; `app` adds the direct digits, left out under Safari rules. Context, platform and Safari detection; key and code matching |
+| `keymap.ts` | Bindings: leader keys to command ids everywhere, plus the direct digits in the app context outside Safari rules. Context, platform and Safari detection; key and code matching |
 | `keyboard-provider.tsx` | `KeyboardProvider`: the handler registry, the leader state, the window listeners, the pill and the help dialog. `useCommand(id, handler)` registers a handler for the component's lifetime; `conversation.goTo`'s handler takes the position (1–9) |
 | `shell-commands.tsx` | `ShellCommands`: registers `conversation.new`, `.previous`, `.next` and `.goTo`, and hosts the `ProjectPicker` that `conversation.new` opens |
 
