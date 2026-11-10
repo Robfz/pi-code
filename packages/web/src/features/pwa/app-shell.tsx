@@ -1,7 +1,11 @@
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { KeyboardProvider, ShortcutsButton } from "@/features/keyboard/keyboard-provider";
+import {
+  KeyboardProvider,
+  ShortcutsButton,
+  useCommand,
+} from "@/features/keyboard/keyboard-provider";
 import { ShellCommands } from "@/features/keyboard/shell-commands";
 import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { Sidebar } from "@/features/sidebar/sidebar";
@@ -15,13 +19,20 @@ import { useServiceWorkerMessages } from "./sw-messages";
 
 const SIDEBAR_ID = "app-sidebar";
 
+/** Registers `sidebar.toggle` under `KeyboardProvider`, which `AppShell` renders below its state. */
+function SidebarCommand({ onToggle }: { onToggle(): void }) {
+  useCommand("sidebar.toggle", onToggle);
+  return null;
+}
+
 /**
  * Root layout: offline banner, badge sync, service-worker messages and launch-queue routing around
  * every screen. On desktop (≥1024px) the sidebar is docked on the left, shown on load and toggled
  * from the shell for the rest of the tab's life; below, it opens as a sheet from the conversation
  * header. Hosts the worktree dialogs and sheet (`WorktreeActionsProvider`), the Stop-or-Delete
  * dialog (`StopOrDeleteProvider`) and, inside both, the keyboard shortcuts (`KeyboardProvider`,
- * `ShellCommands`); the shortcuts' help button sits beside the sidebar toggle.
+ * `ShellCommands`, and on desktop `sidebar.toggle`); the shortcuts' help button sits beside the
+ * sidebar toggle.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   useServiceWorkerMessages();
@@ -59,6 +70,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       <StopOrDeleteProvider>
         <KeyboardProvider>
           <ShellCommands />
+          {desktop && (
+            <SidebarCommand
+              onToggle={() => {
+                // Focus stays put unless it's in the sidebar, whose contents swap on every toggle.
+                if (document.getElementById(SIDEBAR_ID)?.contains(document.activeElement)) {
+                  focusToggle.current = true;
+                }
+                setSidebarOpen((open) => !open);
+              }}
+            />
+          )}
           <div className="flex min-h-dvh overflow-x-clip bg-background text-foreground">
             {desktop && (
               <aside

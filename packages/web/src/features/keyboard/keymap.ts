@@ -78,25 +78,27 @@ const goTo = DIGITS.map((digit): [string, Binding] => [
   digit,
   { command: "conversation.goTo", position: Number(digit) },
 ]);
+const toggleSidebar: [string, Binding] = ["b", { command: "sidebar.toggle" }];
 
 const LEADER = new Map<string, Binding>([
   ["c", { command: "conversation.new" }],
   ["p", { command: "conversation.previous" }],
   ["n", { command: "conversation.next" }],
   ...goTo,
+  toggleSidebar,
   ["h", { command: "help.toggle" }],
 ]);
 
-const LEADER_ONLY: Keymap = { leader: LEADER, direct: new Map() };
-const WITH_DIRECT_DIGITS: Keymap = { leader: LEADER, direct: new Map(goTo) };
+const WITHOUT_DIRECT_DIGITS: Keymap = { leader: LEADER, direct: new Map([toggleSidebar]) };
+const WITH_DIRECT_DIGITS: Keymap = { leader: LEADER, direct: new Map([...goTo, toggleSidebar]) };
 
 /**
- * The leader everywhere, plus direct ⌘1–9 in the app context outside Safari rules: a tab's
- * browser keeps ⌘1–9 for switching tabs, and Safari never delivers them to the page.
+ * The leader and direct ⌘B everywhere, plus direct ⌘1–9 in the app context outside Safari rules:
+ * a tab's browser keeps ⌘1–9 for switching tabs, and Safari never delivers them to the page.
  */
 export function keymapFor(context: Context, safariRules: boolean): Keymap {
   const directDigits = context === "app" && !safariRules;
-  return directDigits ? WITH_DIRECT_DIGITS : LEADER_ONLY;
+  return directDigits ? WITH_DIRECT_DIGITS : WITHOUT_DIRECT_DIGITS;
 }
 
 /**

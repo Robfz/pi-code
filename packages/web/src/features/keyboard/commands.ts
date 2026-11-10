@@ -8,12 +8,13 @@ export type CommandId =
   | "conversation.previous"
   | "conversation.next"
   | "conversation.goTo"
+  | "sidebar.toggle"
   | "help.toggle";
 
 export interface Command {
   id: CommandId;
   title: string;
-  section: "Conversations" | "Help";
+  section: "Conversations" | "View" | "Help";
 }
 
 export const COMMANDS: readonly Command[] = [
@@ -21,5 +22,6 @@ export const COMMANDS: readonly Command[] = [
   { id: "conversation.previous", title: "Previous conversation", section: "Conversations" },
   { id: "conversation.next", title: "Next conversation", section: "Conversations" },
   { id: "conversation.goTo", title: "Go to conversation 1–9", section: "Conversations" },
+  { id: "sidebar.toggle", title: "Toggle sidebar", section: "View" },
   { id: "help.toggle", title: "Keyboard shortcuts", section: "Help" },
 ];
