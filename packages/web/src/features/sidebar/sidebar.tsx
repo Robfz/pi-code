@@ -298,10 +298,11 @@ function Group({
  * (`groupListing`), with search beside New conversation and Settings, per-folder `+`, Pin and New
  * worktree on repo groups, Remove worktree on linked ones and Stop or Delete on every row (`×`).
  * Group headers collapse, except the main checkout's; pins and collapsed groups are the server's
- * `sidebar` state. `action` sits alone in the titlebar row (the shell's toggle, the sheet's
- * close); `onSelect` runs whenever a row, `+`, Settings or a new conversation is picked. Docked
- * (`data-region="side"`), the titlebar row takes the chrome surface, so the title bar runs the
- * window's width: under Window Controls Overlay the traffic lights sit on it, on `theme-color`.
+ * `sidebar` state. `action` fills the titlebar row: the shell's toggle and its keyboard shortcuts
+ * button, or the sheet's close; `onSelect` runs whenever a row, `+`, Settings or a new
+ * conversation is picked. Docked (`data-region="side"`), the titlebar row takes the chrome
+ * surface, so the title bar runs the window's width: under Window Controls Overlay the traffic
+ * lights sit on it, on `theme-color`.
  */
 export function Sidebar({ action, onSelect }: { action?: ReactNode; onSelect?: () => void }) {
   const { loaded, agents, sessions, branches, sidebar, prs } = useLive(

@@ -10,6 +10,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Kbd } from "@/components/ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { errorMessage, rpc } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
@@ -63,7 +64,7 @@ function ModelMenu({ onChosen }: { onChosen(): void }) {
             placeholder="Search models"
             className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-faint-foreground"
           />
-          <kbd className="rounded border px-1 py-0.5 text-[11.5px] leading-none">esc</kbd>
+          <Kbd>esc</Kbd>
         </div>
         <CommandList aria-label="Models" className="max-h-[340px] px-[5px] pt-1 pb-1.5">
           {models.isPending && (
