@@ -7,14 +7,7 @@
  * model into rows with the connector guides of a git-graph-style gutter.
  */
 
-import {
-  prBlockLabel,
-  type SessionEntry,
-  skillCommand,
-  splitFileBlocks,
-  splitPrBlocks,
-  splitSkillBlock,
-} from "@pi-code/protocol";
+import { prBlockLabel, type SessionEntry, skillCommand, splitUserMessage } from "@pi-code/protocol";
 import { baseName, contentText } from "@/lib/content";
 import { formatTokens } from "@/lib/time";
 
@@ -55,14 +48,13 @@ export function previewText(text: string): string {
 }
 
 /**
- * A user message's PR, else its skill command, else its typed text, else its attached file
- * names, else "(image)".
+ * A user message's PR (`(PR #12 Title)`) or PR guide (`(Guide #12 Title)`), else its skill
+ * command, else its typed text, else its attached file names, else "(image)".
  */
 function userText(text: string): string {
-  const { skill, body: args } = splitSkillBlock(text);
-  const { files, body: rest } = splitFileBlocks(args);
-  const { prs, body } = splitPrBlocks(rest);
+  const { skill, files, prs, guides, body } = splitUserMessage(text);
   if (prs[0] !== undefined) return `(PR ${prBlockLabel(prs[0])})`;
+  if (guides[0] !== undefined) return `(Guide #${guides[0].number} ${guides[0].title})`;
   if (skill) return skillCommand(skill.name, body);
   if (body.trim() !== "") return body;
   if (files.length > 0) return `(file: ${files.map((f) => baseName(f.name)).join(", ")})`;

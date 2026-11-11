@@ -1,4 +1,4 @@
-import { formatFileBlock, formatPrBlock } from "@pi-code/protocol";
+import { formatFileBlock, formatPrBlock, formatPrGuideBlock } from "@pi-code/protocol";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -92,6 +92,28 @@ describe("UserMessageView", () => {
     });
     await renderWithStore(<UserMessageView message={{ content: block }} />, hydratedStore());
     expect(screen.getByTestId("pr-card")).toHaveTextContent("updated · open");
+  });
+
+  it("renders a leading PR guide block as a card that expands to the guide", async () => {
+    const block = formatPrGuideBlock({
+      number: 12,
+      title: "Speed up the parser",
+      url: "https://github.com/o/r/pull/12",
+      text: "Review guide for pull request o/r#12: Speed up the parser\n1. Core change",
+    });
+    await renderWithStore(
+      <UserMessageView message={{ content: `${block}Use it as a map` }} />,
+      hydratedStore(),
+    );
+    const card = screen.getByTestId("pr-guide-card");
+    const trigger = within(card).getByRole("button");
+    expect(trigger).toHaveTextContent("Review guide ·#12Speed up the parser");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/Core change/)).toBeNull();
+    expect(screen.queryByText(/<pr-guide/)).toBeNull();
+    expect(screen.getByText("Use it as a map")).toBeInTheDocument();
+    await userEvent.setup().click(trigger);
+    expect(within(card).getByText(/1\. Core change/)).toBeInTheDocument();
   });
 
   it("renders an expanded skill as a collapsed card, its args as the text", async () => {

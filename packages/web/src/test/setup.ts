@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { useReviewedStore } from "@/features/review/guide-reviewed";
 import { useLineSelection } from "@/features/review/line-selection";
 import { useReviewStore } from "@/features/review/review-state";
 import { useDrafts } from "@/store/drafts";
@@ -44,4 +45,6 @@ afterEach(() => {
   useLineSelection.setState({ pending: null });
   useReviewStore.setState({ reviews: {} });
   localStorage.removeItem("pi-code:review");
+  useReviewedStore.setState({ guides: {} });
+  localStorage.removeItem("pi-code:guide-reviewed");
 });

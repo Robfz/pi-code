@@ -10,8 +10,8 @@ import { DESKTOP_QUERY } from "@/lib/use-media-query";
 import { createAppRouter } from "@/router";
 import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
-import { sendBaseline } from "@/test/fake-event-source";
-import { makeAgent, makeSnapshot } from "@/test/fixtures";
+import { sendBaseline, sendFrame } from "@/test/fake-event-source";
+import { makeAgent, makePr, makeSnapshot } from "@/test/fixtures";
 import { stubFetch } from "@/test/render";
 import { fixtureEditPatch } from "@/tools/testing";
 import { useReviewStore } from "./review-state";
@@ -22,15 +22,33 @@ afterEach(() => vi.unstubAllGlobals());
 const gitPatch = () =>
   `diff --git a/notes.txt b/notes.txt\nindex 1..2 100644\n${fixtureEditPatch()}`;
 
-/** The app at `path` with agent a1 open; one changed file, an empty file search. */
+const SESSION_FILE = "/sessions/a1.jsonl";
+
+/** A reload of the review state: the in-memory state is gone and the persisted one read back. */
+async function reloadReviewState() {
+  const saved = localStorage.getItem("pi-code:review") ?? "";
+  useReviewStore.setState({ reviews: {} });
+  localStorage.setItem("pi-code:review", saved);
+  await act(() => useReviewStore.persist.rehydrate());
+}
+
+/**
+ * The app at `path` with agent a1 open; one changed file, an empty file search; `attached`, its
+ * conversation is attached to a PR whose guide is being written.
+ */
 async function renderApp(
   path: string,
-  { desktop, snapshot }: { desktop: boolean; snapshot?: Partial<Snapshot> },
+  {
+    desktop,
+    snapshot,
+    attached = false,
+  }: { desktop: boolean; snapshot?: Partial<Snapshot>; attached?: boolean },
 ) {
   stubMatchMedia((query) => desktop && query === DESKTOP_QUERY);
+  const agent = makeAgent({ id: "a1", ...(attached && { sessionFile: SESSION_FILE }) });
   const { calls } = stubFetch((call) => {
-    if (call.url === "/api/agents/a1/snapshot")
-      return [200, makeSnapshot({ agent: makeAgent({ id: "a1" }), ...snapshot })];
+    if (call.url === "/api/agents/a1/snapshot") return [200, makeSnapshot({ agent, ...snapshot })];
+    if (call.url === "/api/agents/a1/pr/guide") return [200, { key: "k", state: "generating" }];
     if (call.url === "/api/agents/a1/rpc")
       return [200, { data: { text: "Build the thing", cancelled: false } }];
     if (call.url === "/api/agents/a1/git/diff")
@@ -54,7 +72,16 @@ async function renderApp(
   });
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
   render(<App router={router} queryClient={createQueryClient()} />);
-  sendBaseline([makeAgent({ id: "a1" })]);
+  if (attached) {
+    sendFrame({
+      type: "baseline",
+      agents: [agent],
+      sessions: [],
+      branches: {},
+      sidebar: { pinned: [], collapsed: [], mains: {} },
+      prs: { [SESSION_FILE]: makePr() },
+    });
+  } else sendBaseline([agent]);
   return { router, calls };
 }
 
@@ -148,6 +175,37 @@ describe("review pane on desktop", () => {
     expect(screen.queryByRole("menuitem", { name: /Tree/ })).toBeNull();
   });
 
+  it("an attached conversation's pane offers Guide first and opens on it over a persisted tab", async () => {
+    useReviewStore.getState().openPane("a1", "files");
+    await reloadReviewState();
+
+    await renderApp("/agents/a1", { desktop: true, attached: true });
+    const shown = await screen.findByRole("complementary", { name: "Review" });
+    await waitFor(() => expect(selectedTab(shown)).toBe("Guide"));
+    expect(
+      within(shown)
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Guide", "Changes", "Files", "Tree"]);
+    expect(await within(shown).findByText("Writing the review guide…")).toBeInTheDocument();
+    expect(within(shown).queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(
+      within(rail())
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Guide panel", "Changes panel", "Files panel", "Tree panel"]);
+    expect(pressed()).toEqual(["Guide panel"]);
+
+    // The rail switches from the default Guide, then closes the pane from the tab showing.
+    const user = userEvent.setup();
+    await user.click(railButton("Changes panel"));
+    expect(selectedTab(shown)).toBe("Changes");
+    await user.click(railButton("Guide panel"));
+    expect(selectedTab(shown)).toBe("Guide");
+    await user.click(railButton("Guide panel"));
+    expect(pane()).toBeNull();
+  });
+
   it("marks Changes while the working tree is dirty", async () => {
     await renderApp("/agents/a1", {
       desktop: true,
@@ -180,6 +238,20 @@ describe("review pane on desktop", () => {
     expect(router.state.location.pathname).toBe("/agents/a1");
   });
 
+  it("/diff on an attached conversation's pane showing its default Guide switches to Changes", async () => {
+    useReviewStore.getState().togglePane("a1");
+    await renderApp("/agents/a1", { desktop: true, attached: true });
+    const shown = await screen.findByRole("complementary", { name: "Review" });
+    await waitFor(() => expect(selectedTab(shown)).toBe("Guide"));
+    await waitFor(() => expect(box()).toBeEnabled());
+    const user = userEvent.setup();
+    await user.type(box(), "/diff");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(selectedTab(shown)).toBe("Changes"));
+    expect(pane()).toBe(shown);
+  });
+
   it("the open pane and its tab survive a reload", async () => {
     await renderApp("/agents/a1", { desktop: true });
     await waitFor(() => expect(box()).toBeEnabled());
@@ -187,11 +259,7 @@ describe("review pane on desktop", () => {
     await user.click(railButton("Changes panel"));
     await user.click(await screen.findByRole("tab", { name: "Files" }));
     cleanup();
-
-    const saved = localStorage.getItem("pi-code:review") ?? "";
-    useReviewStore.setState({ reviews: {} });
-    localStorage.setItem("pi-code:review", saved);
-    await act(() => useReviewStore.persist.rehydrate());
+    await reloadReviewState();
 
     await renderApp("/agents/a1", { desktop: true });
     const shown = await screen.findByRole("complementary", { name: "Review" });
@@ -272,6 +340,21 @@ describe("review page on phones", () => {
       expect(calls.some((call) => call.url === "/api/agents/a1/files")).toBe(true),
     );
     expect(pane()).toBeNull();
+  });
+
+  it("an attached conversation's page offers Guide, Changes and Files, on Guide", async () => {
+    useReviewStore.getState().openPane("a1", "files");
+    await reloadReviewState();
+    await renderApp("/agents/a1/diff", { desktop: false, attached: true });
+    await waitFor(() =>
+      expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+        "Guide",
+        "Changes",
+        "Files",
+      ]),
+    );
+    expect(screen.getByRole("tab", { name: "Guide" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("Writing the review guide…")).toBeInTheDocument();
   });
 
   it("the page offers Changes and Files, showing Changes for the pane's Tree", async () => {

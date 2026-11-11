@@ -8,17 +8,38 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const REVIEW_TABS = ["changes", "files", "tree"] as const;
+export const REVIEW_TABS = ["guide", "changes", "files", "tree"] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number];
 
-/** The phone page's tabs: Tree is the pane's only. */
-export const PAGE_TABS: readonly ReviewTab[] = ["changes", "files"];
-
 export const TAB_LABEL: Record<ReviewTab, string> = {
+  guide: "Guide",
   changes: "Changes",
   files: "Files",
   tree: "Tree",
 };
+
+/** The desktop pane's tabs: Guide only for a conversation attached to a PR. */
+export function paneTabs(attached: boolean): readonly ReviewTab[] {
+  return attached ? REVIEW_TABS : REVIEW_TABS.filter((tab) => tab !== "guide");
+}
+
+/** The phone page's tabs: the pane's but Tree, which has a page of its own. */
+export function pageTabs(attached: boolean): readonly ReviewTab[] {
+  return paneTabs(attached).filter((tab) => tab !== "tree");
+}
+
+/**
+ * The tab a host offering `tabs` shows: Guide for a conversation attached to a PR until a tab is
+ * picked (picks live in memory, so every reload gets the default), else the stored tab, or Changes
+ * when the host doesn't offer it.
+ */
+export function tabOf(
+  { tab, tabPicked }: Pick<ReviewState, "tab" | "tabPicked">,
+  tabs: readonly ReviewTab[],
+): ReviewTab {
+  if (!tabPicked && tabs.includes("guide")) return "guide";
+  return tabs.includes(tab) ? tab : "changes";
+}
 
 const isReviewTab = (value: unknown): value is ReviewTab =>
   REVIEW_TABS.includes(value as ReviewTab);
@@ -54,7 +75,10 @@ export interface FileTarget {
 export interface ReviewState {
   /** Desktop only. */
   paneOpen: boolean;
+  /** The tab last picked, else the persisted one: see `tabOf`. */
   tab: ReviewTab;
+  /** Whether `tab` was picked since the page loaded. */
+  tabPicked: boolean;
   diff: DiffMode;
   /** The open file, as committed in `rev` when set, else its working-tree copy. */
   files: { query: string; path?: string; rev?: string; target?: FileTarget };
@@ -65,6 +89,7 @@ export interface ReviewState {
 export const DEFAULT_REVIEW: ReviewState = {
   paneOpen: false,
   tab: "changes",
+  tabPicked: false,
   diff: { uncommitted: false },
   files: { query: "" },
   tree: { collapsed: [] },
@@ -75,8 +100,8 @@ interface ReviewStore {
   /** Opens the pane, on `tab` or the stored one. */
   openPane(agentId: string, tab?: ReviewTab): void;
   togglePane(agentId: string): void;
-  /** Opens the pane on `tab`, or closes it when it already shows `tab`. */
-  toggleTab(agentId: string, tab: ReviewTab): void;
+  /** Opens the pane on `tab`, or closes it when it already shows `tab` (offering `tabs`). */
+  toggleTab(agentId: string, tab: ReviewTab, tabs: readonly ReviewTab[]): void;
   setTab(agentId: string, tab: ReviewTab): void;
   setDiffMode(agentId: string, diff: Partial<DiffMode>): void;
   /** Shows `path` (as committed in `rev`, if given) in the Files tab, `target` lines highlighted. */
@@ -101,19 +126,21 @@ export const useReviewStore = create<ReviewStore>()(
       return {
         reviews: {},
         openPane: (agentId, tab) =>
-          update(agentId, (review) => ({ paneOpen: true, tab: tab ?? review.tab })),
+          update(agentId, () => ({ paneOpen: true, ...(tab && { tab, tabPicked: true }) })),
         togglePane: (agentId) => update(agentId, (review) => ({ paneOpen: !review.paneOpen })),
-        toggleTab: (agentId, tab) =>
+        toggleTab: (agentId, tab, tabs) =>
           update(agentId, (review) => ({
-            paneOpen: !(review.paneOpen && review.tab === tab),
+            paneOpen: !(review.paneOpen && tabOf(review, tabs) === tab),
             tab,
+            tabPicked: true,
           })),
-        setTab: (agentId, tab) => update(agentId, () => ({ tab })),
+        setTab: (agentId, tab) => update(agentId, () => ({ tab, tabPicked: true })),
         setDiffMode: (agentId, diff) =>
           update(agentId, (review) => ({ diff: { ...review.diff, ...diff } })),
         openFile: (agentId, path, target, rev) =>
           update(agentId, (review) => ({
             tab: "files",
+            tabPicked: true,
             files: {
               query: review.files.query,
               path,

@@ -5,10 +5,9 @@
  * references to the composer, versioned per "Version naming".
  */
 
-import type { CodeRef, GitDiffResponse, GitFileDiff, PrAttachment } from "@pi-code/protocol";
+import type { CodeRef, GitDiffResponse, GitFileDiff, PrGuideNoHunks } from "@pi-code/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronRightIcon,
   CircleCheckIcon,
   GitBranchIcon,
   GitCompareIcon,
@@ -17,7 +16,6 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import { type ReactNode, useId, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { countPatchLines, type LineSelection } from "@/components/diff";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -30,13 +28,21 @@ import {
   getGitBranches,
   getGitDiff,
   isApiRequestError,
-  refreshPr,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
-import { cn } from "@/lib/utils";
 import { BranchPicker } from "./branch-picker";
-import { splitPath } from "./files-view";
-import { isOutdated, useConversationPr } from "./pr";
+import {
+  changeReference,
+  EXPAND_MAX_FILES,
+  EXPAND_MAX_LINES,
+  FileCard,
+  FilePath,
+  LineCounts,
+  NoHunks,
+  StatusBadge,
+} from "./file-card";
+import { useConversationPr } from "./pr";
+import { PrHeader } from "./pr-header";
 import { LoadError, NotARepo, retryServerErrors } from "./query-states";
 import {
   type DiffMode,
@@ -47,102 +53,21 @@ import {
 } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
-const STATUS: Record<GitFileDiff["status"], { letter: string; label: string; className: string }> =
-  {
-    added: { letter: "A", label: "Added", className: "bg-diff-add/12 text-diff-add" },
-    untracked: { letter: "U", label: "Untracked", className: "bg-diff-add/12 text-diff-add" },
-    modified: {
-      letter: "M",
-      label: "Modified",
-      className: "bg-status-input/12 text-status-input",
-    },
-    deleted: { letter: "D", label: "Deleted", className: "bg-diff-del/12 text-diff-del" },
-    renamed: { letter: "R", label: "Renamed", className: "bg-muted text-muted-foreground" },
-  };
-
-/**
- * Every expanded file mounts a diff view, so past these totals (files, or added plus deleted
- * lines) the files start collapsed and open from the list or their header.
- */
-export const EXPAND_MAX_FILES = 30;
-export const EXPAND_MAX_LINES = 3000;
-
 interface FileEntry {
   key: string;
   file: GitFileDiff;
   counts?: { additions: number; deletions: number };
 }
 
-/**
- * The reference for lines of `file`: old-side lines name the old commit; new-side lines name the
- * new commit when it isn't on disk (`pinned`, a PR's head) or the working tree differs from it.
- */
-function changeReference(
-  file: GitFileDiff,
-  { oldRev, newRev }: Pick<GitDiffResponse, "oldRev" | "newRev">,
-  { side, start, end }: LineSelection,
-  pinned = false,
-): CodeRef {
-  const ref: CodeRef =
-    side === "old"
-      ? { path: file.oldPath ?? file.path, start, end }
-      : { path: file.path, start, end };
-  const rev = side === "old" ? oldRev : pinned || file.worktreeChanged ? newRev : undefined;
-  if (rev !== undefined) ref.rev = rev;
-  return ref;
-}
-
-function StatusBadge({ status }: { status: GitFileDiff["status"] }) {
-  const { letter, label, className } = STATUS[status] ?? STATUS.modified;
-  return (
-    <span
-      title={label}
-      className={cn(
-        "inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] leading-none font-semibold",
-        className,
-      )}
-    >
-      <span aria-hidden>{letter}</span>
-      <span className="sr-only">{label}</span>
-    </span>
-  );
-}
-
-/** The directory muted and the basename in front; the basename is the last to truncate. */
-function FilePath({ file }: { file: GitFileDiff }) {
-  const { dir, name } = splitPath(file.path);
-  const renamed = file.oldPath !== undefined && file.oldPath !== file.path;
-  return (
-    <span
-      title={renamed ? `${file.oldPath} → ${file.path}` : file.path}
-      className="flex min-w-0 flex-1 font-mono text-xs"
-    >
-      {renamed && (
-        <>
-          <span className="min-w-0 truncate text-muted-foreground">{file.oldPath}</span>
-          <span aria-hidden className="shrink-0 px-1 text-faint-foreground">
-            →
-          </span>
-        </>
-      )}
-      {dir && <span className="min-w-0 truncate text-muted-foreground">{dir}/</span>}
-      <span className="max-w-full shrink-0 truncate">{name}</span>
-    </span>
-  );
-}
-
 function Counts({ entry: { file, counts } }: { entry: FileEntry }) {
-  if (file.binary) return <span className="shrink-0 text-xs text-muted-foreground">binary</span>;
-  if (file.tooLarge) {
-    return <span className="shrink-0 text-xs text-muted-foreground">too large</span>;
-  }
+  const noHunks: PrGuideNoHunks | undefined = file.binary
+    ? "binary"
+    : file.tooLarge
+      ? "tooLarge"
+      : undefined;
+  if (noHunks) return <NoHunks reason={noHunks} />;
   if (!counts) return null;
-  return (
-    <span className="shrink-0 font-mono text-xs tabular-nums">
-      <span className="text-diff-add">+{counts.additions}</span>{" "}
-      <span className="text-diff-del">−{counts.deletions}</span>
-    </span>
-  );
+  return <LineCounts {...counts} />;
 }
 
 function FileBody({
@@ -171,7 +96,7 @@ function FileBody({
   );
 }
 
-/** One file's patch under a header that sticks to the top of the panel's scroll area. */
+/** One file's patch under its sticky header. */
 function FileSection({
   entry,
   open,
@@ -187,55 +112,17 @@ function FileSection({
   toReference(selection: LineSelection): CodeRef;
   onAdded?(): void;
 }) {
-  const section = useRef<HTMLElement | null>(null);
-  const header = useRef<HTMLDivElement>(null);
-  const toggle = () => {
-    // Collapsing a file whose header is stuck would leave the view somewhere past it.
-    const top = section.current?.getBoundingClientRect().top;
-    const headerTop = header.current?.getBoundingClientRect().top;
-    if (open && top !== undefined && headerTop !== undefined && headerTop > top) {
-      section.current?.scrollIntoView({ block: "start" });
-    }
-    onOpenChange(!open);
-  };
   return (
-    <section
-      ref={(element) => {
-        section.current = element;
-        sectionRef(element);
-      }}
-      data-testid="diff-file"
-      data-path={entry.file.path}
+    <FileCard
+      file={entry.file}
+      aside={<Counts entry={entry} />}
+      open={open}
+      onOpenChange={onOpenChange}
+      cardRef={sectionRef}
       className="border-b"
     >
-      <div
-        ref={header}
-        className={cn(
-          "sticky top-0 z-20 flex h-9 items-center gap-2 bg-background pr-3 pl-2 in-data-[region=side]:bg-surface-side",
-          open && "border-b",
-        )}
-      >
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={toggle}
-          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <ChevronRightIcon
-            className={cn(
-              "size-4 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
-            )}
-          />
-          <StatusBadge status={entry.file.status} />
-          <FilePath file={entry.file} />
-        </button>
-        <Counts entry={entry} />
-      </div>
-      {open && (
-        <FileBody file={entry.file} toReference={toReference} {...(onAdded && { onAdded })} />
-      )}
-    </section>
+      <FileBody file={entry.file} toReference={toReference} {...(onAdded && { onAdded })} />
+    </FileCard>
   );
 }
 
@@ -410,53 +297,6 @@ function ModeControl({
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
-  );
-}
-
-/**
- * PR mode's header line: `#N title`, the number linking to the PR, a state chip once merged or
- * closed, and "Outdated · Refresh" while the PR has pushes newer than the pinned head.
- */
-function PrHeader({ agentId, pr }: { agentId: string; pr: PrAttachment }) {
-  const refresh = useMutation({
-    mutationFn: () => refreshPr(agentId),
-    onError: (error) => toast.error(`Couldn't refresh the PR: ${errorMessage(error)}`),
-  });
-  return (
-    <div data-testid="pr-header" className="flex h-9 items-center gap-2 border-b px-3 text-xs">
-      <GitPullRequestIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-      <p className="min-w-0 flex-1 truncate">
-        <a
-          href={pr.url}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-link hover:underline"
-        >
-          #{pr.number}
-        </a>{" "}
-        <span title={pr.title}>{pr.title}</span>
-      </p>
-      {pr.state !== "open" && (
-        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
-          {pr.state === "merged" ? "Merged" : "Closed"}
-        </span>
-      )}
-      {isOutdated(pr) && (
-        <span className="flex shrink-0 items-center gap-1 text-status-input">
-          Outdated ·
-          <Button
-            size="xs"
-            variant="link"
-            disabled={refresh.isPending}
-            onClick={() => refresh.mutate()}
-            className="h-auto px-0"
-          >
-            {refresh.isPending && <LoaderIcon className="animate-spin" />}
-            Refresh
-          </Button>
-        </span>
-      )}
-    </div>
   );
 }
 

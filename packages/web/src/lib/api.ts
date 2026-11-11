@@ -23,6 +23,7 @@ import type {
   NavigateResponse,
   OpenAgentBody,
   PrAttachment,
+  PrGuideResponse,
   ProjectSummary,
   ProjectsResponse,
   PrResponse,
@@ -252,6 +253,16 @@ export async function attachPr(id: AgentId, pr?: string): Promise<PrAttachment> 
 /** Re-pins the attached PR to its latest commits and sends the agent what changed. */
 export async function refreshPr(id: AgentId): Promise<PrAttachment> {
   return (await request<PrResponse>("POST", agentPath(id, "/pr/refresh"), {})).pr;
+}
+
+/** The attached PR's guide: generating, failed, or ready with its units. */
+export function getPrGuide(id: AgentId): Promise<PrGuideResponse> {
+  return request<PrGuideResponse>("GET", agentPath(id, "/pr/guide"));
+}
+
+/** Regenerates the attached PR's guide; its end arrives as a `guide` frame. */
+export function retryPrGuide(id: AgentId): Promise<PrGuideResponse> {
+  return request<PrGuideResponse>("POST", agentPath(id, "/pr/guide/retry"), {});
 }
 
 /** Checks the attached PR for new pushes; the result arrives as a `prs` frame. */

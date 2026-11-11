@@ -1,8 +1,8 @@
 /**
- * The review panel (`docs/design/07-code-review.md`, "Review panel"): the tabs (Changes and Files,
- * plus Tree in the desktop pane), diff text size and Refresh buttons for the Changes and Files
- * tabs and the active tab's view. The desktop pane and the phone page host it, each adding its own controls to the
- * header.
+ * The review panel (`docs/design/07-code-review.md`, "Review panel"): the tabs (Guide for a
+ * conversation attached to a PR, Changes and Files, plus Tree in the desktop pane), diff text size
+ * buttons, Refresh for the Changes and Files tabs and the active tab's view. The desktop pane and
+ * the phone page host it, each adding its own controls to the header.
  */
 
 import { type QueryKey, useIsFetching, useQueryClient } from "@tanstack/react-query";
@@ -16,11 +16,17 @@ import { cn } from "@/lib/utils";
 import { ScreenHeader } from "@/routes/placeholder";
 import { ChangesView } from "./changes-view";
 import { FilesView } from "./files-view";
-import { PAGE_TABS, type ReviewTab, TAB_LABEL, useReview, useReviewStore } from "./review-state";
+import { GuideView } from "./guide-view";
+import { type ReviewTab, TAB_LABEL, tabOf, useReview, useReviewStore } from "./review-state";
 
-/** The queries the Refresh button refetches, per tab; the tree follows the live store. */
+/**
+ * The queries the Refresh button refetches, per tab; the tree follows the live store, the guide
+ * its `guide` frames.
+ */
 function tabQueries(agentId: string, tab: ReviewTab): QueryKey[] {
   switch (tab) {
+    case "guide":
+      return [];
     case "changes":
       return [queryKeys.gitDiffs(agentId), queryKeys.gitBranches(agentId)];
     case "files":
@@ -32,15 +38,15 @@ function tabQueries(agentId: string, tab: ReviewTab): QueryKey[] {
 
 export function ReviewPanel({
   agentId,
-  tabs = PAGE_TABS,
+  tabs,
   leading,
   trailing,
   onAdded,
   className,
 }: {
   agentId: string;
-  /** The tabs offered; a stored tab outside them shows Changes. */
-  tabs?: readonly ReviewTab[];
+  /** The tabs offered, in order (`paneTabs`, `pageTabs`); the one shown is `tabOf`'s. */
+  tabs: readonly ReviewTab[];
   /** Header controls before the tabs. */
   leading?: ReactNode;
   /** Header controls after Refresh. */
@@ -49,8 +55,7 @@ export function ReviewPanel({
   onAdded?(): void;
   className?: string;
 }) {
-  const stored = useReview(agentId).tab;
-  const tab = tabs.includes(stored) ? stored : "changes";
+  const tab = tabOf(useReview(agentId), tabs);
   const queryClient = useQueryClient();
   const queries = tabQueries(agentId, tab);
   const fetching =
@@ -97,6 +102,7 @@ export function ReviewPanel({
       {/* `relative` so absolutely positioned descendants (`sr-only` labels) are clipped here
           instead of overflowing the document. */}
       <div role="tabpanel" className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {tab === "guide" && <GuideView agentId={agentId} {...(onAdded && { onAdded })} />}
         {tab === "changes" && (
           <div className="pb-6">
             <ChangesView agentId={agentId} {...(onAdded && { onAdded })} />

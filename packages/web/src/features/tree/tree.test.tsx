@@ -1,5 +1,6 @@
 import {
   formatPrBlock,
+  formatPrGuideBlock,
   initialLiveState,
   type NavigateResponse,
   type SessionEntry,
@@ -231,6 +232,12 @@ describe("tree model", () => {
     });
     const model = buildTreeModel([user("u1", null, `${block}Give me an overview`)], "u1");
     expect(model.items.get("u1")?.text).toBe("(PR #12 Speed up)");
+  });
+
+  it("names a PR guide prompt by its PR", () => {
+    const block = formatPrGuideBlock({ number: 12, title: "Speed up", url: "u", text: "guide" });
+    const model = buildTreeModel([user("u1", null, `${block}Use it as a map`)], "u1");
+    expect(model.items.get("u1")?.text).toBe("(Guide #12 Speed up)");
   });
 
   it("maps a hidden leaf to its nearest shown ancestor", () => {

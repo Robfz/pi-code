@@ -1,12 +1,17 @@
 import {
   type PrBlock,
+  type PrGuideBlock,
   type SkillBlock,
-  splitFileBlocks,
-  splitPrBlocks,
-  splitSkillBlock,
+  splitUserMessage,
   type UserMessage,
 } from "@pi-code/protocol";
-import { BotIcon, FileTextIcon, GitPullRequestIcon, SparklesIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  BotIcon,
+  FileTextIcon,
+  GitPullRequestIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { useState } from "react";
 import { CollapsibleRow } from "@/components/collapsible-row";
 import { Markdown } from "@/components/markdown";
@@ -39,6 +44,29 @@ function PrCard({ pr }: { pr: PrBlock }) {
   );
 }
 
+/** A `<pr-guide>` block (a PR's guide the server sent once ready) as a card: `#N title`. */
+function PrGuideCard({ guide }: { guide: PrGuideBlock }) {
+  return (
+    <CollapsibleRow
+      data-testid="pr-guide-card"
+      icon={<BookOpenIcon />}
+      label={
+        <>
+          <span className="shrink-0">Review guide ·</span>
+          <span className="shrink-0 font-mono text-link">#{guide.number}</span>
+          <span title={guide.title} className="truncate">
+            {guide.title}
+          </span>
+        </>
+      }
+    >
+      <pre className="mt-0.5 mb-1 max-h-64 overflow-auto rounded-lg border bg-card px-3 py-2 font-mono text-xs whitespace-pre-wrap">
+        {guide.text}
+      </pre>
+    </CollapsibleRow>
+  );
+}
+
 /**
  * An expanded `/skill:name` command as a row that expands to the skill's text. Ultraspawn's skill
  * takes the look of ultraspawn tool rows.
@@ -66,9 +94,9 @@ function SkillCard({ skill }: { skill: SkillBlock }) {
 /**
  * A full-width box: image thumbnails, then a leading `<skill>` block (an expanded `/skill:name`)
  * as a skill card, then leading `<file>` blocks (attached text files) as collapsed rows that
- * expand to the file's content, then leading `<pr>` blocks (PR review's context) as PR cards, then
- * the text (content may be a string or a content array). Line references in the text are
- * clickable.
+ * expand to the file's content, then leading `<pr>` blocks (PR review's context) as PR cards and
+ * `<pr-guide>` blocks (a PR's guide) as guide cards, then the text (content may be a string or a
+ * content array). Line references in the text are clickable.
  */
 export function UserMessageView({
   message,
@@ -77,10 +105,7 @@ export function UserMessageView({
   message: Pick<UserMessage, "content">;
   pending?: boolean;
 }) {
-  // The composer keeps a skill command ahead of attached files, so pi's skill block comes first.
-  const { skill, body: args } = splitSkillBlock(contentText(message.content));
-  const { files, body: rest } = splitFileBlocks(args);
-  const { prs, body } = splitPrBlocks(rest);
+  const { skill, files, prs, guides, body } = splitUserMessage(contentText(message.content));
   const images = contentImages(message.content);
   const [zoomed, setZoomed] = useState<number | null>(null);
   return (
@@ -134,6 +159,10 @@ export function UserMessageView({
       {prs.map((pr, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: PR blocks have no id
         <PrCard key={index} pr={pr} />
+      ))}
+      {guides.map((guide, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: guide blocks have no id
+        <PrGuideCard key={index} guide={guide} />
       ))}
       {body !== "" && (
         <div className="whitespace-pre-wrap break-words">

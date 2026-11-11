@@ -6,7 +6,7 @@ Terms:
 
 - **Changes**: the git diff of the agent's project in one of two modes (below). It replaces the full-page diff of `03`.
 - **Files**: a fuzzy file search over the project and a file viewer.
-- **Review panel**: the Changes and Files tabs. On desktop it is a pane beside the conversation, which also holds the session tree (a Tree tab); on phones it is the `/agents/$agentId/diff` page.
+- **Review panel**: the Changes and Files tabs, after a Guide tab for a conversation attached to a PR ([`11-pr-guide.md`](11-pr-guide.md), "Web client"). On desktop it is a pane beside the conversation, which also holds the session tree (a Tree tab); on phones it is the `/agents/$agentId/diff` page.
 - **Reference**: `@path:N` or `@path:N-M` text, optionally naming a commit (`@<sha>:./path:N-M`).
 
 All paths in this feature are relative to the agent's cwd, which is what the model reads and writes. Every git command runs in the cwd, so a conversation in a subfolder of a repo sees only that subtree.
@@ -245,23 +245,24 @@ Transcript renderers (`tools/file-edits.tsx`) render `SelectableDiff` with the t
 
 ## Review panel
 
-`ReviewPanel` (`features/review/review-panel.tsx`) renders the tab bar, diff text size buttons and a Refresh button for the active tab (Changes and Files; the Tree follows the live store and has neither), and the active tab. It is used by the desktop pane, which offers Changes, Files and Tree, and the phone page, which offers Changes and Files (its `tabs` prop); a stored tab the host doesn't offer shows Changes. Below its header, the active tab fills the panel's own scroll area at full width: the Changes tab is flush with the edges, the Files tab has a small inset (`px-2 pt-3`).
+`ReviewPanel` (`features/review/review-panel.tsx`) renders the tab bar, diff text size buttons (not on Tree) and a Refresh button for the active tab (Changes and Files; the Tree follows the live store and the Guide its `guide` frames), and the active tab. It is used by the desktop pane, which offers Changes, Files and Tree (`paneTabs`), and the phone page, which offers Changes and Files (`pageTabs`, its `tabs` prop); both put Guide first for a conversation attached to a PR. The tab shown is `tabOf(review, tabs)`: Guide for an attached conversation until a tab is picked, else the stored tab, or Changes when the host doesn't offer it. Below its header, the active tab fills the panel's own scroll area at full width: the Changes tab is flush with the edges, the Files tab has a small inset (`px-2 pt-3`).
 
 ### Review state
 
-`features/review/review-state.ts`: a Zustand store keyed by agent id. Only `paneOpen` and `tab` are persisted, to `localStorage` (`pi-code:review`), and only for conversations with the pane open; the rest lasts for the tab's lifetime. A stored entry without a tab, or with one this build doesn't know, reads as Changes:
+`features/review/review-state.ts`: a Zustand store keyed by agent id. Only `paneOpen` and `tab` are persisted, to `localStorage` (`pi-code:review`), and only for conversations with the pane open; the rest lasts for the tab's lifetime. A stored entry without a tab, or with one this build doesn't know, reads as Changes. A persisted tab isn't picked (`tabPicked`), so an attached conversation reopens on Guide:
 
 ```ts
 interface ReviewState {
   paneOpen: boolean;                                   // desktop only
-  tab: "changes" | "files" | "tree";                   // "tree": desktop pane only
+  tab: "guide" | "changes" | "files" | "tree";         // "guide": attached only; "tree": desktop pane only
+  tabPicked: boolean;                                  // picked since the page loaded: see `tabOf`
   diff: { mode?: "uncommitted" | "branch" | "pr"; base?: string; uncommitted: boolean }; // unset: `diffModeOf` (10-pr-review.md)
   files: { query: string; path?: string; rev?: string; target?: { start: number; end: number; nonce: number } };
   tree: { collapsed: string[] };                       // session tree's collapsed branch points
 }
 ```
 
-`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes, no mode picked: uncommitted, or PR mode for a conversation attached to a PR). Setters update the entry, among them `openPane(agentId, tab?)`, `togglePane`, `toggleTab(agentId, tab)` (opens the pane on `tab`, or closes it when it already shows `tab`) and `openFile(agentId, path, target?, rev?)`, which switches to the Files tab and gives `target` a fresh `nonce`, so opening the same lines again scrolls to them again.
+`useReview(agentId)` reads an entry with defaults (`paneOpen: false`, Changes not picked, no mode picked: uncommitted, or PR mode for a conversation attached to a PR). Setters update the entry, and those naming a tab mark it picked, among them `openPane(agentId, tab?)`, `togglePane`, `toggleTab(agentId, tab, tabs)` (opens the pane on `tab`, or closes it when it already shows `tab`, as `tabOf` reads it for the host's `tabs`) and `openFile(agentId, path, target?, rev?)`, which switches to the Files tab and gives `target` a fresh `nonce`, so opening the same lines again scrolls to them again.
 
 ### Changes tab
 
@@ -283,7 +284,7 @@ R  docs/old.md → docs/new.md
 - Fetch runs `POST git/fetch` only when pressed (`fetchOrigin`, a mutation). It is disabled with a spinner while running; a failure shows "Couldn't fetch: <message>" under the toolbar; success invalidates the agent's diffs and branches.
 - Query `queryKeys.gitDiff(agentId, mode, base, uncommitted)` = `["agent", id, "review", "diff", …]` → `getGitDiff(id, { base, uncommitted })`.
 - **File list** (`nav` "Changed files", shown with two or more files): one line per file with its status badge, path and counts. A click expands the file and scrolls its section to the top of the pane (`scrollIntoView({ block: "start" })`).
-- **File sections**: each file's header sticks to the top of the panel's scroll area (`sticky top-0`, opaque: `bg-background`, or `bg-surface-side` inside the desktop pane's `data-region="side"`) while its patch scrolls under it. The header is a collapse toggle (`aria-expanded`, chevron) with the status badge, the path and `+n −m` (or "binary" / "too large"). Collapsing a file whose header is stuck scrolls back to the header first. The patch is `SelectableDiff` with `flush`, sitting directly under the header without a border of its own; binary, too-large (1 MB) and patch-less files show a one-line message instead.
+- **File sections** (`FileCard`, `features/review/file-card.tsx`, shared with the Guide tab's file cards): each file's header sticks to the top of the panel's scroll area (`sticky top-0`, opaque: `bg-background`, or `bg-surface-side` inside the desktop pane's `data-region="side"`) while its patch scrolls under it. The header is a collapse toggle (`aria-expanded`, chevron) with the status badge, the path and `+n −m` (or "binary" / "too large"). Collapsing a file whose header is stuck scrolls back to the header first. The patch is `SelectableDiff` with `flush`, sitting directly under the header without a border of its own; binary, too-large (1 MB) and patch-less files show a one-line message instead.
 - **Status badge**: a 16px tinted square with the letter, its name as `title` and screen-reader text: A and U `diff-add`, M `status-input`, D `diff-del`, R muted.
 - **Paths**: the directory muted and the basename in the foreground, in mono; the directory truncates before the basename. A rename shows `old → new`; the full text is the element's `title`.
 - **Expanded by default**: every file starts expanded, unless the diff has more than `EXPAND_MAX_FILES` (30) files or more than `EXPAND_MAX_LINES` (3000) added plus deleted lines, where every expanded file would mount a diff view at once; then they all start collapsed. Per-file expansion is kept across refetches of the same mode and reset when the mode, base or toggle changes. `DiffViewer`'s own guard ("Show anyway" past 1500 lines) still applies inside each file.
@@ -317,18 +318,18 @@ At ≥1024px (`useIsDesktop`), the conversation route renders the activity rail 
 ```
 
 - `ConversationScreen` becomes a row: the conversation column and `ReviewPane` (`features/review/review-pane.tsx`) split the width left by the rail in halves, each `h-dvh` with its own scroll. The pane can't be resized. The transcript and composer column keeps its `max-w-[46rem]` cap and padding and fits the half left to it ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Layout"). The conversation outline in the transcript's right margin needs 78rem of transcript width, so the pane hides it ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Conversation outline"). Scoped dialog sheets stay in the conversation column; the rail and the pane stay usable while one is open.
-- **Activity rail** (`ReviewRail`, `features/review/review-rail.tsx`): a 44px column (`--rail-width`, `border-l`, `bg-surface-chrome`), a vertical `toolbar` named "Side panel", always shown on desktop, pane open or closed. Its top cell lines up with the header row (the title bar under Window Controls Overlay) and stays empty; below it, ghost icon buttons with tooltips on the left: Changes (`FileDiffIcon`), Files (`FolderTreeIcon`) and Tree (`ListTreeIcon`), named "Changes panel" and so on to tell them from the pane's tabs. A button calls `toggleTab`: it opens the pane on its tab, and the button of the tab showing closes the pane. That button is `aria-pressed`, on `sidebar-accent` with the foreground colour; the others are muted. While `gitStatus.dirty` (already in the conversation store), a `status-input` dot marks Changes, and its name ends in ", uncommitted changes".
-- The pane header holds the tabs (Changes, Files, Tree), the diff text size buttons and Refresh (not on Tree) and a Close (×, "Close pane") button, which moves focus to the rail button of the tab it closes.
+- **Activity rail** (`ReviewRail`, `features/review/review-rail.tsx`): a 44px column (`--rail-width`, `border-l`, `bg-surface-chrome`), a vertical `toolbar` named "Side panel", always shown on desktop, pane open or closed. Its top cell lines up with the header row (the title bar under Window Controls Overlay) and stays empty; below it, ghost icon buttons with tooltips on the left: Guide (`BookOpenIcon`, for a conversation attached to a PR), Changes (`FileDiffIcon`), Files (`FolderTreeIcon`) and Tree (`ListTreeIcon`), named "Changes panel" and so on to tell them from the pane's tabs. A button calls `toggleTab`: it opens the pane on its tab, and the button of the tab showing closes the pane. That button is `aria-pressed`, on `sidebar-accent` with the foreground colour; the others are muted. While `gitStatus.dirty` (already in the conversation store), a `status-input` dot marks Changes, and its name ends in ", uncommitted changes".
+- The pane header holds the tabs (Guide when attached, Changes, Files, Tree), the diff text size buttons and Refresh (not on Tree) and a Close (×, "Close pane") button, which moves focus to the rail button of the tab it closes.
 - **Tree tab**: the tree view the phone's tree page shows (`TreeView`, [`03-web-client.md`](03-web-client.md), "Tree screen"), without a header of its own. Go here and Fork from here end on `/agents/$agentId`, where the pane already is, so it stays open on Tree.
-- Other ways in: `/diff` toggles the pane on Changes (`toggleTab`); `/tree` opens it on Tree; the turn footer's files chip opens Changes and line references open Files. The header has no pane controls, and its menu no Tree or Diff item, on desktop.
-- `paneOpen` and the tab are per conversation and survive a reload (review state).
-- `/agents/$agentId/diff` on desktop opens the pane (on Files when that is the stored tab, else Changes) and `/agents/$agentId/tree` opens it on Tree; both replace themselves with `/agents/$agentId`.
+- Other ways in: `/diff` toggles the pane on Changes (`toggleTab`); `/tree` opens it on Tree; `/pr` opens it on Guide; the turn footer's files chip opens Changes and line references open Files. The header has no pane controls, and its menu no Tree or Diff item, on desktop.
+- `paneOpen` and the tab are per conversation and survive a reload (review state); an attached conversation reopens on Guide.
+- `/agents/$agentId/diff` on desktop opens the pane on the tab it shows, or Changes instead of Tree, and `/agents/$agentId/tree` opens it on Tree; both replace themselves with `/agents/$agentId`.
 - Under Window Controls Overlay the conversation header's `--titlebar-right` is the rail's width, plus the pane's while it is open, and the pane header's is the rail's, so the row at the right edge, the rail's empty top cell, takes the browser's controls.
 - Below 1024px neither the rail nor the pane is rendered and the phone flow applies, whatever `paneOpen` says.
 
 ## Phone page
 
-`/agents/$agentId/diff` (`features/diff/diff-screen.tsx`) is the review panel as a page: the back chevron to the conversation, the Changes and Files tabs, the diff text size buttons, Refresh, then the active tab. The session tree keeps its own page (`/agents/$agentId/tree`). The page is `h-dvh`, so the header stays put and the tab scrolls in the panel's scroll area, where the Changes file headers stick. Files is reached only through this page's tab. The header menu's Diff item and `/diff` navigate here. Selections use the Add to chat bar, which returns to the conversation, where the composer shows the draft with the reference at the saved caret.
+`/agents/$agentId/diff` (`features/diff/diff-screen.tsx`) is the review panel as a page: the back chevron to the conversation, the Changes and Files tabs (after Guide, on which it opens, for a conversation attached to a PR), the diff text size buttons, Refresh, then the active tab. The session tree keeps its own page (`/agents/$agentId/tree`). The page is `h-dvh`, so the header stays put and the tab scrolls in the panel's scroll area, where the Changes file headers stick. Files is reached only through this page's tab. The header menu's Diff item and `/diff` navigate here. Selections use the Add to chat bar, which returns to the conversation, where the composer shows the draft with the reference at the saved caret.
 
 ## Clickable references
 

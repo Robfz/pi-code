@@ -12,3 +12,4 @@ export * from "./rpc.ts";
 export * from "./sidebar.ts";
 export * from "./skill-blocks.ts";
 export type * from "./types.ts";
+export * from "./user-message.ts";

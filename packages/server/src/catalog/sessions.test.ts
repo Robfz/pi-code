@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatPrBlock } from "@pi-code/protocol";
+import { formatPrBlock, formatPrGuideBlock } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import {
@@ -260,6 +260,20 @@ describe("parseSessionFile", () => {
       "x",
     );
     expect(s?.firstMessage).toBe("#7 Add things");
+  });
+
+  it("names the PR of a guide prompt and the command of an expanded skill", () => {
+    const block = formatPrGuideBlock({
+      number: 7,
+      title: "Add things",
+      url: "https://github.com/o/r/pull/7",
+      text: "Review guide for o/r#7\n…",
+    });
+    const guide = parseSessionFile("/f.jsonl", `${header}\n${user(`${block}Read it`)}\n`, "x");
+    expect(guide?.firstMessage).toBe("#7 Add things (guide)");
+    const skill = '<skill name="review" location="/s/SKILL.md">\nSteps\n</skill>\n\nthe diff';
+    const skilled = parseSessionFile("/f.jsonl", `${header}\n${user(skill)}\n`, "x");
+    expect(skilled?.firstMessage).toBe("/skill:review the diff");
   });
 
   it("rejects content whose first record isn't a header", () => {

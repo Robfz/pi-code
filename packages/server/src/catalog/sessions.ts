@@ -10,10 +10,11 @@ import {
   compareRecency,
   type ProjectSummary,
   prBlockLabel,
+  prGuideBlockLabel,
   recencyOf,
   type SessionSummary,
-  splitFileBlocks,
-  splitPrBlocks,
+  skillCommand,
+  splitUserMessage,
 } from "@pi-code/protocol";
 import { findGitDir } from "../git/branches.ts";
 import { isDirectory, layoutOf } from "./layout.ts";
@@ -125,12 +126,15 @@ function foldLines(state: ParseState, lines: string[]): ParseState {
       record.message.role === "user"
     ) {
       // Leading `<file>` blocks (attached text files) are left out; a message with nothing but
-      // files shows their names. A `/pr` prompt shows its PR.
-      const { files, body: rest } = splitFileBlocks(contentText(record.message.content));
-      const { prs, body } = splitPrBlocks(rest);
+      // files shows their names. A `/pr` prompt shows its PR, a guide prompt its PR's guide, an
+      // expanded skill its command.
+      const { skill, files, prs, guides, body } = splitUserMessage(
+        contentText(record.message.content),
+      );
       next.firstMessage =
         (prs[0] && preview(prBlockLabel(prs[0]))) ??
-        preview(body) ??
+        (guides[0] && preview(prGuideBlockLabel(guides[0]))) ??
+        preview(skill ? skillCommand(skill.name, body) : body) ??
         (files.length > 0
           ? preview(`(file: ${files.map((f) => basename(f.name)).join(", ")})`)
           : undefined);

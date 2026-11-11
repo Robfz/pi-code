@@ -10,7 +10,8 @@ import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
-import { ChangesView, EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./changes-view";
+import { ChangesView } from "./changes-view";
+import { EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./file-card";
 import { useReviewStore } from "./review-state";
 
 beforeAll(stubCanvas);

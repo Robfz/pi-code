@@ -18,6 +18,11 @@ const fileContents = (agentId: string) => [...review(agentId), "file"] as const;
  */
 const pinned = (agentId: string) => ["agent", agentId, "pinned"] as const;
 
+/** Whether `queryKey` is a `prGuide` query, of any agent. */
+export function isPrGuideQuery(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === "agent" && queryKey[2] === "pr-guide";
+}
+
 export const queryKeys = {
   health: ["health"] as const,
   projects: ["projects"] as const,
@@ -39,6 +44,9 @@ export const queryKeys = {
   /** The PR diff between its pinned commits. */
   prDiff: (agentId: string, baseSha: string, headSha: string) =>
     [...pinned(agentId), "diff", baseSha, headSha] as const,
+  /** The PR guide of the diff between the PR's pinned commits; `guide` frames refetch it. */
+  prGuide: (agentId: string, baseSha: string, headSha: string) =>
+    ["agent", agentId, "pr-guide", baseSha, headSha] as const,
   gitBranches: (agentId: string) => ["agent", agentId, "branches"] as const,
   /** Every `fileSearch` of the agent. */
   fileSearches,

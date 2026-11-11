@@ -439,7 +439,7 @@ describe("built-in commands", () => {
     },
   );
 
-  it("/pr <number> attaches the PR and switches the Changes tab to it", async () => {
+  it("/pr <number> attaches the PR, switches the Changes tab to it and the page to Guide", async () => {
     const { user } = await setup();
     const { calls } = stubFetch((call) =>
       call.url === "/api/agents/a1/pr" ? [200, { pr: { number: 12 } }] : handler(call),
@@ -449,10 +449,14 @@ describe("built-in commands", () => {
     expect(calls.filter((c) => c.url === "/api/agents/a1/pr").map((c) => c.body)).toEqual([
       { pr: "12" },
     ]);
-    expect(useReviewStore.getState().reviews.a1?.diff.mode).toBe("pr");
+    expect(useReviewStore.getState().reviews.a1).toMatchObject({
+      paneOpen: false,
+      tab: "guide",
+      diff: { mode: "pr" },
+    });
   });
 
-  it("/pr <number> on desktop opens the review pane on Changes, in PR mode", async () => {
+  it("/pr <number> on desktop opens the review pane on Guide, Changes in PR mode", async () => {
     stubMatchMedia((query) => query === DESKTOP_QUERY);
     useReviewStore.setState({ reviews: {} });
     const { user } = await setup();
@@ -463,7 +467,7 @@ describe("built-in commands", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Attached PR #12"));
     expect(useReviewStore.getState().reviews.a1).toMatchObject({
       paneOpen: true,
-      tab: "changes",
+      tab: "guide",
       diff: { mode: "pr" },
     });
   });

@@ -12,6 +12,7 @@ import type {
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "@/lib/api";
+import { queryKeys } from "@/lib/query-client";
 import { FakeEventSource } from "@/test/fake-event-source";
 import { fixtureEvents, makeAgent, makePr, makeSnapshot, reduceAll } from "@/test/fixtures";
 import type { ConversationStore } from "./conversation-store";
@@ -337,7 +338,9 @@ describe("LiveRegistry", () => {
       sidebar: noSidebar,
       prs: {},
     });
-    expect(invalidateQueries).not.toHaveBeenCalled();
+    // The baseline brings the sessions; it refetches only the PR guides (by predicate).
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([undefined]);
+    invalidateQueries.mockClear();
 
     const prompted = { ...session("s1"), lastPromptAt: "2026-01-03T00:00:00.000Z" };
     latest().send({ type: "catalog", sessions: [prompted] });
@@ -364,6 +367,49 @@ describe("LiveRegistry", () => {
     const outdated = { ...pr, remoteHeadSha: "c".repeat(40) };
     latest().send({ type: "prs", prs: { "/s/1.jsonl": outdated, "/s/2.jsonl": pr } });
     expect(registry.live.getState().prs).toEqual({ "/s/1.jsonl": outdated, "/s/2.jsonl": pr });
+  });
+
+  it("invalidates the PR guide queries a guide frame names, and those without a guide yet", () => {
+    start();
+    latest().open();
+    const keyOf = (agentId: string, head: string) => queryKeys.prGuide(agentId, "a", head);
+    queryClient.setQueryData(keyOf("a1", "b"), { key: "o/r#1@a..b", state: "generating" });
+    queryClient.setQueryData(keyOf("a2", "b"), { key: "o/r#1@a..b", state: "generating" });
+    queryClient.setQueryData(keyOf("a3", "c"), { key: "o/r#1@a..c", state: "generating" });
+    queryClient.getQueryCache().build(queryClient, { queryKey: keyOf("a4", "d") });
+    queryClient.setQueryData(queryKeys.prDiff("a1", "a", "b"), { files: [] });
+
+    latest().send({ type: "guide", key: "o/r#1@a..b", state: "ready" });
+    const invalidated = queryClient
+      .getQueryCache()
+      .getAll()
+      .filter((query) => query.state.isInvalidated)
+      .map((query) => query.queryKey);
+    expect(invalidated).toEqual([keyOf("a1", "b"), keyOf("a2", "b"), keyOf("a4", "d")]);
+  });
+
+  it("invalidates every PR guide query on a baseline, whose frames weren't replayed", () => {
+    start();
+    latest().open();
+    const keyOf = (agentId: string, head: string) => queryKeys.prGuide(agentId, "a", head);
+    queryClient.setQueryData(keyOf("a1", "b"), { key: "o/r#1@a..b", state: "generating" });
+    queryClient.setQueryData(keyOf("a2", "c"), { key: "o/r#1@a..c", state: "ready" });
+    queryClient.setQueryData(queryKeys.prDiff("a1", "a", "b"), { files: [] });
+
+    latest().send({
+      type: "baseline",
+      agents: [],
+      sessions: [],
+      branches: {},
+      sidebar: noSidebar,
+      prs: {},
+    });
+    const invalidated = queryClient
+      .getQueryCache()
+      .getAll()
+      .filter((query) => query.state.isInvalidated)
+      .map((query) => query.queryKey);
+    expect(invalidated).toEqual([keyOf("a1", "b"), keyOf("a2", "c")]);
   });
 
   it("follows sidebar frames and applies its own changes at once", async () => {

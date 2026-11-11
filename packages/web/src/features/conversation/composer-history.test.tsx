@@ -1,4 +1,9 @@
-import { formatFileBlock, formatPrBlock, type SessionEntry } from "@pi-code/protocol";
+import {
+  formatFileBlock,
+  formatPrBlock,
+  formatPrGuideBlock,
+  type SessionEntry,
+} from "@pi-code/protocol";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -89,9 +94,12 @@ describe("promptHistory", () => {
       update: false,
       text: "context",
     });
-    expect(promptHistory(chain([user("mine"), user(`${block}Give me an overview`)]))).toEqual([
-      "mine",
-    ]);
+    const guide = formatPrGuideBlock({ number: 12, title: "t", url: "u", text: "guide" });
+    expect(
+      promptHistory(
+        chain([user("mine"), user(`${block}Give me an overview`), user(`${guide}Use it as a map`)]),
+      ),
+    ).toEqual(["mine"]);
   });
 
   it("recalls an expanded skill as its command, without attached files", () => {

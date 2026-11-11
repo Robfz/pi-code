@@ -2,6 +2,7 @@ export { DiffFontSizeControl } from "./diff-font-size-control";
 export {
   DiffViewer,
   type DiffViewerProps,
+  isLargePatch,
   LARGE_DIFF_LINES,
   type LineSelection,
 } from "./diff-viewer";

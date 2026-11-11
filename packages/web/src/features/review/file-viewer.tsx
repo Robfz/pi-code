@@ -5,16 +5,15 @@
  * an opened reference's lines highlighted and scrolled to.
  */
 
-import { useQuery } from "@tanstack/react-query";
 import { ChevronLeftIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { fileAsPatch, splitLines } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getFileContent, isApiRequestError } from "@/lib/api";
-import { queryKeys } from "@/lib/query-client";
-import { LoadError, NotARepo, retryServerErrors } from "./query-states";
+import { isApiRequestError } from "@/lib/api";
+import { useFileContent } from "./file-content";
+import { LoadError, NotARepo } from "./query-states";
 import type { FileTarget } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
@@ -52,14 +51,7 @@ export function FileViewer({
   onBack(): void;
   onAdded?(): void;
 }) {
-  const file = useQuery({
-    queryKey: queryKeys.fileContent(agentId, path, rev),
-    queryFn: ({ client, queryKey }) =>
-      getFileContent(agentId, path, rev, client.getQueryData(queryKey)),
-    staleTime: rev === undefined ? 0 : Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: false,
-    retry: retryServerErrors,
-  });
+  const file = useFileContent(agentId, path, rev);
   const content = file.data?.content;
   const { patch, lines } = useMemo(
     () =>

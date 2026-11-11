@@ -232,19 +232,44 @@ describe("DiffScreen", () => {
     expect(await screen.findByText(/No changes/)).toBeInTheDocument();
   });
 
-  it("shows an attached conversation's PR diff by default", async () => {
+  it("opens an attached conversation on its Guide, then Changes shows the PR diff", async () => {
     const pr = makePr();
-    const { calls } = stubFetch(() => [
-      200,
-      { files: [file({ patch: gitPatch() })], oldRev: "aaaaaaa", newRev: "bbbbbbb" },
-    ]);
+    const { calls } = stubFetch((call) =>
+      call.url.endsWith("/pr/guide")
+        ? [200, { key: "o/r#12@a..b", state: "generating" }]
+        : [200, { files: [file({ patch: gitPatch() })], oldRev: "aaaaaaa", newRev: "bbbbbbb" }],
+    );
     await renderScreen("p1", { [SESSION_FILE]: pr });
+    expect(await screen.findByText("Writing the review guide…")).toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Guide",
+      "Changes",
+      "Files",
+    ]);
+    expect(screen.getByRole("tab", { name: "Guide" })).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(screen.getByTestId("pr-header")).getByRole("link", { name: "#12" }),
+    ).toBeVisible();
+
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Changes" }));
     expect(await screen.findByTestId("diff-file")).toBeInTheDocument();
-    expect(calls.map((call) => call.url + call.search)).toEqual(["/api/agents/p1/git/diff?pr=1"]);
+    expect(calls.map((call) => call.url + call.search)).toEqual([
+      "/api/agents/p1/pr/guide",
+      "/api/agents/p1/git/diff?pr=1",
+    ]);
     expect(screen.getByRole("radio", { name: "PR" })).toHaveAttribute("aria-checked", "true");
     const header = screen.getByTestId("pr-header");
     expect(within(header).getByRole("link", { name: "#12" })).toHaveAttribute("href", pr.url);
     expect(header).toHaveTextContent("Speed up the parser");
+  });
+
+  it("shows a stored Guide tab without an attachment as Changes", async () => {
+    useReviewStore.getState().setTab("a1", "guide");
+    stubFetch(() => [200, { files: [] }]);
+    await renderScreen();
+    expect(await screen.findByText(/No changes/)).toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Changes", "Files"]);
+    expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("on desktop opens the review pane and replaces itself with the conversation", async () => {
@@ -256,5 +281,14 @@ describe("DiffScreen", () => {
     expect(router.history.length).toBe(1);
     expect(useReviewStore.getState().reviews.a3?.paneOpen).toBe(true);
     expect(calls).toEqual([]);
+  });
+
+  it("on desktop opens the pane on Changes when the pane would show Tree", async () => {
+    stubMatchMedia((query) => query === DESKTOP_QUERY);
+    useReviewStore.getState().setTab("a3", "tree");
+    stubFetch(() => [200, { files: [] }]);
+    await renderScreen("a3");
+    expect(await screen.findByText("conversation")).toBeInTheDocument();
+    expect(useReviewStore.getState().reviews.a3).toMatchObject({ paneOpen: true, tab: "changes" });
   });
 });

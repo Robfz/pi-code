@@ -7,11 +7,13 @@
 
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConversationPr } from "./pr";
 import { ReviewPanel } from "./review-panel";
-import { REVIEW_TABS, useReview, useReviewStore } from "./review-state";
+import { paneTabs, tabOf, useReview, useReviewStore } from "./review-state";
 
 export function ReviewPane({ agentId }: { agentId: string }) {
-  const { tab } = useReview(agentId);
+  const tabs = paneTabs(useConversationPr() !== undefined);
+  const tab = tabOf(useReview(agentId), tabs);
   const close = () => {
     useReviewStore.getState().togglePane(agentId);
     // The Close button unmounts; focus moves to the rail button that reopens this tab.
@@ -25,7 +27,7 @@ export function ReviewPane({ agentId }: { agentId: string }) {
     >
       <ReviewPanel
         agentId={agentId}
-        tabs={REVIEW_TABS}
+        tabs={tabs}
         className="min-h-0 flex-1"
         trailing={
           <Button variant="ghost" size="icon" aria-label="Close pane" onClick={close}>

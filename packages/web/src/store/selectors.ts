@@ -9,9 +9,7 @@ import {
   type LabelEntry,
   type SessionEntry,
   skillCommand,
-  splitFileBlocks,
-  splitPrBlocks,
-  splitSkillBlock,
+  splitUserMessage,
   type ToolResultMessage,
   type Transcript,
 } from "@pi-code/protocol";
@@ -75,8 +73,8 @@ export const selectActiveBranch = (s: ConversationState): SessionEntry[] => bran
 /**
  * The composer's prompt history, newest first: user message text without its `<file>` blocks
  * (an expanded skill as its `/skill:name args` command), and bash commands as `!cmd` (`!!cmd` when excluded from context). Blank entries and PR review's
- * prompts (`<pr>` blocks, which the user didn't type) are skipped, and consecutive duplicates
- * collapsed.
+ * prompts (`<pr>` and `<pr-guide>` blocks, which the user didn't type) are skipped, and
+ * consecutive duplicates collapsed.
  */
 export function promptHistory(branch: readonly SessionEntry[]): string[] {
   const history: string[] = [];
@@ -86,9 +84,10 @@ export function promptHistory(branch: readonly SessionEntry[]): string[] {
     const { message } = entry;
     let text = "";
     if (message.role === "user") {
-      const { skill, body: args } = splitSkillBlock(contentText(message.content));
-      const { prs, body } = splitPrBlocks(splitFileBlocks(args).body);
-      if (prs.length === 0) text = skill ? skillCommand(skill.name, body) : body.trim();
+      const { skill, prs, guides, body } = splitUserMessage(contentText(message.content));
+      if (prs.length === 0 && guides.length === 0) {
+        text = skill ? skillCommand(skill.name, body) : body.trim();
+      }
     } else if (message.role === "bashExecution") {
       text = `${message.excludeFromContext ? "!!" : "!"}${message.command}`;
     }

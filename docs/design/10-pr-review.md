@@ -16,7 +16,7 @@ A client built-in slash command (`/pr [<url>|<number>]`, listed in the composer'
 
 - **With a number** (`12` or `#12`) or a **PR URL** (`https://github.com/<owner>/<repo>/pull/<n>…`): that PR of the folder's repo.
 - **Without an argument**: the PR of the folder's current branch (`gh pr view` without a number).
-- On success the client switches the Changes tab to PR mode, opens the review pane on Changes (desktop) and toasts "Attached PR #N". The server has already sent the agent the context prompt, which steers a running agent like a composer prompt.
+- On success the client switches the Changes tab to PR mode and the review panel to its Guide tab ([`11-pr-guide.md`](11-pr-guide.md), "Web client"), opens the review pane (desktop) and toasts "Attached PR #N". The server has already sent the agent the context prompt, which steers a running agent like a composer prompt.
 - **No PR for this branch** (`404 pr_not_found` without an argument): a toast "No PR for this branch" with a **Create draft PR** button, which sends the agent a fixed prompt (steering a running agent): push the branch with `git push -u origin '<branch>'` (single-quoted for the shell, since git allows `;`, `$` and backticks in branch names; `HEAD` when detached), create a draft PR with `gh pr create --draft`, writing the title and description from the changes, and report its number. The conversation isn't attached afterwards; the user runs `/pr` again.
 - Other errors are toasted with the server's message.
 
@@ -171,10 +171,10 @@ A third mode in the Changes tab, beside Uncommitted and Branch, offered only whe
 - **Default**: the review state's `diff.mode` is unset until one is picked; `diffModeOf(diff, attached)` makes it `"pr"` for an attached conversation, else `"uncommitted"`. The mode lives in memory per agent id, so a reopened conversation, a new device or a reload opens in PR mode. `/pr` sets it to `"pr"`.
 - **Diff**: `GET /api/agents/:id/git/diff?pr=1` → `gitDiff(cwd, { range: { from: baseSha, to: headSha } })`: branch mode's tracked diff between two commits read from the object database, with `oldRev` and `newRev` (short shas), and its hunk options pinned (`-U3 --diff-algorithm=myers --inter-hunk-context=0 --indent-heuristic -l1000`) so its hunks, which the PR guide numbers, don't follow the user's git config ([`11-pr-guide.md`](11-pr-guide.md)). A conversation without a PR → `400 invalid_body`; a missing commit → `502 git_failed`. Query key `["agent", id, "pinned", "diff", baseSha, headSha]`, so a refresh loads the new diff; the content of fixed commits never changes, so it is outside the `review` prefix that `git_status` events invalidate, and never stale.
 - **References**: the head isn't on disk, so new-side lines name it too: `@<newRev>:./path:N-M`; old-side lines `@<oldRev>:./path:N-M`.
-- **Header** (`PrHeader`), one line under the toolbar: a pull request icon, `#N` linking to the PR on GitHub, the title; a "Merged" or "Closed" chip only for those states; "Outdated · Refresh" only while `remoteHeadSha ≠ headSha`. Refresh is disabled with a spinner while it runs; a failure toasts "Couldn't refresh the PR: <message>".
+- **Header** (`PrHeader`, `features/review/pr-header.tsx`, also the Guide tab's), one line under the toolbar: a pull request icon, `#N` linking to the PR on GitHub, the title; a "Merged" or "Closed" chip only for those states; "Outdated · Refresh" only while `remoteHeadSha ≠ headSha`. Refresh is disabled with a spinner while it runs; a failure toasts "Couldn't refresh the PR: <message>".
 - **Empty**: "No changes in this PR".
 
-It works in the desktop pane and on the phone's Diff page.
+It works in the desktop pane and on the phone's Diff page. Both also offer an attached conversation the Guide tab, first and shown by default ([`11-pr-guide.md`](11-pr-guide.md), "Web client").
 
 ### Version-named references
 

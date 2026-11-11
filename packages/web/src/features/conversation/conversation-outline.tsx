@@ -1,8 +1,7 @@
 import {
   prBlockLabel,
-  splitFileBlocks,
-  splitPrBlocks,
-  splitSkillBlock,
+  prGuideBlockLabel,
+  splitUserMessage,
   type UserMessage,
 } from "@pi-code/protocol";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
@@ -22,13 +21,14 @@ interface Prompt {
 }
 
 /**
- * A prompt's outline title: its PR for a `/pr` prompt or a PR update, else the first non-blank
- * line of its text after an expanded skill and attached files, else `/skill:name`.
+ * A prompt's outline title: its PR for a `/pr` prompt or a PR update, its PR's guide for a guide
+ * prompt, else the first non-blank line of its text after an expanded skill and attached files,
+ * else `/skill:name`.
  */
 export function promptTitle(content: UserMessage["content"]): string {
-  const { skill, body: args } = splitSkillBlock(contentText(content));
-  const { prs, body } = splitPrBlocks(splitFileBlocks(args).body);
+  const { skill, prs, guides, body } = splitUserMessage(contentText(content));
   if (prs[0] !== undefined) return prBlockLabel(prs[0]);
+  if (guides[0] !== undefined) return prGuideBlockLabel(guides[0]);
   const line = body
     .split("\n")
     .find((line) => line.trim() !== "")
