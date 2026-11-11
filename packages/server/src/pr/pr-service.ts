@@ -2,13 +2,15 @@
  * PR review (design/10-pr-review.md): attaching a conversation to a GitHub PR (`/pr`), refreshing
  * it, and polling its head for newer pushes. Each fetches through `gh` and `git` without a
  * checkout, pins the PR's base and head, stores the attachment by session file and, for attach and
- * refresh, prompts the agent (steering a running one).
+ * refresh, prompts the agent (steering a running one). Attach and refresh also start the
+ * conversation's PR guide (design/11-pr-guide.md), which is sent to the agent once ready.
  */
-import type { PrAttachment } from "@pi-code/protocol";
+import { createHash } from "node:crypto";
+import type { PrAttachment, PrGuide, PrGuideResponse } from "@pi-code/protocol";
 import type { Agent, AgentManager } from "../agents/agent-manager.ts";
-import { assertAcceptsInput } from "../agents/commands.ts";
+import { acceptsInput, assertAcceptsInput } from "../agents/commands.ts";
 import { ApiError } from "../errors.ts";
-import { requireWorkTree } from "../git/git.ts";
+import { gitDiff, requireWorkTree } from "../git/git.ts";
 import {
   commitsBetween,
   diffStat,
@@ -17,8 +19,10 @@ import {
   originRepo,
   pinBase,
   remotePrHead,
+  repoFolder,
 } from "../git/pr.ts";
-import { PrStore, prView, type StoredPr } from "../store/pr-store.ts";
+import { guideKey } from "../store/guide-store.ts";
+import { PrStore, prView, type StoredPr, type StoredPrs } from "../store/pr-store.ts";
 import {
   type GhRunner,
   type InlineComment,
@@ -30,7 +34,15 @@ import {
   sameRepo,
   viewPr,
 } from "./github.ts";
-import { contextMessage, latestCommentAt, updateMessage } from "./messages.ts";
+import { guideUnits } from "./guide-hunks.ts";
+import type { GuideInput } from "./guide-job.ts";
+import {
+  clientGuideState,
+  type GuideListener,
+  type GuideService,
+  guideInputKey,
+} from "./guide-service.ts";
+import { contextMessage, guideMessage, latestCommentAt, updateMessage } from "./messages.ts";
 
 /** The least time between two polls of a conversation started by its turns. */
 const TURN_POLL_INTERVAL_MS = 30_000;
@@ -57,7 +69,34 @@ export interface PrServiceDeps {
   gh?: GhRunner;
   /** Default: an RPC `prompt` with `streamingBehavior: "steer"`. */
   prompt?: PromptSender;
+  /** The conversations' PR guides, started on attach and Refresh and sent to them once ready. */
+  guides: GuideService;
 }
+
+/** An attachment whose folder is known, so its guide key is. */
+type KeyedPr = StoredPr & { folder: string };
+
+/** The guide key of an attachment; `undefined` for one made before PR guides, without a folder. */
+function prGuideKey(pr: StoredPr): string | undefined {
+  return pr.folder === undefined ? undefined : guideKey(pr);
+}
+
+/** The guide keys `prs` pin. */
+function pinnedGuideKeys(prs: StoredPrs): Set<string> {
+  return new Set(Object.values(prs).flatMap((pr) => prGuideKey(pr) ?? []));
+}
+
+/** Every id a guide references: its sections' hunks and its other changes. */
+function guideIds(guide: PrGuide): Set<string> {
+  return new Set([...guide.sections.flatMap((s) => s.hunks), ...guide.other]);
+}
+
+/** This generation of a guide: a regenerated guide hashes differently. */
+function guideGeneration(guide: PrGuide): string {
+  return createHash("sha256").update(JSON.stringify(guide)).digest("hex").slice(0, 16);
+}
+
+const UNRESOLVED = "the guide names hunks the PR diff doesn't have; retry";
 
 interface Fetched {
   view: PrView;
@@ -79,6 +118,15 @@ export class PrService {
   private readonly polledAt = new Map<string, number>();
   /** Polls deferred by `onTurnEnd` to the end of the interval, by session file. */
   private readonly deferred = new Map<string, NodeJS.Timeout>();
+  private readonly guides: GuideService;
+  /** Guide prunes, one at a time, each keeping the keys pinned when it starts. */
+  private pruning: Promise<void> = Promise.resolve();
+  /**
+   * The generation (`guideGeneration`) of the guide last sent to each session file, so a guide
+   * both a job's end and an attach (or Refresh) find ready is sent once.
+   */
+  private readonly delivered = new Map<string, string>();
+  private readonly unsubscribe: (() => void)[];
 
   constructor(deps: PrServiceDeps) {
     this.agents = deps.agents;
@@ -87,6 +135,13 @@ export class PrService {
     });
     this.gh = deps.gh ?? runGh;
     this.prompt = deps.prompt ?? sendPrompt;
+    this.guides = deps.guides;
+    this.unsubscribe = [
+      this.guides.subscribe(this.onGuide),
+      // Every change of the attachments (attach, refresh, copy, prune) may unpin a guide.
+      this.store.subscribe(() => this.pruneGuides()),
+    ];
+    void this.store.ready.then(() => this.pruneGuides());
   }
 
   /**
@@ -115,17 +170,19 @@ export class PrService {
           `that PR is in ${target.repo}, but this folder's origin is ${repo}`,
         );
       }
-      const [fetched, gitDir] = await Promise.all([
+      const [fetched, gitDir, folder] = await Promise.all([
         this.fetch(agent.cwd, repo, target.number),
         gitCommonDir(agent.cwd),
+        repoFolder(agent.cwd),
       ]);
-      const pr = this.entry(fetched, repo, gitDir);
+      const pr = this.entry(fetched, repo, gitDir, folder);
       const [files, commits] = await Promise.all([
         diffStat(agent.cwd, fetched.baseSha, fetched.headSha),
         commitsBetween(agent.cwd, fetched.baseSha, fetched.headSha),
       ]);
       const message = contextMessage(pr, fetched.view, fetched.inline, files, commits);
       await this.deliver(agent, file, pr, message);
+      await this.startGuide(agent, file, pr, fetched.view);
       return prView(pr);
     });
   }
@@ -143,9 +200,12 @@ export class PrService {
       if (previous === undefined) {
         throw new ApiError("invalid_body", "this conversation isn't attached to a PR");
       }
-      const fetched = await this.fetch(agent.cwd, previous.repo, previous.number);
+      const [fetched, folder] = await Promise.all([
+        this.fetch(agent.cwd, previous.repo, previous.number),
+        previous.folder ?? repoFolder(agent.cwd),
+      ]);
       const { view, baseSha, headSha, inline } = fetched;
-      const pr = this.entry(fetched, previous.repo, previous.gitDir, previous);
+      const pr = this.entry(fetched, previous.repo, previous.gitDir, folder, previous);
       const previousHead =
         headSha === previous.headSha ? previous.previousHeadSha : previous.headSha;
       if (previousHead !== undefined) pr.previousHeadSha = previousHead;
@@ -155,7 +215,50 @@ export class PrService {
       ]);
       const message = updateMessage(previous, pr, view, inline, files, commits);
       await this.deliver(agent, file, pr, message);
+      // The prune that storing `pr` started cancels the previous key's job once nothing pins it.
+      if (guideKey(pr) !== prGuideKey(previous)) await this.startGuide(agent, file, pr, view);
       return prView(pr);
+    });
+  }
+
+  /**
+   * The conversation's PR guide: `generating`, `failed` (a key without a guide or a job reads as
+   * failed too), or `ready` with every unit it references resolved against the pinned PR diff.
+   * Throws `invalid_body` when no PR is attached.
+   */
+  async guide(agent: Agent): Promise<PrGuideResponse> {
+    const { pr } = await this.guideTarget(agent);
+    const key = guideKey(pr);
+    const state = clientGuideState(await this.guides.status(key));
+    if (state.state !== "ready") return { key, ...state };
+    const diff = await gitDiff(agent.cwd, { range: { from: pr.baseSha, to: pr.headSha } });
+    const units = guideUnits(diff.files, guideIds(state.guide));
+    if (units === undefined) return { key, state: "failed", error: UNRESOLVED };
+    return {
+      key,
+      state: "ready",
+      id: guideGeneration(state.guide),
+      guide: state.guide,
+      units,
+      oldRev: diff.oldRev ?? pr.baseSha,
+      newRev: diff.newRev ?? pr.headSha,
+    };
+  }
+
+  /**
+   * Retry: generates the conversation's PR guide again, its PR's title and description re-read
+   * with `gh`; the new guide is sent to the agents attached to it once ready. Throws
+   * `invalid_body` when no PR is attached, and `gh`'s errors (`gh_failed`, `pr_not_found`).
+   */
+  async retryGuide(agent: Agent): Promise<PrGuideResponse> {
+    const file = sessionFileOf(agent);
+    return this.locked(file, async () => {
+      const { pr, stored } = await this.guideTarget(agent);
+      const view = await viewPr(this.gh, agent.cwd, pr.repo, pr.number);
+      if (stored.folder === undefined) await this.store.set(file, pr);
+      const input = guideInput(agent.cwd, pr, view);
+      void this.guides.regenerate(input);
+      return { key: guideInputKey(input), state: "generating" };
     });
   }
 
@@ -206,10 +309,124 @@ export class PrService {
     this.deferred.set(file, timer);
   };
 
-  /** Cancels the deferred polls. */
+  /** Cancels the deferred polls and stops following the guides and the store. */
   close(): void {
     for (const timer of this.deferred.values()) clearTimeout(timer);
     this.deferred.clear();
+    for (const unsubscribe of this.unsubscribe) unsubscribe();
+  }
+
+  /**
+   * The agent's attachment with its folder: the stored one, or for an attachment made before PR
+   * guides, read from the agent's folder. Throws `invalid_body` when no PR is attached.
+   */
+  private async guideTarget(agent: Agent): Promise<{ pr: KeyedPr; stored: StoredPr }> {
+    const stored = this.store.get(sessionFileOf(agent));
+    if (stored === undefined) {
+      throw new ApiError("invalid_body", "this conversation isn't attached to a PR");
+    }
+    return { pr: { ...stored, folder: stored.folder ?? (await repoFolder(agent.cwd)) }, stored };
+  }
+
+  /**
+   * Starts the guide of `pr`, just attached or moved by a Refresh: a stored guide is sent to the
+   * agent right away, else its job is started (or joined) and the guide sent once ready. A
+   * failure is logged: the attachment is stored by now.
+   */
+  private async startGuide(agent: Agent, file: string, pr: KeyedPr, view: PrView): Promise<void> {
+    try {
+      // A prune that started before `pr` was stored may still delete its key's guide.
+      await this.pruning;
+      const input = guideInput(agent.cwd, pr, view);
+      const state = await this.guides.status(guideInputKey(input));
+      if (state.state !== "ready") {
+        void this.guides.ensure(input);
+        return;
+      }
+      const guide = state.guide;
+      await this.sendGuide(agent, file, guide, () => this.guidePrompt(agent.cwd, pr, guide));
+    } catch (e) {
+      console.warn(`[guides] couldn't start the guide of ${file}: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Sends a guide whose job just ended ready to every live agent attached to its key, its prompt
+   * built once; a guide no attachment pins any more (cancelled while storing) is pruned.
+   */
+  private readonly onGuide: GuideListener = (key, state, { finished }) => {
+    if (!finished || state.state !== "ready") return;
+    const guide = state.guide;
+    const attached = Object.entries(this.store.current()).filter(
+      ([, pr]) => prGuideKey(pr) === key,
+    );
+    if (attached.length === 0) {
+      this.pruneGuides();
+      return;
+    }
+    // One prompt for all: the attachments of a key share its commits and folder. It is built from
+    // the attachments as the job ended, which pin the guide's diff whatever a Refresh does since.
+    let prompt: Promise<string> | undefined;
+    for (const [file, pr] of attached) {
+      // Behind any attach or refresh of the conversation, which may move it to another key.
+      void this.locked(file, async () => {
+        const current = this.store.get(file);
+        const id = this.agents().ownerOf(file);
+        const agent = id === undefined ? undefined : this.agents().get(id);
+        if (current === undefined || prGuideKey(current) !== key) return;
+        if (agent === undefined || !acceptsInput(agent)) return;
+        await this.sendGuide(agent, file, guide, () => {
+          prompt ??= this.guidePrompt(agent.cwd, pr, guide);
+          return prompt;
+        });
+      }).catch((e: unknown) => {
+        console.warn(`[guides] couldn't send the guide to ${file}: ${(e as Error).message}`);
+      });
+    }
+  };
+
+  /** The `<pr-guide>` prompt of `guide`, its units resolved against `pr`'s diff read in `cwd`. */
+  private async guidePrompt(cwd: string, pr: StoredPr, guide: PrGuide): Promise<string> {
+    const diff = await gitDiff(cwd, { range: { from: pr.baseSha, to: pr.headSha } });
+    const units = guideUnits(diff.files, guideIds(guide));
+    if (units === undefined) throw new Error(UNRESOLVED);
+    return guideMessage(pr, guide, units);
+  }
+
+  /**
+   * Prompts the agent with `guide` (`prompt` builds the message), unless `file` already got this
+   * generation of it or the agent moved to another session file. Runs within `file`'s lock.
+   */
+  private async sendGuide(
+    agent: Agent,
+    file: string,
+    guide: PrGuide,
+    prompt: () => Promise<string>,
+  ): Promise<void> {
+    const id = guideGeneration(guide);
+    if (this.delivered.get(file) === id) return;
+    const message = await prompt();
+    await agent.pipeline.exclusive(async () => {
+      if (agent.sessionFile !== file) return;
+      await this.prompt(agent, message);
+      this.delivered.set(file, id);
+    });
+  }
+
+  /**
+   * Keeps only the guides the attachments pin (`GuideService.prune`), and forgets the guides
+   * sent to conversations no longer attached.
+   */
+  private pruneGuides(): void {
+    const prs = this.store.current();
+    for (const file of this.delivered.keys()) {
+      if (prs[file] === undefined) this.delivered.delete(file);
+    }
+    this.pruning = this.pruning
+      .then(() => this.guides.prune(pinnedGuideKeys(this.store.current())))
+      .catch((e: unknown) => {
+        console.warn(`[guides] prune failed: ${(e as Error).message}`);
+      });
   }
 
   /**
@@ -270,8 +487,9 @@ export class PrService {
     { view, baseSha, headSha, inline }: Fetched,
     repo: string,
     gitDir: string,
+    folder: string,
     previous?: StoredPr,
-  ): StoredPr {
+  ): KeyedPr {
     const since = latestCommentAt(view) ?? previous?.commentsSince;
     return {
       repo,
@@ -285,6 +503,7 @@ export class PrService {
       headSha,
       remoteHeadSha: headSha,
       gitDir,
+      folder,
       ...(since !== undefined ? { commentsSince: since } : {}),
       reportedInline: inline.map((c) => c.id),
     };
@@ -299,6 +518,16 @@ export class PrService {
     });
     return run;
   }
+}
+
+function guideInput(cwd: string, pr: KeyedPr, view: Pick<PrView, "title" | "body">): GuideInput {
+  return {
+    cwd,
+    folder: pr.folder,
+    pr: { repo: pr.repo, number: pr.number, title: view.title, body: view.body },
+    baseSha: pr.baseSha,
+    headSha: pr.headSha,
+  };
 }
 
 function sessionFileOf(agent: Agent): string {

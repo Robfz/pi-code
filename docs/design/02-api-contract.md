@@ -221,7 +221,7 @@ Sets attention to `none`, except `input` while the agent has a pending dialog or
 GET /api/stream?open=<agentId>:<seq>,<agentId>:<seq>
 ```
 
-- `open` (optional): the opened agents, each with the last `seq` the client holds (from its snapshot or the last applied event). Without it, only `baseline` and the frames every connection gets (`agent`, `agent_closed`, `catalog`, `branch`, `sidebar`, `prs`). Pairs without `:` or without an id are ignored, and so are ids of unknown agents.
+- `open` (optional): the opened agents, each with the last `seq` the client holds (from its snapshot or the last applied event). Without it, only `baseline` and the frames every connection gets (`agent`, `agent_closed`, `catalog`, `branch`, `sidebar`, `prs`, `guide`). Pairs without `:` or without an id are ignored, and so are ids of unknown agents.
 - `Last-Event-ID`: the same `agentId:seq,…` format (EventSource sends the last `id:` on reconnect). `open` decides which agents are streamed; for each, a cursor from `Last-Event-ID` wins over the query's. Header cursors for agents not in `open` are ignored.
 - Per agent, a cursor replays the events after it when it is a non-negative integer, not ahead of the agent's log, and its successor is still in the log's ring buffer (a caught-up cursor replays nothing). Otherwise that agent gets a `resync` frame and streams live from the log's current `seq`; the other agents are unaffected.
 
@@ -242,13 +242,14 @@ type StreamFrame =
   | { type: "catalog"; sessions: StreamedSession[] }      // every session; replaces the previous list
   | { type: "branch"; cwd: string; branch: string | null } // null: no longer tracked
   | { type: "sidebar"; sidebar: SidebarView }             // replaces the previous state
-  | { type: "prs"; prs: PrAttachments };                  // replaces the previous attachments
+  | { type: "prs"; prs: PrAttachments }                   // replaces the previous attachments
+  | { type: "guide"; key: string; state: "generating" | "ready" | "failed" }; // a PR guide's state changed
 ```
 
 - `baseline.agents`: every agent the server holds, exited included (`GET /api/agents`). `baseline.sessions` and `catalog.sessions`: every session, most recently prompted first, without `ownedBy` (clients match agents by `sessionFile`) or `updatedAt`. `baseline.branches`: cwd → branch for folders with a live agent inside a git work tree. `baseline.sidebar`: the sidebar state. `baseline.prs`: the PR attachments by session file. Every `SidebarView` the server sends resolves `mains` (`mainCheckoutIn`) as it sends it.
 - `event.seq` duplicates the agent's pair in `id:`, so clients never parse ids.
 - `agent` is sent on every `AgentInfo` change: status, attention, `isStreaming`, `sessionName`, `sessionFile`, `sessionId`.
-- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `prs` when the PR attachments change (attach, refresh, a poll that sees a new head, a clone, pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent.
+- `catalog` is sent when a rescan of pi's sessions dir (TUI sessions included), or the hourly tick, changes the streamed list (a session's `layout` and `missing` included; agent output, which moves only `updatedAt`, doesn't); `sidebar` when the sidebar state changes (`PATCH /api/sidebar`, or pruning); `prs` when the PR attachments change (attach, refresh, a poll that sees a new head, a clone, pruning); `branch` when the branch of a folder with a live agent is first read or changes, and with `null` when the folder loses its last live agent; `guide` when a PR guide's state changes (a job starts, ends or is cancelled; a key left with nothing stored or running is sent as `failed`), naming its guide key: clients refetch `GET /api/agents/:id/pr/guide` for the conversations showing that key ([`11-pr-guide.md`](11-pr-guide.md)).
 
 ## Events
 
@@ -415,6 +416,41 @@ Re-fetches the attached PR, re-pins its base and head, and sends the agent an up
 
 ### `POST /api/agents/:id/pr/poll`
 `git ls-remote origin refs/pull/<n>/head`; a head other than the stored `remoteHeadSha` is stored (a `prs` frame). Merged PRs and unattached conversations are skipped; failures are silent. → `204`.
+
+Attaching, and a Refresh that moves the pinned commits, also start the conversation's PR guide, sent to the agent as a `<pr-guide>` prompt once ready ([`11-pr-guide.md`](11-pr-guide.md)).
+
+### `GET /api/agents/:id/pr/guide`
+The conversation's PR guide, with what the Guide tab needs to render each unit it references.
+```ts
+type PrGuideUnit = {
+  path: string;
+  oldPath?: string;               // renames
+  status: GitFileDiff["status"];
+  additions: number;              // the file's added and removed lines (0 for a file without hunks)
+  deletions: number;
+} & (
+  | { patch: string }             // a hunk: a self-contained unified patch (its file's header lines, then the hunk)
+  | { noHunks: "binary" | "tooLarge" | "noContent" }  // a file-level unit (`<path>#0`)
+);
+type PrGuideResponse = {
+  key: string;                    // the guide key: `owner/repo#N@<baseSha>..<headSha>[:<folder>]`, as `guide` frames name it
+} & (
+  | { state: "generating" }
+  | { state: "failed"; error: string }  // also a key with nothing stored or running (a job lost to a restart): retry
+  | {
+      state: "ready";
+      id: string;                         // this generation of the guide; a Retry's guide gets another
+      guide: PrGuide;                     // sections and other changes (11-pr-guide.md, "Guide format")
+      units: Record<string, PrGuideUnit>; // every id in the guide's sections and `other`
+      oldRev: string;                     // short shas of the PR diff's sides, as in GitDiffResponse
+      newRev: string;
+    }
+);
+```
+→ `200 PrGuideResponse`. `400 invalid_body` when no PR is attached, `409 agent_busy` when the agent has no session yet, `502 git_failed` (reading the folder of an attachment stored without one, or a pinned commit missing for a ready guide's diff).
+
+### `POST /api/agents/:id/pr/guide/retry`
+Re-reads the PR's title and description with `gh pr view` and generates the guide again, replacing a running job and the stored guide; the new guide is sent to the agents attached to it once ready. → `200 PrGuideResponse` (`generating`). `400 invalid_body` when no PR is attached, `404 pr_not_found`, `409 agent_busy` when the agent has no session yet, `502 gh_failed`, `502 git_failed` (reading the folder of an attachment stored without one).
 
 ### `GET /api/agents/:id/git/status`
 → `200 { status: GitStatus | null }` (`null` outside a repo).

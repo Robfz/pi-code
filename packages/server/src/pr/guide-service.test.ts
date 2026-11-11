@@ -77,7 +77,8 @@ let dataDir: string;
 let store: GuideStore;
 let runner: ReturnType<typeof fakeRunner>;
 let service: GuideService;
-let events: [string, GuideState][];
+/** Every change: the key, its state, and whether a job just finished with it. */
+let events: [string, GuideState, boolean][];
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), "pi-code-guide-service-"));
@@ -85,8 +86,8 @@ beforeEach(() => {
   runner = fakeRunner();
   service = new GuideService(store, runner.run);
   events = [];
-  service.subscribe((k, state) => {
-    events.push([k, state]);
+  service.subscribe((k, state, { finished }) => {
+    events.push([k, state, finished]);
   });
 });
 
@@ -117,8 +118,8 @@ describe("GuideService", () => {
     expect(await service.status(key)).toEqual({ state: "ready", guide });
     expect(await store.read(key)).toEqual({ state: "ready", guide });
     expect(events).toEqual([
-      [key, { state: "generating" }],
-      [key, { state: "ready", guide }],
+      [key, { state: "generating" }, false],
+      [key, { state: "ready", guide }, true],
     ]);
   });
 
@@ -153,7 +154,7 @@ describe("GuideService", () => {
     await done;
     const failed = { state: "failed", error: "the guide job ended without calling submit_guide" };
     expect(await service.status(key)).toEqual(failed);
-    expect(events.at(-1)).toEqual([key, failed]);
+    expect(events.at(-1)).toEqual([key, failed, true]);
 
     const retry = service.ensure(input);
     await started(2);
@@ -187,9 +188,9 @@ describe("GuideService", () => {
     await second;
     expect(await service.status(key)).toEqual({ state: "ready", guide });
     expect(events).toEqual([
-      [key, { state: "generating" }],
-      [key, { state: "generating" }],
-      [key, { state: "ready", guide }],
+      [key, { state: "generating" }, false],
+      [key, { state: "generating" }, false],
+      [key, { state: "ready", guide }, true],
     ]);
   });
 
@@ -233,10 +234,24 @@ describe("GuideService", () => {
     expect(await service.status(key)).toEqual({ state: "none" });
     expect(await store.read(key)).toBeUndefined();
     expect(events).toEqual([
-      [key, { state: "generating" }],
-      [key, { state: "none" }],
+      [key, { state: "generating" }, false],
+      [key, { state: "none" }, false],
     ]);
     service.cancel(key);
+  });
+
+  it("reports a cancel that leaves a stored guide as ready, not as a finished job", async () => {
+    const stored = guideOf("Stored");
+    await store.write(key, stored);
+    const done = service.regenerate(input);
+    await started(1);
+    service.cancel(key);
+    await done;
+    await until(() => events.length === 2);
+    expect(events).toEqual([
+      [key, { state: "generating" }, false],
+      [key, { state: "ready", guide: stored }, false],
+    ]);
   });
 
   it("cancels a job still reading the store: none starts", async () => {
@@ -350,5 +365,48 @@ describe("GuideService", () => {
     expect(events.map(([, s]) => s.state)).toEqual(["generating", "ready"]);
     expect(logged).toHaveBeenCalledTimes(2);
     logged.mockRestore();
+  });
+
+  it("kills every job on close, dropping their results silently", async () => {
+    const other = { ...input, headSha: "c".repeat(40) };
+    void service.ensure(input);
+    void service.ensure(other);
+    await started(2);
+    await service.close();
+    expect(runner.jobs.map((j) => j.signal.aborted)).toEqual([true, true]);
+    expect(events.map(([, s]) => s.state)).toEqual(["generating", "generating"]);
+    expect(await service.status(key)).toEqual({ state: "none" });
+  });
+
+  it("prunes the stored guides but the kept keys'", async () => {
+    const other = guideInputKey({ ...input, folder: "sub/" });
+    await store.write(key, guideOf("Kept"));
+    await store.write(other, guideOf("Pruned"));
+    await service.prune([key]);
+    expect(await service.status(key)).toEqual({ state: "ready", guide: guideOf("Kept") });
+    expect(await service.status(other)).toEqual({ state: "none" });
+  });
+
+  it("prunes the other keys' jobs and failures", async () => {
+    const kept = { ...input, folder: "sub/" };
+    const failing = { ...input, headSha: "c".repeat(40) };
+    const running = service.ensure(input);
+    const keptJob = service.ensure(kept);
+    const failed = service.ensure(failing);
+    await started(3);
+    const job = (of: GuideInput) => runner.jobs.find((j) => j.input === of);
+    job(failing)?.reject(new Error("broke"));
+    await failed;
+    expect(await service.status(guideInputKey(failing))).toMatchObject({ state: "failed" });
+
+    await service.prune([guideInputKey(kept)]);
+    await running;
+    expect(job(input)?.signal.aborted).toBe(true);
+    expect(job(kept)?.signal.aborted).toBe(false);
+    expect(await service.status(key)).toEqual({ state: "none" });
+    expect(await service.status(guideInputKey(failing))).toEqual({ state: "none" });
+    expect(await service.status(guideInputKey(kept))).toEqual({ state: "generating" });
+    job(kept)?.resolve(guideOf("Kept"));
+    await keptJob;
   });
 });

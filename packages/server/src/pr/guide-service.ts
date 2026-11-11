@@ -13,8 +13,22 @@ export type GuideState = PrGuideStatus | { state: "none" };
 /** Generates the guide of `input`'s PR diff; aborting `signal` kills the job. */
 export type GuideRunner = (input: GuideInput, signal: AbortSignal) => Promise<PrGuide>;
 
-/** Told of every change of a key's state. */
-export type GuideListener = (key: string, state: GuideState) => void;
+/**
+ * Told of every change of a key's state; `finished` when a job just ended with it, rather than
+ * started (`generating`) or was cancelled (the key's state read again).
+ */
+export type GuideListener = (key: string, state: GuideState, change: { finished: boolean }) => void;
+
+/**
+ * A key with nothing stored, running or failed: its job was lost to a server restart (job state
+ * lives in memory) or cancelled.
+ */
+const NO_GUIDE = "the guide isn't being generated (the server may have restarted meanwhile); retry";
+
+/** A key's state as clients see it: `none` reads as failed, asking for a retry. */
+export function clientGuideState(state: GuideState): PrGuideStatus {
+  return state.state === "none" ? { state: "failed", error: NO_GUIDE } : state;
+}
 
 /** The guide key of `input`'s PR diff. */
 export function guideInputKey({ pr, baseSha, headSha, folder }: GuideInput): string {
@@ -34,7 +48,7 @@ export class GuideService {
   private readonly store: GuideStore;
   private readonly run: GuideRunner;
   private readonly jobs = new Map<string, Job>();
-  /** The last job's error by key, until the next job for it starts. */
+  /** The last job's error by key, until the next job for it starts or a prune drops the key. */
   private readonly failures = new Map<string, string>();
   private readonly listeners = new Set<GuideListener>();
 
@@ -85,8 +99,30 @@ export class GuideService {
     this.jobs.delete(key);
     if (!job.running) return;
     void this.status(key).then((state) => {
-      if (!this.jobs.has(key)) this.emit(key, state);
+      if (!this.jobs.has(key)) this.emit(key, state, false);
     });
+  }
+
+  /**
+   * Kills every job (shutdown) and resolves once they have ended; their results are dropped and
+   * listeners aren't told, so their keys read as after a restart.
+   */
+  close(): Promise<void> {
+    const jobs = [...this.jobs.values()];
+    this.jobs.clear();
+    for (const job of jobs) job.controller.abort();
+    return Promise.all(jobs.map((job) => job.done)).then(() => {});
+  }
+
+  /**
+   * Keeps only the guides of `keepKeys`: cancels the other keys' jobs, forgets their failures and
+   * deletes every other stored guide (`GuideStore.prune`).
+   */
+  prune(keepKeys: Iterable<string>): Promise<void> {
+    const keep = new Set(keepKeys);
+    for (const key of [...this.jobs.keys()]) if (!keep.has(key)) this.cancel(key);
+    for (const key of [...this.failures.keys()]) if (!keep.has(key)) this.failures.delete(key);
+    return this.store.prune(keep);
   }
 
   /** Listens to every change; returns the unsubscribe function. */
@@ -128,7 +164,7 @@ export class GuideService {
       if (!current()) return;
       job.running = true;
       this.failures.delete(key);
-      this.emit(key, { state: "generating" });
+      this.emit(key, { state: "generating" }, false);
       const guide = await this.run(input, job.controller.signal);
       if (!current()) return;
       job.storing = true;
@@ -142,13 +178,13 @@ export class GuideService {
     }
     if (!current()) return;
     this.jobs.delete(key);
-    this.emit(key, outcome);
+    this.emit(key, outcome, true);
   }
 
-  private emit(key: string, state: GuideState): void {
+  private emit(key: string, state: GuideState, finished: boolean): void {
     for (const listener of this.listeners) {
       try {
-        listener(key, state);
+        listener(key, state, { finished });
       } catch (e) {
         console.error("[guides] listener failed:", e);
       }

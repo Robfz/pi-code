@@ -88,14 +88,23 @@ function assertNotPrAttached(agent: Agent, isPrAttached?: (sessionFile: string) 
   }
 }
 
+/** Whether the agent can take commands: its pi is running, past the project-trust decision. */
+export function acceptsInput(agent: Agent): boolean {
+  return (
+    agent.status !== "awaiting_trust" &&
+    agent.status !== "exited" &&
+    agent.hasHost &&
+    agent.host.status === "running"
+  );
+}
+
 /** Rejects requests for agents that can't take them. */
 export function assertAcceptsInput(agent: Agent): void {
+  if (acceptsInput(agent)) return;
   if (agent.status === "awaiting_trust") {
     throw new ApiError("agent_busy", "the agent is waiting for the project-trust decision");
   }
-  if (agent.status === "exited" || !agent.hasHost || agent.host.status !== "running") {
-    throw new ApiError("agent_exited", "pi has exited; restart the agent");
-  }
+  throw new ApiError("agent_exited", "pi has exited; restart the agent");
 }
 
 /**

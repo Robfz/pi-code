@@ -36,7 +36,7 @@ The repo is the folder's `origin` remote only: its configured URL (`git config -
    - Open and closed PRs: `git merge-base <base tip> <head>`, the base branch's tip as just fetched, or with GitHub's `baseRefOid` when the base branch is gone (a stale local `origin/<base>` is ignored).
    - Merged PRs: the head is in the base branch by now, so that merge-base would be the head itself and the diff empty; `git merge-base <baseRefOid> <head>` instead (the merge-base with GitHub's recorded base), `baseRefOid` fetched by id if missing.
 8. `gh api --paginate repos/<o>/<r>/pulls/<n>/comments --jq '.[] | tojson'`: the inline review comments as GitHub's REST API returns them, one JSON object per line (a malformed line → `502 gh_failed`), mapped by pi-code (`line`, or `original_line` once outdated; `user.login`). It runs alongside steps 6–7, once step 5 has named the PR.
-9. Within the agent's session lock (`pipeline.exclusive`, which session-changing commands take too): if the agent has moved to another session file since step 1 (`/new`, a switch, a fork or clone during the fetch) → `409 agent_busy` "the conversation changed while the PR was fetched". Otherwise the context prompt (below) is sent as `prompt` with `streamingBehavior: "steer"` (pi applies it only while the agent runs), then the attachment is stored. → `200 { pr: PrAttachment }`.
+9. Within the agent's session lock (`pipeline.exclusive`, which session-changing commands take too): if the agent has moved to another session file since step 1 (`/new`, a switch, a fork or clone during the fetch) → `409 agent_busy` "the conversation changed while the PR was fetched". Otherwise the context prompt (below) is sent as `prompt` with `streamingBehavior: "steer"` (pi applies it only while the agent runs), then the attachment is stored. Then the conversation's PR guide starts: a stored guide for its diff is sent to the agent right away, else its job is started or joined and the guide sent once ready ([`11-pr-guide.md`](11-pr-guide.md), "Triggers"). → `200 { pr: PrAttachment }`.
 
 `gh` runs through an injectable `GhRunner` (`runGh`: `execFile("gh", …)`, `GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, a 30 s timeout, stdin closed). `git` runs through `runGit`; network commands use `fetchEnv` (ssh in batch mode), 60 s for fetches and 30 s for `ls-remote`.
 
@@ -128,6 +128,7 @@ interface StoredPr extends PrAttachment {
   commentsSince?: string;       // newest conversation comment or review time already reported to the agent
   reportedInline?: number[];    // ids of the inline review comments already reported to the agent
   previousHeadSha?: string;     // the head before the last refresh that moved it
+  folder?: string;              // the folder relative to the repository's top level (`repoFolder`), part of the PR guide's key; absent from attachments made before PR guides until a Refresh or a guide Retry
 }
 ```
 
@@ -141,6 +142,8 @@ interface StoredPr extends PrAttachment {
 Fetched PR commits are reachable from no branch or tag and would be garbage-collected. One ref per pinned commit, `refs/pi-code/pr/<number>/<sha>`, keeps them: each entry pins its head, its base, and its previous head once a refresh has moved it (the last update prompt's `git diff <old>..<new>` needs it after a force-push).
 
 After every store change (attach, refresh, poll, prune, copy), the store compares each repository's pins before and after and, where they differ or the repository's last sync failed, mirrors them with `syncPrRefs(gitDir, pins)` (`git/pr.ts`): `git for-each-ref refs/pi-code/pr/`, `git update-ref -d` for the refs nothing pins, `git update-ref <ref> <sha>` for the missing ones whose commit exists. Every update is attempted even when one fails (a ref lock held by another git); a sync with failures throws once done, is logged, and is repeated on the store's next change. Loading the store, after pruning, mirrors every repository `prs.json` names, the pruned entries' included (their refs go when nothing else pins them), with failures handled the same way: the record of failed syncs lives in memory, and the server can stop between writing the file and syncing. Pins are computed across every entry of the repository, so worktrees of one repo and cloned conversations share refs and a ref goes only once no conversation pins it. A repository that no longer exists is skipped.
+
+At the same moments, and once the store has loaded, the stored PR guides no attachment pins are deleted and their running jobs cancelled ([`11-pr-guide.md`](11-pr-guide.md), "Pruning").
 
 ## Updates
 
@@ -157,7 +160,7 @@ Merged PRs and conversations without a PR aren't polled; concurrent polls of a c
 
 ### Refresh
 
-The pane's Refresh (`POST /api/agents/:id/pr/refresh`) repeats steps 5–8 of `/pr` for the stored PR's number, re-pins base and head (and state, title, refs), and, with step 9's session check, sends the agent an update prompt, steering a running agent: a `<pr … update="true">` block with the new commits, state and base (each "was …" when changed), the commits since the previous head (`git log --first-parent --format='%h %s' <old>..<new>`, so a merge of the base branch counts once; at most 50, then "…and N more"; or a note that the head was force-pushed, or "No new commits."), `git diff <old>..<new>`, the changed files, the new comments, and the commands; then "Tell me briefly what changed." New comments are the conversation comments and reviews newer than `commentsSince` (a review counts at its submission), and the inline comments whose id isn't in `reportedInline`: an inline comment drafted in a pending review keeps its draft time once the review is submitted, so its time can't tell. The agent can't move the pane: asking it to look again only updates its own view.
+The pane's Refresh (`POST /api/agents/:id/pr/refresh`) repeats steps 5–8 of `/pr` for the stored PR's number, re-pins base and head (and state, title, refs), and, with step 9's session check, sends the agent an update prompt, steering a running agent: a `<pr … update="true">` block with the new commits, state and base (each "was …" when changed), the commits since the previous head (`git log --first-parent --format='%h %s' <old>..<new>`, so a merge of the base branch counts once; at most 50, then "…and N more"; or a note that the head was force-pushed, or "No new commits."), `git diff <old>..<new>`, the changed files, the new comments, and the commands; then "Tell me briefly what changed." When the new commits give another PR diff, the guide of the new diff starts as on attach, and the old diff's running guide job is cancelled unless another attachment still pins it ([`11-pr-guide.md`](11-pr-guide.md)). New comments are the conversation comments and reviews newer than `commentsSince` (a review counts at its submission), and the inline comments whose id isn't in `reportedInline`: an inline comment drafted in a pending review keeps its draft time once the review is submitted, so its time can't tell. The agent can't move the pane: asking it to look again only updates its own view.
 
 ## Review pane
 
@@ -193,8 +196,10 @@ Rows of attached conversations (agent rows by the agent's session file, session 
 | `POST /api/agents/:id/pr/poll` | check origin's head → `204` |
 | `GET /api/agents/:id/git/diff?pr=1` | the PR diff |
 | `GET /api/agents/:id/files/content?path&rev` | a file at a commit |
+| `GET /api/agents/:id/pr/guide` | the PR guide ([`11-pr-guide.md`](11-pr-guide.md)) |
+| `POST /api/agents/:id/pr/guide/retry` | regenerate the PR guide |
 
-Stream: `baseline.prs` and the `prs` frame. Error codes: `not_a_github_repo` (400), `pr_not_found` (404), `pr_attached` (409, also for tree navigation and `fork` of an attached conversation), `gh_failed` (502). Details in [`02-api-contract.md`](02-api-contract.md).
+Stream: `baseline.prs` and the `prs` frame, and the PR guide's `guide` frame. Error codes: `not_a_github_repo` (400), `pr_not_found` (404), `pr_attached` (409, also for tree navigation and `fork` of an attached conversation), `gh_failed` (502). Details in [`02-api-contract.md`](02-api-contract.md).
 
 ## Tests
 

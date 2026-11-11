@@ -237,6 +237,53 @@ export type PrGuideStatus =
   | { state: "ready"; guide: PrGuide }
   | { state: "failed"; error: string };
 
+/** Why a changed file has no hunks. */
+export type PrGuideNoHunks = "binary" | "tooLarge" | "noContent";
+
+/**
+ * One unit a guide references, as the Guide tab renders it: a hunk (`<path>#<n>`, with its
+ * `patch`) or a file without hunks (`<path>#0`, with `noHunks`). File fields describe the unit's
+ * file.
+ */
+export type PrGuideUnit = {
+  path: string;
+  /** The old path of a renamed file. */
+  oldPath?: string;
+  status: GitFileDiff["status"];
+  /** The file's added and removed lines, counted over its hunks (0 for a file without hunks). */
+  additions: number;
+  deletions: number;
+} & (
+  | {
+      /** A hunk's unified patch, its file's header lines included: one `DiffViewer` patch. */
+      patch: string;
+    }
+  | {
+      /** Why a file-level unit has no hunks. */
+      noHunks: PrGuideNoHunks;
+    }
+);
+
+/** `GET /api/agents/:id/pr/guide` and `POST …/pr/guide/retry`. */
+export type PrGuideResponse = {
+  /** The guide key (`owner/repo#N@<base>..<head>[:<folder>]`), which `guide` frames name. */
+  key: string;
+} & (
+  | { state: "generating" }
+  | { state: "failed"; error: string }
+  | {
+      state: "ready";
+      /** This generation of the guide (a hash of it): a regenerated guide gets another. */
+      id: string;
+      guide: PrGuide;
+      /** Every id the guide references (its sections' and `other`), resolved. */
+      units: Record<string, PrGuideUnit>;
+      /** Short shas of the PR diff's sides, as in `GitDiffResponse`. */
+      oldRev: string;
+      newRev: string;
+    }
+);
+
 // ---------------------------------------------------------------------------
 // Agents
 
@@ -360,7 +407,9 @@ export type StreamFrame =
   /** The PR attachments changed; replaces the previous ones. */
   | { type: "prs"; prs: PrAttachments }
   /** `null`: the folder stopped being tracked (no live agent left) after reporting a branch. */
-  | { type: "branch"; cwd: string; branch: string | null };
+  | { type: "branch"; cwd: string; branch: string | null }
+  /** A PR guide's state changed: refetch `GET /api/agents/:id/pr/guide` of the agents showing it. */
+  | { type: "guide"; key: string; state: PrGuideStatus["state"] };
 
 // ---------------------------------------------------------------------------
 // Dialog answers / tree navigation

@@ -11,6 +11,7 @@ import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
 import { PrService } from "./pr/pr-service.ts";
 import { SidebarStateStore } from "./store/sidebar-state.ts";
+import { testGuides } from "./testing/guides.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const PORT = 4180;
@@ -38,14 +39,15 @@ beforeAll(() => {
   });
   const catalog = new SessionCatalog({ agentDir: join(dist, "agent") });
   const sidebar = new SidebarStateStore(join(dist, "data"));
-  const prService = new PrService({ dataDir: join(dist, "data"), agents: () => manager });
+  const guides = testGuides(join(dist, "data"));
+  const prService = new PrService({ dataDir: join(dist, "data"), agents: () => manager, guides });
   app = createApp({
     hostname: HOSTNAME,
     port: PORT,
     staticDir: dist,
     manager,
     catalog,
-    hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store }),
+    hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides }),
     sidebar,
     prService,
     piVersion: async () => "9.9.9",

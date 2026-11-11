@@ -8,6 +8,7 @@ import type {
 import type { AgentManager } from "../agents/agent-manager.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { FolderBranches } from "../git/branches.ts";
+import { clientGuideState, type GuideService } from "../pr/guide-service.ts";
 import { type PrStore, prsView } from "../store/pr-store.ts";
 import { type SidebarStateStore, sidebarView } from "../store/sidebar-state.ts";
 
@@ -19,7 +20,7 @@ type BaselineFrame = Extract<StreamFrame, { type: "baseline" }>;
 /** Frames every connection receives, whatever it opened. */
 type HubFrame = Extract<
   StreamFrame,
-  { type: "agent" | "agent_closed" | "catalog" | "branch" | "sidebar" | "prs" }
+  { type: "agent" | "agent_closed" | "catalog" | "branch" | "sidebar" | "prs" | "guide" }
 >;
 
 interface StreamHubDeps {
@@ -27,6 +28,8 @@ interface StreamHubDeps {
   catalog: SessionCatalog;
   sidebar: SidebarStateStore;
   prs: PrStore;
+  /** PR guides, whose state changes are broadcast as `guide` frames. */
+  guides: Pick<GuideService, "subscribe">;
 }
 
 /** Every session, in the catalog's order, as `StreamedSession`s. */
@@ -38,9 +41,10 @@ async function catalogListing(catalog: SessionCatalog): Promise<StreamedSession[
 
 /**
  * The live stream's shared inputs: turns manager events, catalog rescans, folder branches,
- * sidebar state and PR attachment changes into frames for every connection, and keeps the session
- * list, the branch map, the sidebar state and the PR attachments in memory, so baselines are built
- * without I/O beyond resolving the pinned repos' main checkouts (`sidebarView`).
+ * sidebar state, PR attachment and PR guide changes into frames for every connection, and keeps
+ * the session list, the branch map, the sidebar state and the PR attachments in memory, so
+ * baselines are built without I/O beyond resolving the pinned repos' main checkouts
+ * (`sidebarView`).
  */
 export class StreamHub {
   /** Resolves once the first session list is computed and the sidebar state and PRs loaded. */
@@ -51,6 +55,7 @@ export class StreamHub {
   private readonly prs: PrStore;
   private readonly unsubscribeSidebar: () => void;
   private readonly unsubscribePrs: () => void;
+  private readonly unsubscribeGuides: () => void;
   private sessions: StreamedSession[] = [];
   /** `sessions` as JSON, to compare rescans against. */
   private sessionsJson = "[]";
@@ -82,6 +87,9 @@ export class StreamHub {
     );
     this.unsubscribePrs = deps.prs.subscribe((prs) =>
       this.broadcast({ type: "prs", prs: prsView(prs) }),
+    );
+    this.unsubscribeGuides = deps.guides.subscribe((key, state) =>
+      this.broadcast({ type: "guide", key, state: clientGuideState(state).state }),
     );
     this.ready = Promise.all([this.refreshCatalog(), deps.sidebar.ready, deps.prs.ready]).then(
       () => {},
@@ -156,14 +164,15 @@ export class StreamHub {
   }
 
   /**
-   * Stops following the manager, the sidebar state and the PRs, and closes the branch watches
-   * (shutdown).
+   * Stops following the manager, the sidebar state, the PRs and the guides, and closes the branch
+   * watches (shutdown).
    */
   close(): void {
     this.manager.off("agent", this.onAgent);
     this.manager.off("closed", this.onClosed);
     this.unsubscribeSidebar();
     this.unsubscribePrs();
+    this.unsubscribeGuides();
     this.branches.close();
   }
 

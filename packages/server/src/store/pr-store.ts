@@ -21,6 +21,11 @@ export interface StoredPr extends PrAttachment {
   reportedInline?: number[];
   /** The head before the last refresh moved it, which the update prompt diffs against. */
   previousHeadSha?: string;
+  /**
+   * The conversation's folder relative to the repository's top level (`repoFolder`), part of its
+   * PR guide's key. Absent from attachments made before PR guides, until a Refresh or Retry.
+   */
+  folder?: string;
 }
 
 export type StoredPrs = Record<string, StoredPr>;
@@ -49,6 +54,7 @@ function parseEntry(value: unknown): StoredPr | undefined {
     delete entry.reportedInline;
   }
   if (typeof v.previousHeadSha !== "string") delete entry.previousHeadSha;
+  if (typeof v.folder !== "string") delete entry.folder;
   return entry;
 }
 
@@ -58,6 +64,7 @@ export function prView({
   commentsSince: _since,
   reportedInline: _reported,
   previousHeadSha: _previous,
+  folder: _folder,
   ...pr
 }: StoredPr): PrAttachment {
   return pr;

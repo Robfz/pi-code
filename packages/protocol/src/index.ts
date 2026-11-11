@@ -6,6 +6,7 @@ export * from "./live.ts";
 export type * from "./pi-types.ts";
 export * from "./pr-blocks.ts";
 export * from "./pr-guide.ts";
+export * from "./pr-guide-blocks.ts";
 export * from "./recency.ts";
 export * from "./rpc.ts";
 export * from "./sidebar.ts";
