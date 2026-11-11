@@ -14,6 +14,7 @@ import {
   originRepo,
   pinBase,
   remotePrHead,
+  repoFolder,
   syncPrRefs,
 } from "./pr.ts";
 import { fetchOrigin } from "./refs.ts";
@@ -50,6 +51,14 @@ describe("originRepo", () => {
       code: "not_a_github_repo",
       message: "this repository has no origin remote",
     });
+  });
+});
+
+describe("repoFolder", () => {
+  it("is empty at the top level and the relative folder below it", async () => {
+    mkdirSync(join(clone, "sub", "dir"), { recursive: true });
+    expect(await repoFolder(clone)).toBe("");
+    expect(await repoFolder(join(clone, "sub", "dir"))).toBe("sub/dir/");
   });
 });
 

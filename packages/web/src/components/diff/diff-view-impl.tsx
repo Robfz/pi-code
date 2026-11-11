@@ -61,8 +61,12 @@ export interface DiffViewImplProps {
   onSelectLines?: (selection: LineSelection) => void;
   selection?: LineSelection | null;
   scrollTo?: { line: number; nonce: number };
-  /** Both sides' full text, for an all-context patch. */
-  content?: string | undefined;
+  /**
+   * Each side's full text: an all-context patch needs it, and with it the library expands the
+   * unchanged lines around hunks.
+   */
+  oldContent?: string | undefined;
+  newContent?: string | undefined;
 }
 
 export default function DiffViewImpl({
@@ -74,7 +78,8 @@ export default function DiffViewImpl({
   onSelectLines,
   selection,
   scrollTo,
-  content,
+  oldContent,
+  newContent,
 }: DiffViewImplProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<DiffViewWithMultiSelectRef>(null);
@@ -85,12 +90,12 @@ export default function DiffViewImpl({
     () => ({
       key: nextViewKey++,
       data: {
-        oldFile: { fileName: oldName, content: content ?? null },
-        newFile: { fileName: newName, content: content ?? null },
+        oldFile: { fileName: oldName, content: oldContent ?? null },
+        newFile: { fileName: newName, content: newContent ?? null },
         hunks,
       },
     }),
-    [oldName, newName, hunks, content],
+    [oldName, newName, hunks, oldContent, newContent],
   );
 
   // Applied in an effect: on mouseup the library marks the line just selected after calling

@@ -1,6 +1,7 @@
 import {
   formatFileBlock,
   formatPrBlock,
+  formatPrGuideBlock,
   initialLiveState,
   type SessionEntry,
 } from "@pi-code/protocol";
@@ -83,6 +84,8 @@ describe("promptTitle", () => {
       });
     expect(promptTitle(`${pr(false)}Give me an overview`)).toBe("#12 Speed up");
     expect(promptTitle(`${pr(true)}Tell me what changed`)).toBe("#12 Speed up (updated)");
+    const guide = formatPrGuideBlock({ number: 12, title: "Speed up", url: "u", text: "guide" });
+    expect(promptTitle(`${guide}Use it as a map`)).toBe("Review guide · #12 Speed up");
   });
 
   it("skips an expanded skill, else names it", () => {

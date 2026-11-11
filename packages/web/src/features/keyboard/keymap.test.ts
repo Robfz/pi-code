@@ -169,6 +169,7 @@ describe("keymapFor", () => {
     expect([...keymapFor("tab", false).direct.keys()]).toEqual(["b"]);
     for (const keymap of [keymapFor("app", false), keymapFor("tab", true)]) {
       expect(keymap.leader.get("c")?.command).toBe("conversation.new");
+      expect(keymap.leader.get("r")?.command).toBe("pr.review");
       expect(keymap.leader.get("p")?.command).toBe("conversation.previous");
       expect(keymap.leader.get("n")?.command).toBe("conversation.next");
       expect(keymap.leader.get("b")?.command).toBe("sidebar.toggle");
@@ -192,6 +193,7 @@ describe("keymapFor", () => {
     expect(shortcutsFor("conversation.new", keymapFor("app", false), "apple")).toEqual([
       ["⌘J", "C"],
     ]);
+    expect(shortcutsFor("pr.review", keymapFor("tab", false), "other")).toEqual([["Ctrl+J", "R"]]);
     expect(shortcutsFor("conversation.goTo", keymapFor("app", false), "apple")).toEqual([
       ["⌘J", "1–9"],
       ["⌘1–9"],

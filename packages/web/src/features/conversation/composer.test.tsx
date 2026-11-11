@@ -1,4 +1,9 @@
-import { formatFileBlock, initialLiveState, type LiveState } from "@pi-code/protocol";
+import {
+  formatFileBlock,
+  formatPrGuideBlock,
+  initialLiveState,
+  type LiveState,
+} from "@pi-code/protocol";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -219,6 +224,18 @@ describe("Composer", () => {
         expect(rpcBodies(calls)).toEqual([{ type: "clear_queue" }, { type: "abort" }]),
       );
       expect(box).toHaveValue("steer me\n\nlater\n\ndraft");
+    });
+
+    it("shows a queued PR guide prompt by its label, not its block", async () => {
+      const guide = `${formatPrGuideBlock({ number: 12, title: "Speed up", url: "u", text: "Guide" })}Use it as a map`;
+      await renderWithStore(
+        <QueueDisplay />,
+        hydratedStore({
+          live: live({ run: { active: true }, queue: { steering: [guide], followUp: [] } }),
+        }),
+      );
+      expect(screen.getByTestId("queue")).toHaveTextContent("SteerReview guide · #12 Speed up");
+      expect(screen.getByTestId("queue")).not.toHaveTextContent("<pr-guide");
     });
   });
 

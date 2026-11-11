@@ -9,8 +9,11 @@ import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { StreamHub } from "../live/stream-hub.ts";
+import { PrReviews } from "../pr/pr-reviews.ts";
 import { PrService } from "../pr/pr-service.ts";
+import { RepoRegistry } from "../store/repo-registry.ts";
 import { SidebarStateStore } from "../store/sidebar-state.ts";
+import { testGuides } from "../testing/guides.ts";
 
 const HOSTNAME = "mac.tail1234.ts.net";
 const TEST_DATA = fileURLToPath(new URL("../../test-data", import.meta.url));
@@ -24,16 +27,22 @@ beforeAll(() => {
   const manager = new AgentManager({ home, command: () => ({ bin: "/nonexistent", args: [] }) });
   const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: (f) => manager.ownerOf(f) });
   const sidebar = new SidebarStateStore(join(home, "data"));
-  const prService = new PrService({ dataDir: join(home, "data"), agents: () => manager });
+  const guides = testGuides(join(home, "data"));
+  const prService = new PrService({ dataDir: join(home, "data"), agents: () => manager, guides });
   app = createApp({
     hostname: HOSTNAME,
     port: 4180,
     staticDir: home,
     manager,
     catalog,
-    hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store }),
+    hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides }),
     sidebar,
     prService,
+    prReviews: new PrReviews({
+      manager,
+      prs: prService,
+      repos: new RepoRegistry(join(home, "data")),
+    }),
     piVersion: async () => "test",
   });
 });

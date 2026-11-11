@@ -9,12 +9,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { StreamFrame } from "@pi-code/protocol";
+import type { PrGuide, StreamFrame } from "@pi-code/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/agent-manager.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
+import { type GuideService, guideInputKey } from "../pr/guide-service.ts";
 import { PRS_FILE, PrStore } from "../store/pr-store.ts";
 import { SidebarStateStore } from "../store/sidebar-state.ts";
+import { testGuides } from "../testing/guides.ts";
 import { git, makeLayoutRepo } from "../testing/layout-repo.ts";
 import { StreamHub } from "./stream-hub.ts";
 
@@ -26,6 +28,11 @@ let dataRoot: string;
 /** A sidebar state store in the test's data dir. */
 function sidebarStore(): SidebarStateStore {
   return new SidebarStateStore(join(dataRoot, "data"));
+}
+
+/** PR guides in the test's data dir. */
+function guides(): GuideService {
+  return testGuides(join(dataRoot, "data"));
 }
 
 /** A PR store in the test's data dir. */
@@ -51,7 +58,13 @@ describe("StreamHub baseline", () => {
     });
     // Every session is owned, so `ownedBy` would show up if it weren't stripped.
     const catalog = new SessionCatalog({ agentDir: TEST_DATA, ownerOf: () => "agent-1" });
-    const hub = new StreamHub({ manager, catalog, sidebar: sidebarStore(), prs: prStore() });
+    const hub = new StreamHub({
+      manager,
+      catalog,
+      sidebar: sidebarStore(),
+      prs: prStore(),
+      guides: guides(),
+    });
     await hub.ready;
     const baseline = hub.baseline();
     expect(baseline.sessions.map((s) => s.id)).toEqual([
@@ -105,6 +118,7 @@ describe("StreamHub baseline", () => {
           commentsSince: "2026-01-02T00:00:00Z",
           reportedInline: [1],
           previousHeadSha: "a".repeat(40),
+          folder: "sub/",
         },
       }),
     );
@@ -113,9 +127,76 @@ describe("StreamHub baseline", () => {
       command: () => ({ bin: "/nonexistent", args: [] }),
     });
     const catalog = new SessionCatalog({ agentDir: TEST_DATA });
-    const hub = new StreamHub({ manager, catalog, sidebar: sidebarStore(), prs: prStore() });
+    const hub = new StreamHub({
+      manager,
+      catalog,
+      sidebar: sidebarStore(),
+      prs: prStore(),
+      guides: guides(),
+    });
     await hub.ready;
     expect(hub.baseline().prs).toEqual({ [file]: view });
+    hub.close();
+  });
+});
+
+describe("StreamHub PR guides", () => {
+  it("broadcasts each guide state change by key, a key without a guide as failed", async () => {
+    const manager = new AgentManager({
+      home: TEST_DATA,
+      command: () => ({ bin: "/nonexistent", args: [] }),
+    });
+    let finish: (guide: PrGuide) => void = () => {};
+    const service = testGuides(
+      join(dataRoot, "data"),
+      () => new Promise<PrGuide>((resolve) => (finish = resolve)),
+    );
+    const hub = new StreamHub({
+      manager,
+      catalog: new SessionCatalog({ agentDir: TEST_DATA }),
+      sidebar: sidebarStore(),
+      prs: prStore(),
+      guides: service,
+    });
+    await hub.ready;
+    const frames: StreamFrame[] = [];
+    hub.subscribe((f) => frames.push(f));
+    const input = {
+      cwd: dataRoot,
+      folder: "",
+      pr: { repo: "o/r", number: 1, title: "t", body: "" },
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+    };
+    const key = guideInputKey(input);
+    const done = service.ensure(input);
+    await vi.waitFor(() => expect(frames).toHaveLength(1));
+    finish({
+      version: 1,
+      repo: "o/r",
+      number: 1,
+      baseSha: "a",
+      headSha: "b",
+      sections: [],
+      other: [],
+    });
+    await done;
+    void service.regenerate(input);
+    await vi.waitFor(() => expect(frames).toHaveLength(3));
+    service.cancel(key);
+    await vi.waitFor(() => expect(frames).toHaveLength(4));
+    expect(frames).toEqual([
+      { type: "guide", key, state: "generating" },
+      { type: "guide", key, state: "ready" },
+      { type: "guide", key, state: "generating" },
+      { type: "guide", key, state: "ready" },
+    ]);
+    await service.prune([]);
+    void service.regenerate(input);
+    await vi.waitFor(() => expect(frames).toHaveLength(5));
+    service.cancel(key);
+    await vi.waitFor(() => expect(frames).toHaveLength(6));
+    expect(frames.at(-1)).toEqual({ type: "guide", key, state: "failed" });
     hub.close();
   });
 });
@@ -160,6 +241,7 @@ describe("StreamHub catalog refresh", () => {
       catalog: new SessionCatalog({ agentDir }),
       sidebar: sidebarStore(),
       prs: prStore(),
+      guides: guides(),
     });
     await hub.ready;
     const frames: StreamFrame[] = [];
@@ -197,6 +279,7 @@ describe("StreamHub catalog refresh", () => {
       catalog: new SessionCatalog({ agentDir }),
       sidebar: sidebarStore(),
       prs: prStore(),
+      guides: guides(),
     });
     await hub.ready;
     const frames: StreamFrame[] = [];
@@ -226,7 +309,13 @@ describe("StreamHub catalog refresh", () => {
       command: () => ({ bin: "/nonexistent", args: [] }),
     });
     const catalog = new SessionCatalog({ agentDir });
-    const hub = new StreamHub({ manager, catalog, sidebar: sidebarStore(), prs: prStore() });
+    const hub = new StreamHub({
+      manager,
+      catalog,
+      sidebar: sidebarStore(),
+      prs: prStore(),
+      guides: guides(),
+    });
     await hub.ready;
 
     const list = catalog.sessions.bind(catalog);
@@ -279,6 +368,7 @@ describe("StreamHub catalog refresh", () => {
       catalog: new SessionCatalog({ agentDir }),
       sidebar: sidebarStore(),
       prs: prStore(),
+      guides: guides(),
     });
     await hub.ready;
     const frames: StreamFrame[] = [];
@@ -325,6 +415,7 @@ describe("StreamHub sidebar state", () => {
       catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
       sidebar,
       prs: new PrStore(join(root, "data")),
+      guides: guides(),
     });
     await hub.ready;
     const frames: StreamFrame[] = [];
@@ -358,6 +449,7 @@ describe("StreamHub sidebar state", () => {
       catalog: new SessionCatalog({ agentDir: join(root, "agent") }),
       sidebar,
       prs: new PrStore(join(root, "data")),
+      guides: guides(),
     });
     await hub.ready;
     const frames: StreamFrame[] = [];

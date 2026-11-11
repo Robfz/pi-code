@@ -2,8 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { draftPrPrompt } from "@/features/review/pr";
-import { useReviewStore } from "@/features/review/review-state";
+import { draftPrPrompt, useConversationPr } from "@/features/review/pr";
+import { openPrGuide, paneTabs, useReviewStore } from "@/features/review/review-state";
 import { attachPr, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { useIsDesktop } from "@/lib/use-media-query";
@@ -27,6 +27,7 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
   const openSheet = useOpenSheet();
   const desktop = useIsDesktop();
   const store = useConversationStore();
+  const attached = useConversationPr() !== undefined;
 
   return useCallback(
     async (name: string, args: string) => {
@@ -101,15 +102,13 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
           await actions.copyLastAssistantText();
           break;
         case "diff":
-          if (desktop) useReviewStore.getState().toggleTab(agentId, "changes");
+          if (desktop) useReviewStore.getState().toggleTab(agentId, "changes", paneTabs(attached));
           else void navigate({ to: "/agents/$agentId/diff", params: { agentId } });
           break;
         case "pr":
           try {
             const pr = await attachPr(agentId, args);
-            const review = useReviewStore.getState();
-            review.setDiffMode(agentId, { mode: "pr" });
-            if (desktop) review.openPane(agentId, "changes");
+            openPrGuide(agentId, desktop);
             toast.success(`Attached PR #${pr.number}`);
           } catch (error) {
             if (args !== "" || !isApiRequestError(error, "pr_not_found")) {
@@ -135,6 +134,6 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
       }
       return true;
     },
-    [actions, agentId, cwd, desktop, navigate, openSheet, queryClient, store],
+    [actions, agentId, attached, cwd, desktop, navigate, openSheet, queryClient, store],
   );
 }

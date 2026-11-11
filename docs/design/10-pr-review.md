@@ -8,7 +8,7 @@ Terms:
 - **Pinned base / head**: the commits the pane and the agent look at, captured at `/pr` and moved only by Refresh.
 - **Outdated**: the PR's head on `origin` differs from the pinned head (new pushes; comments don't count).
 
-Everything runs through `gh` and `git` on the Mac, without a shell and without a checkout: the working tree is never touched. Posting comments and checking out the PR are done by the agent with `gh` and `git` when asked; pi-code has no UI for them.
+Everything runs through `gh` and `git` on the Mac, without a shell and without a checkout: the working tree is never touched, except in a PR review's own worktree, which attach and Refresh move to the pinned head ([`11-pr-guide.md`](11-pr-guide.md), "Review worktrees"). Posting comments and checking out the PR are done by the agent with `gh` and `git` when asked; pi-code has no UI for them.
 
 ## `/pr`
 
@@ -16,7 +16,7 @@ A client built-in slash command (`/pr [<url>|<number>]`, listed in the composer'
 
 - **With a number** (`12` or `#12`) or a **PR URL** (`https://github.com/<owner>/<repo>/pull/<n>…`): that PR of the folder's repo.
 - **Without an argument**: the PR of the folder's current branch (`gh pr view` without a number).
-- On success the client switches the Changes tab to PR mode, opens the review pane on Changes (desktop) and toasts "Attached PR #N". The server has already sent the agent the context prompt, which steers a running agent like a composer prompt.
+- On success the client switches the Changes tab to PR mode and the review panel to its Guide tab ([`11-pr-guide.md`](11-pr-guide.md), "Web client"), opens the review pane (desktop) and toasts "Attached PR #N". The server has already sent the agent the context prompt, which steers a running agent like a composer prompt.
 - **No PR for this branch** (`404 pr_not_found` without an argument): a toast "No PR for this branch" with a **Create draft PR** button, which sends the agent a fixed prompt (steering a running agent): push the branch with `git push -u origin '<branch>'` (single-quoted for the shell, since git allows `;`, `$` and backticks in branch names; `HEAD` when detached), create a draft PR with `gh pr create --draft`, writing the title and description from the changes, and report its number. The conversation isn't attached afterwards; the user runs `/pr` again.
 - Other errors are toasted with the server's message.
 
@@ -36,7 +36,7 @@ The repo is the folder's `origin` remote only: its configured URL (`git config -
    - Open and closed PRs: `git merge-base <base tip> <head>`, the base branch's tip as just fetched, or with GitHub's `baseRefOid` when the base branch is gone (a stale local `origin/<base>` is ignored).
    - Merged PRs: the head is in the base branch by now, so that merge-base would be the head itself and the diff empty; `git merge-base <baseRefOid> <head>` instead (the merge-base with GitHub's recorded base), `baseRefOid` fetched by id if missing.
 8. `gh api --paginate repos/<o>/<r>/pulls/<n>/comments --jq '.[] | tojson'`: the inline review comments as GitHub's REST API returns them, one JSON object per line (a malformed line → `502 gh_failed`), mapped by pi-code (`line`, or `original_line` once outdated; `user.login`). It runs alongside steps 6–7, once step 5 has named the PR.
-9. Within the agent's session lock (`pipeline.exclusive`, which session-changing commands take too): if the agent has moved to another session file since step 1 (`/new`, a switch, a fork or clone during the fetch) → `409 agent_busy` "the conversation changed while the PR was fetched". Otherwise the context prompt (below) is sent as `prompt` with `streamingBehavior: "steer"` (pi applies it only while the agent runs), then the attachment is stored. → `200 { pr: PrAttachment }`.
+9. Within the agent's session lock (`pipeline.exclusive`, which session-changing commands take too): if the agent has moved to another session file since step 1 (`/new`, a switch, a fork or clone during the fetch) → `409 agent_busy` "the conversation changed while the PR was fetched". Otherwise the context prompt (below) is sent as `prompt` with `streamingBehavior: "steer"` (pi applies it only while the agent runs), then the attachment is stored. Then the conversation's PR guide starts: a stored guide for its diff is sent to the agent right away, else its job is started or joined and the guide sent once ready ([`11-pr-guide.md`](11-pr-guide.md), "Triggers"). → `200 { pr: PrAttachment }`.
 
 `gh` runs through an injectable `GhRunner` (`runGh`: `execFile("gh", …)`, `GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, a 30 s timeout, stdin closed). `git` runs through `runGit`; network commands use `fetchEnv` (ssh in batch mode), 60 s for fetches and 30 s for `ls-remote`.
 
@@ -128,6 +128,7 @@ interface StoredPr extends PrAttachment {
   commentsSince?: string;       // newest conversation comment or review time already reported to the agent
   reportedInline?: number[];    // ids of the inline review comments already reported to the agent
   previousHeadSha?: string;     // the head before the last refresh that moved it
+  folder?: string;              // the folder relative to the repository's top level (`repoFolder`), part of the PR guide's key; absent from attachments made before PR guides until a Refresh or a guide Retry
 }
 ```
 
@@ -141,6 +142,8 @@ interface StoredPr extends PrAttachment {
 Fetched PR commits are reachable from no branch or tag and would be garbage-collected. One ref per pinned commit, `refs/pi-code/pr/<number>/<sha>`, keeps them: each entry pins its head, its base, and its previous head once a refresh has moved it (the last update prompt's `git diff <old>..<new>` needs it after a force-push).
 
 After every store change (attach, refresh, poll, prune, copy), the store compares each repository's pins before and after and, where they differ or the repository's last sync failed, mirrors them with `syncPrRefs(gitDir, pins)` (`git/pr.ts`): `git for-each-ref refs/pi-code/pr/`, `git update-ref -d` for the refs nothing pins, `git update-ref <ref> <sha>` for the missing ones whose commit exists. Every update is attempted even when one fails (a ref lock held by another git); a sync with failures throws once done, is logged, and is repeated on the store's next change. Loading the store, after pruning, mirrors every repository `prs.json` names, the pruned entries' included (their refs go when nothing else pins them), with failures handled the same way: the record of failed syncs lives in memory, and the server can stop between writing the file and syncing. Pins are computed across every entry of the repository, so worktrees of one repo and cloned conversations share refs and a ref goes only once no conversation pins it. A repository that no longer exists is skipped.
+
+At the same moments, and once the store has loaded, the stored PR guides no attachment pins are deleted and their running jobs cancelled ([`11-pr-guide.md`](11-pr-guide.md), "Pruning").
 
 ## Updates
 
@@ -157,7 +160,7 @@ Merged PRs and conversations without a PR aren't polled; concurrent polls of a c
 
 ### Refresh
 
-The pane's Refresh (`POST /api/agents/:id/pr/refresh`) repeats steps 5–8 of `/pr` for the stored PR's number, re-pins base and head (and state, title, refs), and, with step 9's session check, sends the agent an update prompt, steering a running agent: a `<pr … update="true">` block with the new commits, state and base (each "was …" when changed), the commits since the previous head (`git log --first-parent --format='%h %s' <old>..<new>`, so a merge of the base branch counts once; at most 50, then "…and N more"; or a note that the head was force-pushed, or "No new commits."), `git diff <old>..<new>`, the changed files, the new comments, and the commands; then "Tell me briefly what changed." New comments are the conversation comments and reviews newer than `commentsSince` (a review counts at its submission), and the inline comments whose id isn't in `reportedInline`: an inline comment drafted in a pending review keeps its draft time once the review is submitted, so its time can't tell. The agent can't move the pane: asking it to look again only updates its own view.
+The pane's Refresh (`POST /api/agents/:id/pr/refresh`) repeats steps 5–8 of `/pr` for the stored PR's number, re-pins base and head (and state, title, refs), and, with step 9's session check, sends the agent an update prompt, steering a running agent: a `<pr … update="true">` block with the new commits, state and base (each "was …" when changed), the commits since the previous head (`git log --first-parent --format='%h %s' <old>..<new>`, so a merge of the base branch counts once; at most 50, then "…and N more"; or a note that the head was force-pushed, or "No new commits."), `git diff <old>..<new>`, the changed files, the new comments, and the commands; then "Tell me briefly what changed." When the new commits give another PR diff, the guide of the new diff starts as on attach, and the old diff's running guide job is cancelled unless another attachment still pins it ([`11-pr-guide.md`](11-pr-guide.md)). New comments are the conversation comments and reviews newer than `commentsSince` (a review counts at its submission), and the inline comments whose id isn't in `reportedInline`: an inline comment drafted in a pending review keeps its draft time once the review is submitted, so its time can't tell. The agent can't move the pane: asking it to look again only updates its own view.
 
 ## Review pane
 
@@ -166,12 +169,12 @@ The pane's Refresh (`POST /api/agents/:id/pr/refresh`) repeats steps 5–8 of `/
 A third mode in the Changes tab, beside Uncommitted and Branch, offered only when the conversation is attached:
 
 - **Default**: the review state's `diff.mode` is unset until one is picked; `diffModeOf(diff, attached)` makes it `"pr"` for an attached conversation, else `"uncommitted"`. The mode lives in memory per agent id, so a reopened conversation, a new device or a reload opens in PR mode. `/pr` sets it to `"pr"`.
-- **Diff**: `GET /api/agents/:id/git/diff?pr=1` → `gitDiff(cwd, { range: { from: baseSha, to: headSha } })`: branch mode's tracked diff between two commits read from the object database, with `oldRev` and `newRev` (short shas). A conversation without a PR → `400 invalid_body`; a missing commit → `502 git_failed`. Query key `["agent", id, "pinned", "diff", baseSha, headSha]`, so a refresh loads the new diff; the content of fixed commits never changes, so it is outside the `review` prefix that `git_status` events invalidate, and never stale.
+- **Diff**: `GET /api/agents/:id/git/diff?pr=1` → `gitDiff(cwd, { range: { from: baseSha, to: headSha } })`: branch mode's tracked diff between two commits read from the object database, with `oldRev` and `newRev` (short shas), and its hunk options pinned (`-U3 --diff-algorithm=myers --inter-hunk-context=0 --indent-heuristic -l1000`) so its hunks, which the PR guide numbers, don't follow the user's git config ([`11-pr-guide.md`](11-pr-guide.md)). A conversation without a PR → `400 invalid_body`; a missing commit → `502 git_failed`. Query key `["agent", id, "pinned", "diff", baseSha, headSha]`, so a refresh loads the new diff; the content of fixed commits never changes, so it is outside the `review` prefix that `git_status` events invalidate, and never stale.
 - **References**: the head isn't on disk, so new-side lines name it too: `@<newRev>:./path:N-M`; old-side lines `@<oldRev>:./path:N-M`.
-- **Header** (`PrHeader`), one line under the toolbar: a pull request icon, `#N` linking to the PR on GitHub, the title; a "Merged" or "Closed" chip only for those states; "Outdated · Refresh" only while `remoteHeadSha ≠ headSha`. Refresh is disabled with a spinner while it runs; a failure toasts "Couldn't refresh the PR: <message>".
+- **Header** (`PrHeader`, `features/review/pr-header.tsx`, also the Guide tab's), one line under the toolbar: a pull request icon, `#N` linking to the PR on GitHub, the title; a "Merged" or "Closed" chip only for those states; "Outdated · Refresh" only while `remoteHeadSha ≠ headSha`. Refresh is disabled with a spinner while it runs; a failure toasts "Couldn't refresh the PR: <message>".
 - **Empty**: "No changes in this PR".
 
-It works in the desktop pane and on the phone's Diff page.
+It works in the desktop pane and on the phone's Diff page. Both also offer an attached conversation the Guide tab, first and shown by default ([`11-pr-guide.md`](11-pr-guide.md), "Web client").
 
 ### Version-named references
 
@@ -193,8 +196,10 @@ Rows of attached conversations (agent rows by the agent's session file, session 
 | `POST /api/agents/:id/pr/poll` | check origin's head → `204` |
 | `GET /api/agents/:id/git/diff?pr=1` | the PR diff |
 | `GET /api/agents/:id/files/content?path&rev` | a file at a commit |
+| `GET /api/agents/:id/pr/guide` | the PR guide ([`11-pr-guide.md`](11-pr-guide.md)) |
+| `POST /api/agents/:id/pr/guide/retry` | regenerate the PR guide |
 
-Stream: `baseline.prs` and the `prs` frame. Error codes: `not_a_github_repo` (400), `pr_not_found` (404), `pr_attached` (409, also for tree navigation and `fork` of an attached conversation), `gh_failed` (502). Details in [`02-api-contract.md`](02-api-contract.md).
+Stream: `baseline.prs` and the `prs` frame, and the PR guide's `guide` frame. Error codes: `not_a_github_repo` (400), `pr_not_found` (404), `pr_attached` (409, also for tree navigation and `fork` of an attached conversation), `gh_failed` (502). Details in [`02-api-contract.md`](02-api-contract.md).
 
 ## Tests
 

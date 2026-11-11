@@ -7,6 +7,7 @@ import {
   useCommand,
 } from "@/features/keyboard/keyboard-provider";
 import { ShellCommands } from "@/features/keyboard/shell-commands";
+import { PrReviewProvider } from "@/features/pr-review/pr-review-dialog";
 import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { Sidebar } from "@/features/sidebar/sidebar";
 import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
@@ -30,9 +31,9 @@ function SidebarCommand({ onToggle }: { onToggle(): void }) {
  * every screen. On desktop (≥1024px) the sidebar is docked on the left, shown on load and toggled
  * from the shell for the rest of the tab's life; below, it opens as a sheet from the conversation
  * header. Hosts the worktree dialogs and sheet (`WorktreeActionsProvider`), the Stop-or-Delete
- * dialog (`StopOrDeleteProvider`) and, inside both, the keyboard shortcuts (`KeyboardProvider`,
- * `ShellCommands`, and on desktop `sidebar.toggle`); the shortcuts' help button sits beside the
- * sidebar toggle.
+ * dialog (`StopOrDeleteProvider`), the "Review PR" dialog (`PrReviewProvider`) and, inside them,
+ * the keyboard shortcuts (`KeyboardProvider`, `ShellCommands`, and on desktop `sidebar.toggle`);
+ * the shortcuts' help button sits beside the sidebar toggle.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   useServiceWorkerMessages();
@@ -68,59 +69,61 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <WorktreeActionsProvider>
       <StopOrDeleteProvider>
-        <KeyboardProvider>
-          <ShellCommands />
-          {desktop && (
-            <SidebarCommand
-              onToggle={() => {
-                // Focus stays put unless it's in the sidebar, whose contents swap on every toggle.
-                if (document.getElementById(SIDEBAR_ID)?.contains(document.activeElement)) {
-                  focusToggle.current = true;
-                }
-                setSidebarOpen((open) => !open);
-              }}
-            />
-          )}
-          <div className="flex min-h-dvh overflow-x-clip bg-background text-foreground">
+        <PrReviewProvider>
+          <KeyboardProvider>
+            <ShellCommands />
             {desktop && (
-              <aside
-                id={SIDEBAR_ID}
-                data-region="side"
+              <SidebarCommand
+                onToggle={() => {
+                  // Focus stays put unless it's in the sidebar, whose contents swap on every toggle.
+                  if (document.getElementById(SIDEBAR_ID)?.contains(document.activeElement)) {
+                    focusToggle.current = true;
+                  }
+                  setSidebarOpen((open) => !open);
+                }}
+              />
+            )}
+            <div className="flex min-h-dvh overflow-x-clip bg-background text-foreground">
+              {desktop && (
+                <aside
+                  id={SIDEBAR_ID}
+                  data-region="side"
+                  className={cn(
+                    "sticky top-0 flex h-dvh shrink-0 flex-col border-r bg-surface-side",
+                    sidebarOpen
+                      ? "w-[280px] pt-[env(safe-area-inset-top)] [--titlebar-right:calc(100vw-280px)]"
+                      : "w-10 items-center pt-[max(0.5rem,env(safe-area-inset-top),env(titlebar-area-height,0px))]",
+                  )}
+                >
+                  {sidebarOpen ? (
+                    <Sidebar
+                      action={
+                        <>
+                          {toggle}
+                          <ShortcutsButton className="ml-auto" />
+                        </>
+                      }
+                    />
+                  ) : (
+                    <>
+                      {toggle}
+                      <ShortcutsButton />
+                    </>
+                  )}
+                </aside>
+              )}
+              <div
                 className={cn(
-                  "sticky top-0 flex h-dvh shrink-0 flex-col border-r bg-surface-side",
-                  sidebarOpen
-                    ? "w-[280px] pt-[env(safe-area-inset-top)] [--titlebar-right:calc(100vw-280px)]"
-                    : "w-10 items-center pt-[max(0.5rem,env(safe-area-inset-top),env(titlebar-area-height,0px))]",
+                  "min-w-0 flex-1",
+                  desktop && (sidebarOpen ? "[--titlebar-left:280px]" : "[--titlebar-left:2.5rem]"),
                 )}
               >
-                {sidebarOpen ? (
-                  <Sidebar
-                    action={
-                      <>
-                        {toggle}
-                        <ShortcutsButton className="ml-auto" />
-                      </>
-                    }
-                  />
-                ) : (
-                  <>
-                    {toggle}
-                    <ShortcutsButton />
-                  </>
-                )}
-              </aside>
-            )}
-            <div
-              className={cn(
-                "min-w-0 flex-1",
-                desktop && (sidebarOpen ? "[--titlebar-left:280px]" : "[--titlebar-left:2.5rem]"),
-              )}
-            >
-              <OfflineBanner />
-              {children}
+                <OfflineBanner />
+                {children}
+              </div>
             </div>
-          </div>
-        </KeyboardProvider>
+          </KeyboardProvider>
+        </PrReviewProvider>
       </StopOrDeleteProvider>
     </WorktreeActionsProvider>
   );

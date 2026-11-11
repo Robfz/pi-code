@@ -5,6 +5,7 @@
 
 export type CommandId =
   | "conversation.new"
+  | "pr.review"
   | "conversation.previous"
   | "conversation.next"
   | "conversation.goTo"
@@ -19,6 +20,7 @@ export interface Command {
 
 export const COMMANDS: readonly Command[] = [
   { id: "conversation.new", title: "New conversation", section: "Conversations" },
+  { id: "pr.review", title: "Review PR", section: "Conversations" },
   { id: "conversation.previous", title: "Previous conversation", section: "Conversations" },
   { id: "conversation.next", title: "Next conversation", section: "Conversations" },
   { id: "conversation.goTo", title: "Go to conversation 1–9", section: "Conversations" },

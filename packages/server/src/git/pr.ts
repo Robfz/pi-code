@@ -54,6 +54,12 @@ export async function gitCommonDir(cwd: string): Promise<string> {
   return stdout.trim();
 }
 
+/** `cwd` relative to the repository's top level: `""` there, else ending in `/`. */
+export async function repoFolder(cwd: string): Promise<string> {
+  const { stdout } = await git(cwd, ["rev-parse", "--show-prefix"]);
+  return stdout.replace(/\n$/, "");
+}
+
 export interface FetchedPr {
   /** The head as fetched. */
   headSha: string;

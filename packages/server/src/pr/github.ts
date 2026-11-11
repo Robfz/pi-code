@@ -136,6 +136,8 @@ export interface PrView {
   headRefName: string;
   baseRefOid: string;
   headRefOid: string;
+  /** The head branch lives in another repository (a fork). */
+  crossRepository: boolean;
   /** Top-level comments and reviews, oldest first. */
   comments: PrComment[];
 }
@@ -151,6 +153,7 @@ const VIEW_FIELDS = [
   "headRefName",
   "baseRefOid",
   "headRefOid",
+  "isCrossRepository",
   "comments",
   "reviews",
 ].join(",");
@@ -234,6 +237,7 @@ export async function viewPr(
     headRefName: str(data.headRefName),
     baseRefOid,
     headRefOid,
+    crossRepository: data.isCrossRepository === true,
     comments,
   };
 }

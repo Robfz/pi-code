@@ -19,11 +19,11 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 | Path | Screen |
 |---|---|
-| `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
+| `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation" and "Review PR"). Desktop: "Pick a conversation or start a new one" with New conversation and Review PR buttons |
 | `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree (phone). On desktop it opens the review pane on its Tree tab and replaces itself with `/agents/$agentId` |
-| `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
+| `/agents/$agentId/diff` | Review page (phone): the review panel's Changes and Files tabs, after Guide for a conversation attached to a PR. On desktop it opens the review pane and replaces itself with `/agents/$agentId` |
 | `/share` | Share-target landing (`?title&text&url`) |
 | `/settings` | Notifications permission, transcript density, theme, palette, about |
 
@@ -42,7 +42,7 @@ Home and the conversation are in the entry chunk; the other screens are lazy rou
 | Back chevron to Home | Hidden (conversation header, settings, sessions, "Conversation closed" and other placeholder screens) | Shown |
 | Settings | Sidebar footer | Home header, sidebar sheet footer |
 | Conversation column | Centred, `max-w-[46rem]` with `px-6`; fits the half beside the review pane while that is open | Centred, `max-w-[46rem]` with `px-4` |
-| Review panel | Pane beside the conversation (Changes, Files, Tree), opened from the activity rail at the right edge, `/diff` or `/tree` | `/agents/$agentId/diff` page (Changes, Files), from the header menu's Diff or `/diff`; the tree is its own page |
+| Review panel | Pane beside the conversation (Guide when attached to a PR, Changes, Files, Tree), opened from the activity rail at the right edge, `/diff`, `/tree` or `/pr` | `/agents/$agentId/diff` page (Guide when attached, Changes, Files), from the header menu's Diff or `/diff`; the tree is its own page |
 
 The phone tree and review pages keep their "Back to conversation" chevron. The sidebar ([`05-desktop.md`](05-desktop.md), "Sidebar") reads `live`:
 
@@ -57,7 +57,11 @@ The phone tree and review pages keep their "Back to conversation" chevron. The s
 
 Every listing (sidebar, Home, `/sessions`, the picker's recent projects) goes through `groupListing` (`features/catalog/listing-groups.ts`): items without `layout` form folder groups by cwd; items of a `<repo>/main` layout repo form one repo group, with the container's own items under its header and one sub-group per checkout, `main` first. In a missing worktree, exited agents and the sessions no live agent holds are disabled.
 
-`WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`); header buttons reach it through `useWorktreeActions`.
+`WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`; a PR review's branch goes with its worktree); header buttons reach it through `useWorktreeActions`.
+
+### Review PR
+
+`PrReviewProvider` (`features/pr-review/pr-review-dialog.tsx`), mounted once in `AppShell`, owns the "Review PR" dialog: one PR URL field, then `POST /api/pr-reviews`, which creates the PR's review worktree and a conversation attached to it; the conversation opens with its review pane on Guide (desktop) or its Guide tab (phone). Home's "Review PR" buttons (desktop and phone) and ⌘J R (`pr.review`, [`10-keyboard.md`](10-keyboard.md)) open it through `usePrReview`. Details in [`11-pr-guide.md`](11-pr-guide.md), "Review PR dialog".
 
 ### Stop and Delete
 
@@ -149,7 +153,7 @@ The **active branch** is derived from `transcript`: walk `parentId` from `leafId
 
 - **Header:** a single-line breadcrumb, `repo › worktree › title` in a `<repo>/main` layout (the container: `repo › title`), `folder › title` elsewhere; the folders are muted; only the title truncates, and as the header narrows (a container query, so the open review pane counts) the folders hide below 42rem of breadcrumb width, then the branch chip below 32rem; the title (`<h1>`) is the sidebar row's (`conversationTitle`: the session name, else its session's name or first prompt, else "New conversation"). Then the branch chip (`gitStatus.branch`), the connection dot, "Working · 2m 13s" while the agent works (from 640px), and on desktop the Fork… and Compact… icon buttons (tooltips), a separator, the density dropdown and `⋮`: Clone, Rename…, New session, Stop, Delete, with Tree, Diff, Fork… and Compact… first below the desktop breakpoint. Session commands need a ready agent. A conversation attached to a PR has no Fork… or Tree ([`10-pr-review.md`](10-pr-review.md), "Store").
 
-The header spans the width up to the activity rail; the transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop a 44px activity rail is pinned to the right edge, pane open or closed: Changes, Files and Tree icon buttons in a vertical toolbar (named "Changes panel" and so on, tooltips on the left, `aria-pressed` on the tab showing, a `status-input` dot on Changes while `gitStatus.dirty`, announced as "uncommitted changes"). A button opens the review pane on its tab; the button of the tab showing closes it, as does the pane's Close, which moves focus to that button. The pane and the conversation split the width the rail leaves ([`07-code-review.md`](07-code-review.md), "Desktop pane"), and the column fits the half left beside it; the header menu's Tree and Diff items exist only on phone.
+The header spans the width up to the activity rail; the transcript and the composer area share one centred column, `mx-auto w-full max-w-[46rem]` with `px-4` below 1024px and `px-6` from 1024px, on phone and desktop alike. Dialogs render as bottom sheets over this screen: on phone, modal; on desktop, non-modal and scoped to the conversation column (see Extension UI). On desktop a 44px activity rail is pinned to the right edge, pane open or closed: Guide (for a conversation attached to a PR), Changes, Files and Tree icon buttons in a vertical toolbar (named "Changes panel" and so on, tooltips on the left, `aria-pressed` on the tab showing, a `status-input` dot on Changes while `gitStatus.dirty`, announced as "uncommitted changes"). A button opens the review pane on its tab; the button of the tab showing closes it, as does the pane's Close, which moves focus to that button. The pane and the conversation split the width the rail leaves ([`07-code-review.md`](07-code-review.md), "Desktop pane"), and the column fits the half left beside it; the header menu's Tree and Diff items exist only on phone.
 
 The transcript follows live output (`useStickToBottom`): it stays at the bottom while content grows until the user scrolls up, and every send returns it there, as does the leaf moving to another branch (the tree's Go here). On desktop, where the transcript's right margin holds it (a container query, so the open review pane hides it), a conversation outline lists the prompts, marks the one in view and scrolls to one on click, which stops following live as a scroll up does ([`09-ui-overhaul.md`](09-ui-overhaul.md), "Conversation outline").
 
@@ -258,7 +262,7 @@ Built-in commands:
 | `/session` | stats sheet (`get_session_stats`) |
 | `/copy` | copy last assistant text |
 | `/diff` | toggle the review pane on Changes (desktop); review page (phone) |
-| `/pr [url\|number]` | attach the conversation to a GitHub PR and send the agent its context (`POST /pr`, [`10-pr-review.md`](10-pr-review.md)) |
+| `/pr [url\|number]` | attach the conversation to a GitHub PR and send the agent its context (`POST /pr`, [`10-pr-review.md`](10-pr-review.md)); opens the review pane on Guide (desktop) |
 | `/settings`, `/login`, `/logout`, `/trust`, `/export`, `/share`, `/import`, `/reload`, `/scoped-models`, `/hotkeys`, `/quit` … | "Use the TUI for this" |
 
 A conversation attached to a PR doesn't list `/tree` and `/fork`.
@@ -301,8 +305,9 @@ Actions are disabled while a run is active, with a notice sticking to the top of
 
 ## Review panel
 
-Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tabs, Refresh (Changes and Files) and the active tab, and renders as the desktop pane beside the conversation (Changes, Files, Tree) or as the phone's `/agents/$agentId/diff` page (Changes, Files):
+Specified in [`07-code-review.md`](07-code-review.md). `ReviewPanel` has the tabs, Refresh (Changes and Files) and the active tab, and renders as the desktop pane beside the conversation (Changes, Files, Tree) or as the phone's `/agents/$agentId/diff` page (Changes, Files); for a conversation attached to a PR both start with Guide and open on it until another tab is picked:
 
+- **Guide** (attached conversations only): the PR's review guide, its sections with explanations, Reviewed marks and file cards of their hunks under a sticky bar naming the current section ([`11-pr-guide.md`](11-pr-guide.md), "Web client"). `GET /pr/guide`, refetched on `guide` frames and every baseline.
 - **Changes**: `GET /git/diff` in uncommitted or branch mode, or PR mode for a conversation attached to a PR ([`10-pr-review.md`](10-pr-review.md)) (base from `GET /git/branches`, compared as `origin/<base>` when it exists, optional uncommitted changes; a Fetch button runs `POST /git/fetch` on demand and refreshes the diff and branches). File list with status and `+/−` counts; expanding a file shows its patch in a selectable diff viewer. Handles `binary`, `tooLarge`, `not_a_git_repo` and branch-mode errors.
 - **Files**: fuzzy search (`GET /files?q=`) and a file viewer (`GET /files/content`) with selectable lines.
 - **Tree** (pane only): the tree view (Tree screen).

@@ -23,8 +23,10 @@ import type {
   NavigateResponse,
   OpenAgentBody,
   PrAttachment,
+  PrGuideResponse,
   ProjectSummary,
   ProjectsResponse,
+  PrRefreshResponse,
   PrResponse,
   RemoveWorktreeBody,
   RpcCommandBody,
@@ -35,6 +37,7 @@ import type {
   SidebarResponse,
   SidebarView,
   Snapshot,
+  StartPrReviewBody,
   UiResponseBody,
   VapidKeyResponse,
 } from "@pi-code/protocol";
@@ -249,9 +252,32 @@ export async function attachPr(id: AgentId, pr?: string): Promise<PrAttachment> 
   return (await request<PrResponse>("POST", agentPath(id, "/pr"), pr ? { pr } : {})).pr;
 }
 
-/** Re-pins the attached PR to its latest commits and sends the agent what changed. */
-export async function refreshPr(id: AgentId): Promise<PrAttachment> {
-  return (await request<PrResponse>("POST", agentPath(id, "/pr/refresh"), {})).pr;
+/**
+ * Re-pins the attached PR to its latest commits and sends the agent what changed; in a review
+ * worktree, `worktreeWarning` says when the checkout couldn't follow.
+ */
+export function refreshPr(id: AgentId): Promise<PrRefreshResponse> {
+  return request<PrRefreshResponse>("POST", agentPath(id, "/pr/refresh"), {});
+}
+
+/**
+ * Starts a PR review from its URL: the server creates the review worktree, opens a conversation
+ * there and attaches it to the PR. `repo_not_found`, `worktree_exists`, `branch_exists`, … when
+ * it can't.
+ */
+export async function startPrReview(url: string): Promise<AgentInfo> {
+  const body: StartPrReviewBody = { url };
+  return (await request<AgentResponse>("POST", "/api/pr-reviews", body)).agent;
+}
+
+/** The attached PR's guide: generating, failed, or ready with its units. */
+export function getPrGuide(id: AgentId): Promise<PrGuideResponse> {
+  return request<PrGuideResponse>("GET", agentPath(id, "/pr/guide"));
+}
+
+/** Regenerates the attached PR's guide; its end arrives as a `guide` frame. */
+export function retryPrGuide(id: AgentId): Promise<PrGuideResponse> {
+  return request<PrGuideResponse>("POST", agentPath(id, "/pr/guide/retry"), {});
 }
 
 /** Checks the attached PR for new pushes; the result arrives as a `prs` frame. */

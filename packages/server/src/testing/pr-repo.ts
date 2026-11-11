@@ -91,6 +91,10 @@ export interface FakePr {
   url?: string;
   /** `gh pr view` without a number resolves to this PR. */
   current?: boolean;
+  /** Default: `pr-<number>`. */
+  headRefName?: string;
+  /** Its head branch is in a fork. */
+  fork?: boolean;
   comments?: { author: { login: string }; body: string; createdAt: string }[];
   reviews?: { author: { login: string }; body: string; state: string; submittedAt: string }[];
   /** As GitHub's REST API returns them. */
@@ -123,7 +127,8 @@ export function fakeGh(prs: FakePr[]): GhRunner & { calls: (readonly string[])[]
         author: { login: "alice" },
         body: "The description.",
         baseRefName: "main",
-        headRefName: `pr-${pr.number}`,
+        headRefName: pr.headRefName ?? `pr-${pr.number}`,
+        isCrossRepository: pr.fork ?? false,
         baseRefOid: pr.baseRefOid,
         headRefOid: pr.headRefOid,
         comments: pr.comments ?? [],

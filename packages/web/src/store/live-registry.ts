@@ -30,6 +30,9 @@
  * - The sidebar state (pins, collapsed groups) lives on the server: `setSidebar` applies a change
  *   at once and sends it; `sidebar` frames, this tab's own changes included, replace it.
  * - The PR attachments (session file → PR) come with the baseline; `prs` frames replace them.
+ * - A `guide` frame refetches the PR guide queries showing its key, and those not loaded yet,
+ *   whose key isn't known. A baseline refetches them all: frames sent while the stream was down
+ *   aren't replayed, and a restarted server lost its running jobs.
  */
 
 import {
@@ -37,6 +40,7 @@ import {
   type AgentInfo,
   applySidebarPatch,
   type PrAttachments,
+  type PrGuideResponse,
   type SequencedEvent,
   SIDEBAR_KEYS,
   type SidebarPatch,
@@ -49,7 +53,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { ackAgent, getSnapshot, isApiRequestError, patchSidebar, streamUrl } from "@/lib/api";
-import { queryKeys } from "@/lib/query-client";
+import { isPrGuideQuery, queryKeys } from "@/lib/query-client";
 import {
   type ConnectionState,
   type ConversationStore,
@@ -375,6 +379,9 @@ export class LiveRegistry {
           sidebar: frame.sidebar,
           prs: frame.prs,
         });
+        void this.queryClient.invalidateQueries({
+          predicate: ({ queryKey }) => isPrGuideQuery(queryKey),
+        });
         // A hydrated store's snapshot predates this stream (every hydrate reconnects), so its
         // absence means the agent is gone. A refetching store may be newer than the stream; its
         // snapshot tells.
@@ -432,6 +439,15 @@ export class LiveRegistry {
         return;
       case "prs":
         this.live.setState({ prs: frame.prs });
+        return;
+      case "guide":
+        void this.queryClient.invalidateQueries({
+          predicate: ({ queryKey, state }) => {
+            if (!isPrGuideQuery(queryKey)) return false;
+            const key = (state.data as PrGuideResponse | undefined)?.key;
+            return key === undefined || key === frame.key;
+          },
+        });
         return;
     }
   }

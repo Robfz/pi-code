@@ -10,7 +10,8 @@ import { useDrafts } from "@/store/drafts";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { makeAgent, makePr } from "@/test/fixtures";
 import { type FetchCall, hydratedStore, renderWithStore, stubFetch } from "@/test/render";
-import { ChangesView, EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./changes-view";
+import { ChangesView } from "./changes-view";
+import { EXPAND_MAX_FILES, EXPAND_MAX_LINES } from "./file-card";
 import { useReviewStore } from "./review-state";
 
 beforeAll(stubCanvas);
@@ -476,6 +477,18 @@ describe("ChangesView", () => {
       act(() => registry.live.setState({ prs: { [SESSION]: repinned } }));
       await waitFor(() => expect(prDiffs()).toHaveLength(2));
       expect(screen.getByTestId("pr-header")).not.toHaveTextContent("Outdated");
+    });
+
+    it("toasts the warning of a review worktree that stays at the previous commit", async () => {
+      const warning = vi.spyOn(toast, "warning").mockImplementation(() => "");
+      const message = "pr-12 has local changes; it stays at the previous commit";
+      await renderAttached({ ...PR, remoteHeadSha: "c".repeat(40) }, [
+        200,
+        { pr: { ...PR, headSha: "c".repeat(40) }, worktreeWarning: message },
+      ]);
+      const header = await screen.findByTestId("pr-header");
+      await userEvent.setup().click(within(header).getByRole("button", { name: "Refresh" }));
+      await waitFor(() => expect(warning).toHaveBeenCalledWith(message));
     });
 
     it("toasts why a refresh failed, still Outdated", async () => {

@@ -288,6 +288,27 @@ describe("gitDiff in branch mode", () => {
     expect(files["untracked.txt"]).toMatchObject({ status: "untracked" });
   });
 
+  it("follows the repository's diff config in every mode but PR mode", async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+    const changed = (...at: number[]) =>
+      `${lines.map((l, i) => (at.includes(i) ? `${l}!` : l)).join("\n")}\n`;
+    writeFileSync(join(repo, "a.txt"), changed());
+    commit("main");
+    git("checkout", "-q", "-b", "feature");
+    writeFileSync(join(repo, "a.txt"), changed(10));
+    commit("feature");
+    writeFileSync(join(repo, "a.txt"), changed(5, 10));
+    git("config", "diff.context", "0");
+
+    const contextLines = async (options: Parameters<typeof gitDiff>[1]) =>
+      (await gitDiff(repo, options)).files[0]?.patch?.split("\n").filter((l) => l.startsWith(" "));
+    expect(await contextLines({})).toEqual([]);
+    expect(await contextLines({ base: "main" })).toEqual([]);
+    expect(await contextLines({ base: "main", uncommitted: true })).toEqual([]);
+    const range = { from: git("rev-parse", "main").trim(), to: git("rev-parse", "HEAD").trim() };
+    expect(await contextLines({ range })).toHaveLength(6);
+  });
+
   it("abbreviates revisions to at least 7 digits whatever core.abbrev says", async () => {
     featureBranch();
     git("config", "core.abbrev", "4");
@@ -438,6 +459,85 @@ describe("gitDiff of a range", () => {
     const diff = await gitDiff(repo, { range: { from, to } });
     expect(diff.files.map((f) => [f.status, f.path])).toEqual([["modified", "a.txt"]]);
     expect(diff).toMatchObject({ oldRev: shortSha(from), newRev: shortSha(to) });
+  });
+
+  it("pins the hunk options against the repository's diff config", async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    writeFileSync(join(repo, "context.txt"), `${lines.join("\n")}\n`);
+    // Myers' paper example: myers and histogram match its lines differently.
+    writeFileSync(join(repo, "algorithm.txt"), "a\nb\nc\na\nb\nb\na\n");
+    writeFileSync(join(repo, "indent.c"), "int f() {\n\tif (a) {\n\t\ta();\n\t}\n\treturn 0;\n}\n");
+    commit("one");
+    const from = git("rev-parse", "HEAD").trim();
+    const changed = lines.map((l, i) => (i === 10 || i === 18 || i === 30 ? `${l} changed` : l));
+    writeFileSync(join(repo, "context.txt"), `${changed.join("\n")}\n`);
+    writeFileSync(join(repo, "algorithm.txt"), "c\nb\na\nb\na\nc\n");
+    // The added block can slide by one line; the indent heuristic picks where it starts.
+    writeFileSync(
+      join(repo, "indent.c"),
+      "int f() {\n\tif (a) {\n\t\tb();\n\t}\n\tif (a) {\n\t\ta();\n\t}\n\treturn 0;\n}\n",
+    );
+    commit("two");
+    const to = git("rev-parse", "HEAD").trim();
+
+    const settings = [
+      "diff.context=10",
+      "diff.algorithm=histogram",
+      "diff.interHunkContext=20",
+      "diff.indentHeuristic=false",
+    ];
+    // Each setting alone changes git's own output for this fixture, so each pin is exercised.
+    const defaults = [
+      "diff.context=3",
+      "diff.algorithm=myers",
+      "diff.interHunkContext=0",
+      "diff.indentHeuristic=true",
+    ];
+    const plain = (...config: string[]) =>
+      git(...[...defaults, ...config].flatMap((c) => ["-c", c]), "diff", "--no-color", from, to);
+    for (const setting of settings) expect(plain(setting)).not.toBe(plain());
+
+    const patches = async () =>
+      (await gitDiff(repo, { range: { from, to } })).files.map((f) => [f.path, f.patch]);
+    const pinned = await patches();
+    expect(pinned.map(([, patch]) => patch?.split("\n").filter((l) => l.startsWith("@@")))).toEqual(
+      [
+        ["@@ -1,7 +1,6 @@"],
+        ["@@ -8,7 +8,7 @@ line 6", "@@ -16,7 +16,7 @@ line 14", "@@ -28,7 +28,7 @@ line 26"],
+        ["@@ -1,4 +1,7 @@"],
+      ],
+    );
+    for (const setting of settings) git("config", ...setting.split("="));
+    expect(await patches()).toEqual(pinned);
+  });
+
+  it("pins the rename limit against the repository's diff config", async () => {
+    const lines = (name: string) => Array.from({ length: 20 }, (_, i) => `${name} ${i}\n`).join("");
+    writeFileSync(join(repo, "a.txt"), lines("a"));
+    writeFileSync(join(repo, "b.txt"), lines("b"));
+    commit("one");
+    const from = git("rev-parse", "HEAD").trim();
+    for (const name of ["a", "b"]) {
+      git("mv", `${name}.txt`, `${name}-moved.txt`);
+      writeFileSync(join(repo, `${name}-moved.txt`), `${lines(name)}extra\n`);
+    }
+    commit("two");
+    const to = git("rev-parse", "HEAD").trim();
+    // Two sources and two destinations pass a limit of 1: git itself skips the edited renames
+    // (and warns on stderr, kept out of the test output).
+    git("config", "diff.renameLimit", "1");
+    const plain = execFileSync("git", ["diff", "-M", "--name-status", from, to], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    expect(plain).not.toContain("R");
+
+    const { files } = await gitDiff(repo, { range: { from, to } });
+    expect(files.map((f) => [f.status, f.oldPath, f.path])).toEqual([
+      ["renamed", "a.txt", "a-moved.txt"],
+      ["renamed", "b.txt", "b-moved.txt"],
+    ]);
   });
 
   it("fails with git_failed when a commit is missing", async () => {

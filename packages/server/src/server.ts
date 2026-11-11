@@ -12,10 +12,15 @@ import { CuratorProxy } from "./curator/proxy.ts";
 import { CuratorRegistry } from "./curator/registry.ts";
 import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
+import { generateGuide } from "./pr/guide-job.ts";
+import { GuideService } from "./pr/guide-service.ts";
+import { PrReviews } from "./pr/pr-reviews.ts";
 import { PrService } from "./pr/pr-service.ts";
 import { type PushSender, PushService } from "./push/push-service.ts";
 import { SubscriptionStore } from "./push/subscriptions.ts";
 import { loadVapidDetails } from "./push/vapid.ts";
+import { GuideStore } from "./store/guide-store.ts";
+import { RepoRegistry } from "./store/repo-registry.ts";
 import { SidebarStateStore } from "./store/sidebar-state.ts";
 
 export const LISTEN_HOST = "127.0.0.1";
@@ -33,8 +38,8 @@ interface RunningServer {
   curators: CuratorRegistry;
   /**
    * Graceful shutdown: stop accepting requests, the session watcher and the idle sweep, close
-   * every agent in parallel (end stdin, SIGTERM after 5 s, SIGKILL after 10 s), close the branch
-   * watches, then drop the remaining connections.
+   * every agent in parallel (end stdin, SIGTERM after 5 s, SIGKILL after 10 s) and kill the PR
+   * guide jobs, close the branch watches, then drop the remaining connections.
    */
   shutdown(): Promise<void>;
 }
@@ -60,7 +65,15 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   });
 
   let push: PushService | undefined;
-  const prService = new PrService({ dataDir: config.dataDir, agents: () => manager });
+  const guideOptions = {
+    piBin: config.piBin,
+    extensionPath: config.guideExtensionPath,
+    model: config.guideModel,
+  };
+  const guides = new GuideService(new GuideStore(config.dataDir), (input, signal) =>
+    generateGuide(input, guideOptions, signal),
+  );
+  const prService = new PrService({ dataDir: config.dataDir, agents: () => manager, guides });
   const manager: AgentManager = new AgentManager({
     home: config.home,
     command: piCommand(config.piBin, config.extensionPath),
@@ -82,7 +95,9 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   });
 
   const sidebar = new SidebarStateStore(config.dataDir);
-  const hub = new StreamHub({ manager, catalog, sidebar, prs: prService.store });
+  const hub = new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides });
+  const repos = new RepoRegistry(config.dataDir);
+  repos.follow(hub);
   // Started before the hub's first scan reads the dir (asynchronously), so later changes are
   // picked up once the watch is running.
   const sessionsWatcher = watchSessions(
@@ -98,6 +113,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     hub,
     sidebar,
     prService,
+    prReviews: new PrReviews({ manager, prs: prService, repos }),
     push,
     piVersion: piVersionProbe(config.piBin),
   });
@@ -112,6 +128,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   } catch (e) {
     server.close();
     sessionsWatcher?.close();
+    await repos.close();
     hub.close();
     throw e;
   }
@@ -127,7 +144,8 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
       sessionsWatcher?.close();
       stopIdleSweep();
       prService.close();
-      await manager.closeAll();
+      await Promise.all([manager.closeAll(), guides.close()]);
+      await repos.close();
       hub.close();
       server.closeAllConnections();
       await proxyClosed;

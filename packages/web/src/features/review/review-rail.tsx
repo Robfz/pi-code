@@ -4,20 +4,37 @@
  * pane on its tab, or closes the pane when that tab is already showing.
  */
 
-import { FileDiffIcon, FolderTreeIcon, ListTreeIcon, type LucideIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  FileDiffIcon,
+  FolderTreeIcon,
+  ListTreeIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConversation } from "@/store/context";
-import { type ReviewTab, TAB_LABEL, useReview, useReviewStore } from "./review-state";
+import { useConversationPr } from "./pr";
+import {
+  paneTabs,
+  type ReviewTab,
+  TAB_LABEL,
+  tabOf,
+  useReview,
+  useReviewStore,
+} from "./review-state";
 
-const ITEMS: [ReviewTab, LucideIcon][] = [
-  ["changes", FileDiffIcon],
-  ["files", FolderTreeIcon],
-  ["tree", ListTreeIcon],
-];
+const ICONS: Record<ReviewTab, LucideIcon> = {
+  guide: BookOpenIcon,
+  changes: FileDiffIcon,
+  files: FolderTreeIcon,
+  tree: ListTreeIcon,
+};
 
 export function ReviewRail({ agentId }: { agentId: string }) {
-  const { paneOpen, tab } = useReview(agentId);
+  const review = useReview(agentId);
+  const tabs = paneTabs(useConversationPr() !== undefined);
+  const tab = tabOf(review, tabs);
   const dirty = useConversation((s) => s.gitStatus?.dirty === true);
   return (
     <div
@@ -31,8 +48,9 @@ export function ReviewRail({ agentId }: { agentId: string }) {
           hide most of its bottom border, leaving a stub, so it has none there. */}
       <div className="titlebar box-content h-12 w-full shrink-0 border-b pt-[env(safe-area-inset-top)] [@media(display-mode:window-controls-overlay)]:border-b-0 [--titlebar-left:100vw] [--titlebar-pad:0px] [--titlebar-right:100vw]" />
       <div className="flex flex-col items-center gap-1 py-2">
-        {ITEMS.map(([value, Icon]) => {
-          const active = paneOpen && tab === value;
+        {tabs.map((value) => {
+          const Icon = ICONS[value];
+          const active = review.paneOpen && tab === value;
           const marked = value === "changes" && dirty;
           return (
             <Tooltip key={value}>
@@ -43,7 +61,7 @@ export function ReviewRail({ agentId }: { agentId: string }) {
                   aria-pressed={active}
                   data-rail-tab={value}
                   className="relative text-muted-foreground aria-pressed:bg-sidebar-accent aria-pressed:text-foreground"
-                  onClick={() => useReviewStore.getState().toggleTab(agentId, value)}
+                  onClick={() => useReviewStore.getState().toggleTab(agentId, value, tabs)}
                 >
                   <Icon />
                   <span className="sr-only">

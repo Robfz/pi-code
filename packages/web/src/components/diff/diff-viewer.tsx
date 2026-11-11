@@ -3,7 +3,7 @@
  * viewer itself is at least 1024px wide (unified below, whatever the viewport), following the
  * app theme. Large patches are guarded behind a "Show anyway" button; patches the library can't
  * render fall back to plain text. With `onSelectLines`, line numbers are selectable
- * (`docs/design/07-code-review.md`, "Diff viewer").
+ * (`docs/design/07-code-review.md`, "Diff viewer"); with `fullText`, unchanged lines expand.
  */
 
 import { useTheme } from "next-themes";
@@ -11,12 +11,21 @@ import { Component, lazy, memo, type ReactNode, Suspense, useMemo, useState } fr
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useUiPrefs } from "@/store/ui-prefs";
-import { parsePatch } from "./parse-patch";
+import { type ParsedPatch, parsePatch } from "./parse-patch";
 import { useWidthAtLeast } from "./use-width-at-least";
 
 /** Diff body lines above which rendering waits for an explicit "Show anyway". */
 export const LARGE_DIFF_LINES = 1500;
 const LARGE_DIFF_CHARS = 400_000;
+
+function isLarge(parsed: ParsedPatch, patch: string, maxLines: number): boolean {
+  return parsed.lineCount > maxLines || patch.length > LARGE_DIFF_CHARS;
+}
+
+/** Whether the viewer, at the default threshold, holds `patch` back until "Show anyway". */
+export function isLargePatch(patch: string): boolean {
+  return isLarge(parsePatch(patch), patch, LARGE_DIFF_LINES);
+}
 
 /** Viewer width (px) from which the diff is split. */
 const SPLIT_MIN_WIDTH = 1024;
@@ -87,6 +96,12 @@ export interface DiffViewerProps {
    * without changes, so an all-context patch (`fileAsPatch`) needs it.
    */
   content?: string;
+  /**
+   * The full old and new text of the patch's file: the library then offers rows that expand the
+   * unchanged lines around the hunks. Giving it to a rendered view lays the view out and
+   * highlights it again.
+   */
+  fullText?: { old: string; new: string };
   /** Without its own border and rounding, for a container that frames it (the Changes tab). */
   flush?: boolean;
 }
@@ -101,6 +116,7 @@ export const DiffViewer = memo(function DiffViewer({
   scrollTo,
   unified = false,
   content,
+  fullText,
   flush = false,
 }: DiffViewerProps) {
   const parsed = useMemo(() => parsePatch(patch, fileName), [patch, fileName]);
@@ -115,8 +131,7 @@ export const DiffViewer = memo(function DiffViewer({
   if (parsed.hunks.length === 0) {
     return <p className={message}>No changes.</p>;
   }
-  const large = parsed.lineCount > maxLines || patch.length > LARGE_DIFF_CHARS;
-  if (large && !force) {
+  if (isLarge(parsed, patch, maxLines) && !force) {
     return (
       <div
         data-testid="diff-too-large"
@@ -153,7 +168,8 @@ export const DiffViewer = memo(function DiffViewer({
             onSelectLines={onSelectLines}
             selection={selection}
             scrollTo={scrollTo}
-            content={content}
+            oldContent={fullText?.old ?? content}
+            newContent={fullText?.new ?? content}
           />
         </Suspense>
       </DiffErrorBoundary>

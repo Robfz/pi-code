@@ -11,6 +11,7 @@ import { agentLayout, agentRecency, groupListing } from "@/features/catalog/list
 import { ProjectPicker } from "@/features/catalog/project-picker";
 import { GroupedSessionList } from "@/features/catalog/session-list";
 import { useNewConversationPicker } from "@/features/catalog/use-new-conversation-picker";
+import { ReviewPrButton } from "@/features/pr-review/pr-review-dialog";
 import { StopOrDeleteButton } from "@/features/sessions/stop-or-delete";
 import { agentStatus } from "@/lib/agent-status";
 import { errorMessage, listSessions } from "@/lib/api";
@@ -154,9 +155,12 @@ export function HomeScreen() {
         </nav>
       </header>
 
-      <Button className="h-11" onClick={() => setPickerOpen(true)}>
-        <PlusIcon /> New conversation
-      </Button>
+      <div className="flex gap-2">
+        <Button className="h-11 flex-1" onClick={() => setPickerOpen(true)}>
+          <PlusIcon /> New conversation
+        </Button>
+        <ReviewPrButton className="h-11 flex-1" />
+      </div>
       <ProjectPicker open={pickerOpen} onOpenChange={setPickerOpen} />
 
       <section className="flex flex-col gap-2">

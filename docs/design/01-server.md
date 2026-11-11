@@ -24,6 +24,7 @@ src/
 | `PI_CODE_HOSTNAME` | required | Tailnet hostname, e.g. `mac.tail1234.ts.net`; used for the Host allowlist and origin checks |
 | `PI_CODE_PI_BIN` | `pi` on `PATH` | pi executable |
 | `PI_CODE_DATA_DIR` | `~/.config/pi-code` | VAPID keys, push subscriptions |
+| `PI_CODE_GUIDE_MODEL` | `anthropic/claude-opus-5-5` | The PR guide job's model, as pi's `--model` takes it ([`11-pr-guide.md`](11-pr-guide.md)) |
 | `PI_AGENT_DIR` | `~/.pi/agent` | Sessions, trust.json; read-only except session deletion and worktree removal, which delete session files |
 
 Tailscale setup (documented in the README, not automated):
@@ -101,7 +102,7 @@ A buffer of the last events per agent, each `{ seq, event }` with the event's JS
 
 ## Live stream
 
-`GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, writes `retry:`, the baseline, then each opened agent's replay (or `resync`) as separate writes, and drains a per-connection frame queue of live frames to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the session list, the folder branch map, the sidebar state (pins and collapsed groups, `store/sidebar-state.ts`, persisted to `<dataDir>/sidebar.json`) and the PR attachments (`store/pr-store.ts`, persisted to `<dataDir>/prs.json`, [`10-pr-review.md`](10-pr-review.md)), kept in memory so a baseline needs no I/O.
+`GET /api/stream` (contract in `02-api-contract.md`, design in [`05-desktop.md`](05-desktop.md)): one SSE connection per browser tab. `http/stream.ts` parses the cursors, replays and subscribes to each opened agent's event log in one synchronous block, writes `retry:`, the baseline, then each opened agent's replay (or `resync`) as separate writes, and drains a per-connection frame queue of live frames to the socket with pings. `live/stream-hub.ts` (**StreamHub**) owns the inputs every connection shares: the manager's `agent` / `closed` events, the session list, the folder branch map, the sidebar state (pins and collapsed groups, `store/sidebar-state.ts`, persisted to `<dataDir>/sidebar.json`) and the PR attachments (`store/pr-store.ts`, persisted to `<dataDir>/prs.json`, [`10-pr-review.md`](10-pr-review.md)), kept in memory so a baseline needs no I/O. It also turns the PR guides' state changes (`pr/guide-service.ts`) into `guide` frames ([`11-pr-guide.md`](11-pr-guide.md)).
 
 - **Session watcher** (`catalog/watcher.ts`): `fs.watch` on pi's sessions dir, recursive, TUI sessions included. Changes that can affect the listing (project dirs, their `.jsonl` files) trigger a rescan (trailing throttle, 500 ms; one rescan at a time, changes during one coalescing into a single follow-up); the hub broadcasts `catalog` when the session list differs.
 - **Folder branches** (`git/branches.ts`): for each cwd with a live agent, the git dir is resolved once (worktree `.git` files included), watched non-recursively, and `HEAD` re-read on every event; changes go out as `branch` frames.
@@ -149,7 +150,8 @@ Read-only over `~/.pi/agent/sessions`, parsing the documented session format; se
 `POST` / `DELETE /api/worktrees` (`http/worktrees-routes.ts`, `git/worktrees.ts`; design in [`06-worktrees.md`](06-worktrees.md)) work only in `<repo>/main` layout repos, with paths canonicalized inside `$HOME` (`canonicalPath`, `paths.ts`).
 
 - **Create**: validate name, branch and base, refuse an existing folder or branch, `git fetch origin` (non-interactive ssh), `git worktree add -b <branch> <repo>/<name> <base>` (default `origin/main`, else `origin/master`), then `manager.open({ cwd })`. `fetch` and `worktree add` time out after 60 s.
-- **Remove**: without `force`, refuse uncommitted changes, untracked files or submodules (`worktree_dirty`); close the agents inside the worktree; `git worktree remove [--force]` from the main checkout (10 min timeout; a missing folder's record is pruned); delete the sessions whose header `cwd` is inside it (`trash`, else `unlink`; `catalog/session-files.ts`); refresh the catalog.
+- **Remove**: without `force`, refuse uncommitted changes, untracked files or submodules (`worktree_dirty`); close the agents inside the worktree; `git worktree remove [--force]` from the main checkout (10 min timeout; a missing folder's record is pruned), then `git branch -D` when the worktree's branch is a PR review's (marked `branch.<name>.pi-code-review`; a failure is reported after the next two steps); delete the sessions whose header `cwd` is inside it (`trash`, else `unlink`; `catalog/session-files.ts`); refresh the catalog.
+- **PR reviews**: `POST /api/pr-reviews { url }` (`http/pr-reviews-routes.ts`, `pr/pr-reviews.ts`; design in [`11-pr-guide.md`](11-pr-guide.md), "Entry") finds the URL's repository in the repo registry (`store/repo-registry.ts`, `<dataDir>/repos.json`: every layout repo the sessions and pins have shown, with its `origin`'s GitHub repo, a cache synced from the `StreamHub`'s `catalog` and `sidebar` frames), adds the review worktree `<repo>/pr-<number>` on the PR's head branch (`addReviewWorktree`), opens a conversation there and runs `PrService.attach`; any failure after the worktree exists removes it and its branch. Requests for one PR run one at a time.
 
 ## Session deletion
 
@@ -187,4 +189,4 @@ JSON responses under `/api` are gzipped for clients that accept it; `GET /api/st
 
 ## Shutdown
 
-SIGINT/SIGTERM → stop accepting requests, the session watcher and the idle sweep → close every agent (end stdin, same escalation as `close`) in parallel → close the branch watches and remaining connections → exit.
+SIGINT/SIGTERM → stop accepting requests, the session watcher and the idle sweep → close every agent (end stdin, same escalation as `close`) in parallel, and kill the PR guide jobs ([`11-pr-guide.md`](11-pr-guide.md)) → close the branch watches and remaining connections → exit.

@@ -83,6 +83,7 @@ describe("API errors", () => {
       "pi_timeout",
       "not_a_github_repo",
       "pr_not_found",
+      "repo_not_found",
       "pr_attached",
       "gh_failed",
     ];
