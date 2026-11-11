@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { draftPrPrompt, useConversationPr } from "@/features/review/pr";
-import { paneTabs, useReviewStore } from "@/features/review/review-state";
+import { openPrGuide, paneTabs, useReviewStore } from "@/features/review/review-state";
 import { attachPr, errorMessage, isApiRequestError, rpc } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import { useIsDesktop } from "@/lib/use-media-query";
@@ -108,10 +108,7 @@ export function useBuiltinCommands(): (name: string, args: string) => Promise<bo
         case "pr":
           try {
             const pr = await attachPr(agentId, args);
-            const review = useReviewStore.getState();
-            review.setDiffMode(agentId, { mode: "pr" });
-            if (desktop) review.openPane(agentId, "guide");
-            else review.setTab(agentId, "guide");
+            openPrGuide(agentId, desktop);
             toast.success(`Attached PR #${pr.number}`);
           } catch (error) {
             if (args !== "" || !isApiRequestError(error, "pr_not_found")) {

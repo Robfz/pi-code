@@ -7,7 +7,9 @@ import { createApp } from "../app.ts";
 import { SessionCatalog } from "../catalog/sessions.ts";
 import type { ErrorEnvelope } from "../errors.ts";
 import { StreamHub } from "../live/stream-hub.ts";
+import { PrReviews } from "../pr/pr-reviews.ts";
 import { PrService } from "../pr/pr-service.ts";
+import { RepoRegistry } from "../store/repo-registry.ts";
 import { SidebarStateStore } from "../store/sidebar-state.ts";
 import { testGuides } from "../testing/guides.ts";
 import { fakePiCommand, isAlive } from "../testing/stub-process.ts";
@@ -57,6 +59,11 @@ beforeEach(() => {
     hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides }),
     sidebar,
     prService,
+    prReviews: new PrReviews({
+      manager,
+      prs: prService,
+      repos: new RepoRegistry(join(root, "data")),
+    }),
     piVersion: async () => "test",
   });
 });

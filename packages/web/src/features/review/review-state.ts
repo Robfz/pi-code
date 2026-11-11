@@ -191,3 +191,14 @@ export const useReviewStore = create<ReviewStore>()(
 export function useReview(agentId: string): ReviewState {
   return useReviewStore((state) => state.reviews[agentId] ?? DEFAULT_REVIEW);
 }
+
+/**
+ * Shows a conversation just attached to a PR on its guide, as `/pr` and "Review PR" do: the
+ * Changes tab in PR mode, and the pane opened on Guide (desktop) or the Guide tab picked (phone).
+ */
+export function openPrGuide(agentId: string, desktop: boolean): void {
+  const review = useReviewStore.getState();
+  review.setDiffMode(agentId, { mode: "pr" });
+  if (desktop) review.openPane(agentId, "guide");
+  else review.setTab(agentId, "guide");
+}

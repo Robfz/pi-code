@@ -8,7 +8,7 @@ Terms:
 - **Pinned base / head**: the commits the pane and the agent look at, captured at `/pr` and moved only by Refresh.
 - **Outdated**: the PR's head on `origin` differs from the pinned head (new pushes; comments don't count).
 
-Everything runs through `gh` and `git` on the Mac, without a shell and without a checkout: the working tree is never touched. Posting comments and checking out the PR are done by the agent with `gh` and `git` when asked; pi-code has no UI for them.
+Everything runs through `gh` and `git` on the Mac, without a shell and without a checkout: the working tree is never touched, except in a PR review's own worktree, which attach and Refresh move to the pinned head ([`11-pr-guide.md`](11-pr-guide.md), "Review worktrees"). Posting comments and checking out the PR are done by the agent with `gh` and `git` when asked; pi-code has no UI for them.
 
 ## `/pr`
 

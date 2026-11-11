@@ -11,6 +11,7 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PrReviewProvider } from "@/features/pr-review/pr-review-dialog";
 import { StopOrDeleteProvider } from "@/features/sessions/stop-or-delete";
 import { WorktreeActionsProvider } from "@/features/worktrees/worktree-actions";
 import { createQueryClient } from "@/lib/query-client";
@@ -58,7 +59,9 @@ async function renderRoutes(ui: React.ReactNode, path = "/", live: Partial<LiveO
         <LiveRegistryProvider registry={registry}>
           <WorktreeActionsProvider>
             <StopOrDeleteProvider>
-              <Outlet />
+              <PrReviewProvider>
+                <Outlet />
+              </PrReviewProvider>
             </StopOrDeleteProvider>
           </WorktreeActionsProvider>
         </LiveRegistryProvider>

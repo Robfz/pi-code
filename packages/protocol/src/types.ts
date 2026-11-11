@@ -202,6 +202,23 @@ export interface PrResponse {
   pr: PrAttachment;
 }
 
+/** `POST /api/agents/:id/pr/refresh`. */
+export interface PrRefreshResponse extends PrResponse {
+  /**
+   * Set when the conversation runs in a review worktree that the new head couldn't move to
+   * (local changes, or git failing): what happened, for the user.
+   */
+  worktreeWarning?: string;
+}
+
+/**
+ * `POST /api/pr-reviews`: a GitHub PR URL. Creates the review worktree `<repo>/pr-<number>`,
+ * opens a conversation there and attaches it to the PR (`AgentResponse`).
+ */
+export interface StartPrReviewBody {
+  url: string;
+}
+
 // ---------------------------------------------------------------------------
 // PR guide (`docs/design/11-pr-guide.md`)
 

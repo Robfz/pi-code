@@ -1,13 +1,14 @@
 /**
  * Creating and removing linked worktrees of `<repo>/main` layout repos
- * (design/06-worktrees.md, "Server").
+ * (design/06-worktrees.md, "Server"), and the review worktrees of PR reviews
+ * (design/11-pr-guide.md, "Review worktrees").
  */
 import { lstat, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { layoutOf, mainCheckoutIn } from "../catalog/layout.ts";
 import { ApiError } from "../errors.ts";
 import { canonicalPath } from "../paths.ts";
-import { GitError, gitFailed, type RunGitOptions, runGit } from "./git.ts";
+import { GitError, gitFailed, gitTopLevel, type RunGitOptions, runGit } from "./git.ts";
 import { fetchOrigin } from "./refs.ts";
 
 /** `git worktree add`. */
@@ -65,16 +66,33 @@ export interface CreateWorktreeRequest {
   base?: string;
 }
 
+/** The canonical layout container `repo` (inside `home`) and its main checkout. */
+async function layoutContainer(
+  home: string,
+  path: string,
+): Promise<{ repo: string; main: string }> {
+  const repo = await canonicalPath(path, home);
+  const main = layoutOf(repo)?.role === "container" ? mainCheckoutIn(repo) : undefined;
+  if (main === undefined) {
+    throw new ApiError("not_in_layout", `${repo} is not a <repo>/main layout container`);
+  }
+  return { repo, main };
+}
+
+/** `worktree_exists` when `path` exists, `branch_exists` when the local branch does. */
+async function assertAvailable(main: string, path: string, branch: string): Promise<void> {
+  if (await exists(path)) throw new ApiError("worktree_exists", `${path} already exists`);
+  if (await refExists(main, `refs/heads/${branch}`)) {
+    throw new ApiError("branch_exists", `branch ${branch} already exists`);
+  }
+}
+
 /**
  * Fetches `origin` and adds the linked worktree `<repo>/<name>` on the new branch `branch`,
  * started at `base`. Returns its path.
  */
 export async function createWorktree(req: CreateWorktreeRequest): Promise<string> {
-  const repo = await canonicalPath(req.repo, req.home);
-  const main = layoutOf(repo)?.role === "container" ? mainCheckoutIn(repo) : undefined;
-  if (main === undefined) {
-    throw new ApiError("not_in_layout", `${repo} is not a <repo>/main layout container`);
-  }
+  const { repo, main } = await layoutContainer(req.home, req.repo);
 
   const { name, branch = req.name, base } = req;
   if (!validName(name)) {
@@ -92,10 +110,7 @@ export async function createWorktree(req: CreateWorktreeRequest): Promise<string
 
   // Checked before the fetch, so a doomed request spends no network.
   const path = join(repo, name);
-  if (await exists(path)) throw new ApiError("worktree_exists", `${path} already exists`);
-  if (await refExists(main, `refs/heads/${branch}`)) {
-    throw new ApiError("branch_exists", `branch ${branch} already exists`);
-  }
+  await assertAvailable(main, path, branch);
 
   await fetchOrigin(main);
 
@@ -139,13 +154,18 @@ async function hasSubmodules(path: string): Promise<boolean> {
 }
 
 /**
- * `worktree_dirty` when plain `git worktree remove` would refuse the worktree at `path`: it has
- * uncommitted changes, untracked files or submodules. A missing folder passes.
+ * Whether the checkout at `path` has no uncommitted changes, untracked files or submodules: what
+ * plain `git worktree remove` requires. A missing folder counts as clean.
  */
-export async function assertClean(path: string): Promise<void> {
-  if (!(await exists(path))) return;
+export async function isClean(path: string): Promise<boolean> {
+  if (!(await exists(path))) return true;
   const { stdout } = await git(path, ["status", "--porcelain=v1", "--untracked-files=normal"]);
-  if (stdout !== "" || (await hasSubmodules(path))) {
+  return stdout === "" && !(await hasSubmodules(path));
+}
+
+/** `worktree_dirty` when plain `git worktree remove` would refuse the worktree at `path`. */
+export async function assertClean(path: string): Promise<void> {
+  if (!(await isClean(path))) {
     throw new ApiError("worktree_dirty", `${path} has uncommitted changes or submodules`);
   }
 }
@@ -176,4 +196,171 @@ export async function removeWorktree(main: string, path: string, force: boolean)
     }
     throw gitFailed(args, e);
   }
+}
+
+/**
+ * The git-config key marking `branch` as a review branch: `branch.<name>.pi-code-review` holds the
+ * PR's number. It goes away with the branch.
+ */
+function reviewMarker(branch: string): string {
+  return `branch.${branch}.pi-code-review`;
+}
+
+/** The PR number `branch` is marked with, if any. */
+async function reviewMarkOf(main: string, branch: string): Promise<string | undefined> {
+  const { code, stdout } = await git(main, ["config", "--get", reviewMarker(branch)], {
+    okCodes: [0, 1],
+  });
+  return code === 0 ? stdout.trim() : undefined;
+}
+
+/** The folder name of PR `number`'s review worktree in its layout container. */
+export function reviewWorktreeName(number: number): string {
+  return `pr-${number}`;
+}
+
+/** The branch checked out in each of `main`'s worktrees, by path (folders may be missing). */
+async function checkedOutBranches(main: string): Promise<Map<string, string>> {
+  const { stdout } = await git(main, ["worktree", "list", "--porcelain", "-z"]);
+  const branches = new Map<string, string>();
+  let current: string | undefined;
+  for (const field of stdout.split("\0")) {
+    if (field.startsWith("worktree ")) current = field.slice("worktree ".length);
+    else if (current !== undefined && field.startsWith("branch refs/heads/")) {
+      branches.set(current, field.slice("branch refs/heads/".length));
+    }
+  }
+  return branches;
+}
+
+/**
+ * Deletes `branch` when it is a leftover of PR `number`'s review: marked with that number and
+ * checked out in no worktree, as after a removal whose `git branch -D` failed.
+ */
+async function deleteLeftoverReviewBranch(
+  main: string,
+  branch: string,
+  number: number,
+): Promise<void> {
+  if (!(await refExists(main, `refs/heads/${branch}`))) return;
+  if ((await reviewMarkOf(main, branch)) !== String(number)) return;
+  if ([...(await checkedOutBranches(main)).values()].includes(branch)) return;
+  await deleteBranch(main, branch);
+}
+
+export interface AddReviewWorktreeRequest {
+  /** `$HOME`: `repo` must be inside it. */
+  home: string;
+  /** The layout container. */
+  repo: string;
+  /** The PR's number. */
+  number: number;
+  /** The PR's head branch, on `origin`. */
+  branch: string;
+}
+
+/**
+ * Adds the review worktree `<repo>/pr-<number>` on a new local branch named after the PR's head
+ * branch, fetched from `origin` and tracking `origin/<branch>`, and marks the branch as a review
+ * branch. Returns its path. A leftover review branch of this PR is deleted first; throws
+ * `worktree_exists` or `branch_exists` before fetching anything. A failure after the fetch
+ * removes what was created.
+ */
+export async function addReviewWorktree(req: AddReviewWorktreeRequest): Promise<string> {
+  const { repo, main } = await layoutContainer(req.home, req.repo);
+  const { branch, number } = req;
+  if (!(await validBranch(main, branch))) {
+    throw new ApiError("invalid_body", `the PR's head branch isn't a valid branch name: ${branch}`);
+  }
+  const path = join(repo, reviewWorktreeName(number));
+  await deleteLeftoverReviewBranch(main, branch, number);
+  await assertAvailable(main, path, branch);
+
+  const remote = `refs/remotes/origin/${branch}`;
+  try {
+    await fetchOrigin(main, [`+refs/heads/${branch}:${remote}`]);
+  } catch (e) {
+    if (e instanceof ApiError && e.message.includes("couldn't find remote ref")) {
+      throw new ApiError("git_failed", `the PR's head branch ${branch} isn't on origin`);
+    }
+    throw e;
+  }
+  try {
+    // The upstream is set by hand: `--track` refuses a start point that origin's fetch refspec
+    // doesn't map, as in single-branch clones.
+    await git(main, ["worktree", "add", "--no-track", "-b", branch, path, remote], {
+      timeoutMs: SLOW_GIT_TIMEOUT_MS,
+    });
+    await git(main, ["config", `branch.${branch}.remote`, "origin"]);
+    await git(main, ["config", `branch.${branch}.merge`, `refs/heads/${branch}`]);
+    await git(main, ["config", reviewMarker(branch), String(number)]);
+  } catch (e) {
+    // Neither the branch nor the folder existed before (`assertAvailable`).
+    await discardReviewWorktree(main, path, branch).catch(() => {});
+    throw e;
+  }
+  return path;
+}
+
+/**
+ * Removes a review worktree just created and its branch, unpushed commits included (a review
+ * that couldn't start); either may be missing, as after a `git worktree add` that failed. Both
+ * are attempted; throws `git_failed` when either fails.
+ */
+export async function discardReviewWorktree(
+  main: string,
+  path: string,
+  branch: string,
+): Promise<void> {
+  let failure: unknown;
+  await removeWorktree(main, path, true).catch((e: unknown) => {
+    failure = e;
+  });
+  try {
+    if (await refExists(main, `refs/heads/${branch}`)) await deleteBranch(main, branch);
+  } catch (e) {
+    failure ??= e;
+  }
+  if (failure !== undefined) throw failure;
+}
+
+/** `git branch -D <branch>` from the main checkout `main`. */
+export async function deleteBranch(main: string, branch: string): Promise<void> {
+  await git(main, ["branch", "-D", branch]);
+}
+
+/**
+ * The branch checked out in the linked worktree at `path`, as `main` lists it (the folder may be
+ * missing), when it is marked as a review branch.
+ */
+export async function reviewBranchAt(main: string, path: string): Promise<string | undefined> {
+  const branch = (await checkedOutBranches(main)).get(path);
+  if (branch === undefined) return undefined;
+  return (await reviewMarkOf(main, branch)) === undefined ? undefined : branch;
+}
+
+/**
+ * The top level of the checkout holding `cwd` when it is the review worktree of PR `number`: its
+ * branch carries the review marker with that number.
+ */
+export async function reviewWorktreeOf(cwd: string, number: number): Promise<string | undefined> {
+  const top = await gitTopLevel(cwd);
+  if (top === null) return undefined;
+  const { code, stdout } = await git(top, ["symbolic-ref", "--quiet", "HEAD"], {
+    okCodes: [0, 1],
+  });
+  const ref = stdout.trim();
+  if (code !== 0 || !ref.startsWith("refs/heads/")) return undefined;
+  const branch = ref.slice("refs/heads/".length);
+  return (await reviewMarkOf(top, branch)) === String(number) ? top : undefined;
+}
+
+/** The commit checked out at `path`. */
+export async function headOf(path: string): Promise<string> {
+  return (await git(path, ["rev-parse", "HEAD"])).stdout.trim();
+}
+
+/** `git reset --hard <sha>` in the checkout at `path`. */
+export async function resetHard(path: string, sha: string): Promise<void> {
+  await git(path, ["reset", "--quiet", "--hard", sha], { timeoutMs: SLOW_GIT_TIMEOUT_MS });
 }

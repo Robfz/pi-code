@@ -96,6 +96,7 @@ const VIEW = {
   headRefName: "feature",
   baseRefOid: "a".repeat(40),
   headRefOid: "b".repeat(40),
+  isCrossRepository: false,
   comments: [{ author: { login: "bob" }, body: "Nice", createdAt: "2026-01-02T00:00:00Z" }],
   reviews: [
     {
@@ -145,7 +146,9 @@ describe("viewPr", () => {
       number: 7,
       state: "open",
       author: "alice",
+      headRefName: "feature",
       headRefOid: "b".repeat(40),
+      crossRepository: false,
     });
     // Comments and reviews, oldest first, without pending and empty "commented" reviews.
     expect(view.comments).toEqual([

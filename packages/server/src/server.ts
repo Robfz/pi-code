@@ -14,11 +14,13 @@ import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
 import { generateGuide } from "./pr/guide-job.ts";
 import { GuideService } from "./pr/guide-service.ts";
+import { PrReviews } from "./pr/pr-reviews.ts";
 import { PrService } from "./pr/pr-service.ts";
 import { type PushSender, PushService } from "./push/push-service.ts";
 import { SubscriptionStore } from "./push/subscriptions.ts";
 import { loadVapidDetails } from "./push/vapid.ts";
 import { GuideStore } from "./store/guide-store.ts";
+import { RepoRegistry } from "./store/repo-registry.ts";
 import { SidebarStateStore } from "./store/sidebar-state.ts";
 
 export const LISTEN_HOST = "127.0.0.1";
@@ -94,6 +96,8 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
 
   const sidebar = new SidebarStateStore(config.dataDir);
   const hub = new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides });
+  const repos = new RepoRegistry(config.dataDir);
+  repos.follow(hub);
   // Started before the hub's first scan reads the dir (asynchronously), so later changes are
   // picked up once the watch is running.
   const sessionsWatcher = watchSessions(
@@ -109,6 +113,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
     hub,
     sidebar,
     prService,
+    prReviews: new PrReviews({ manager, prs: prService, repos }),
     push,
     piVersion: piVersionProbe(config.piBin),
   });
@@ -123,6 +128,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
   } catch (e) {
     server.close();
     sessionsWatcher?.close();
+    await repos.close();
     hub.close();
     throw e;
   }
@@ -139,6 +145,7 @@ export async function startServer(config: Config, opts: StartOptions = {}): Prom
       stopIdleSweep();
       prService.close();
       await Promise.all([manager.closeAll(), guides.close()]);
+      await repos.close();
       hub.close();
       server.closeAllConnections();
       await proxyClosed;

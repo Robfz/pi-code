@@ -19,7 +19,7 @@ React SPA, mobile-first, installable PWA, with a desktop shell at ≥1024px. Sou
 
 | Path | Screen |
 |---|---|
-| `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation"). Desktop: "Pick a conversation or start a new one" with a New conversation button |
+| `/` | Phone: Home (open agents with status badges, recent sessions, "New conversation" and "Review PR"). Desktop: "Pick a conversation or start a new one" with New conversation and Review PR buttons |
 | `/sessions` | All sessions, filterable by project (`?cwd=`), in listing groups |
 | `/agents/$agentId` | Conversation |
 | `/agents/$agentId/tree` | Session tree (phone). On desktop it opens the review pane on its Tree tab and replaces itself with `/agents/$agentId` |
@@ -57,7 +57,11 @@ The phone tree and review pages keep their "Back to conversation" chevron. The s
 
 Every listing (sidebar, Home, `/sessions`, the picker's recent projects) goes through `groupListing` (`features/catalog/listing-groups.ts`): items without `layout` form folder groups by cwd; items of a `<repo>/main` layout repo form one repo group, with the container's own items under its header and one sub-group per checkout, `main` first. In a missing worktree, exited agents and the sessions no live agent holds are disabled.
 
-`WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`); header buttons reach it through `useWorktreeActions`.
+`WorktreeActionsProvider` (`features/worktrees/worktree-actions.tsx`) owns the "New worktree" sheet (`POST /api/worktrees`, then navigate to the new agent) and the "Remove worktree" confirmations (`DELETE /api/worktrees`, a second confirmation and `force` on `worktree_dirty`; a PR review's branch goes with its worktree); header buttons reach it through `useWorktreeActions`.
+
+### Review PR
+
+`PrReviewProvider` (`features/pr-review/pr-review-dialog.tsx`), mounted once in `AppShell`, owns the "Review PR" dialog: one PR URL field, then `POST /api/pr-reviews`, which creates the PR's review worktree and a conversation attached to it; the conversation opens with its review pane on Guide (desktop) or its Guide tab (phone). Home's "Review PR" buttons (desktop and phone) and ⌘J R (`pr.review`, [`10-keyboard.md`](10-keyboard.md)) open it through `usePrReview`. Details in [`11-pr-guide.md`](11-pr-guide.md), "Review PR dialog".
 
 ### Stop and Delete
 

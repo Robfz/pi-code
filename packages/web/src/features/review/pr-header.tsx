@@ -10,11 +10,15 @@ import { isOutdated } from "./pr";
  * The attached PR's header line in the Changes tab's PR mode and the Guide tab
  * (`docs/design/10-pr-review.md`, "PR mode"): `#N title`, the number linking to the PR, a state
  * chip once merged or closed, and "Outdated · Refresh" while the PR has pushes newer than the
- * pinned head. Refresh re-pins the PR, which also regenerates its guide.
+ * pinned head. Refresh re-pins the PR, which also regenerates its guide, and toasts the server's
+ * warning when a review worktree's checkout stays behind.
  */
 export function PrHeader({ agentId, pr }: { agentId: string; pr: PrAttachment }) {
   const refresh = useMutation({
     mutationFn: () => refreshPr(agentId),
+    onSuccess: ({ worktreeWarning }) => {
+      if (worktreeWarning !== undefined) toast.warning(worktreeWarning);
+    },
     onError: (error) => toast.error(`Couldn't refresh the PR: ${errorMessage(error)}`),
   });
   return (

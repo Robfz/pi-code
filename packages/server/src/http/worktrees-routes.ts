@@ -7,7 +7,13 @@ import { layoutOf, mainCheckoutIn } from "../catalog/layout.ts";
 import { deleteSessionFiles } from "../catalog/session-files.ts";
 import type { SessionCatalog } from "../catalog/sessions.ts";
 import { ApiError, isApiError } from "../errors.ts";
-import { assertClean, createWorktree, removeWorktree } from "../git/worktrees.ts";
+import {
+  assertClean,
+  createWorktree,
+  deleteBranch,
+  removeWorktree,
+  reviewBranchAt,
+} from "../git/worktrees.ts";
 import type { StreamHub } from "../live/stream-hub.ts";
 import { canonicalPath, isInside } from "../paths.ts";
 
@@ -108,14 +114,25 @@ export function worktreesRoutes({ manager, catalog, hub, trashCommand }: Worktre
         }
         // Checked before closing anything, so conversations keep running if the user cancels.
         if (!force) await assertClean(path);
+        // Read while git still lists the worktree.
+        const reviewBranch = await reviewBranchAt(main, path);
         // A running pi would recreate its session file after the deletion below.
         await manager.closeWhere((a) => isInside(path, a.cwd));
         await removeWorktree(main, path, force);
+        // A PR review's branch goes with its worktree; any other branch is kept. Its failure is
+        // reported once the sessions are gone too; the next review of the PR deletes the branch.
+        let branchFailure: unknown;
+        if (reviewBranch !== undefined) {
+          await deleteBranch(main, reviewBranch).catch((e: unknown) => {
+            branchFailure = e;
+          });
+        }
         try {
           await deleteSessionsIn(catalog, path, trashCommand);
         } finally {
           await hub.refreshCatalog();
         }
+        if (branchFailure !== undefined) throw branchFailure;
         return c.body(null, 204);
       },
     );

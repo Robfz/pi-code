@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-pi-code's keyboard layer: shared shortcut infrastructure, switching between live conversations, starting a new one, toggling the sidebar and a help screen. Decisions and rationale: [`../../maps/2026-11-05-keyboard.md`](../../maps/2026-11-05-keyboard.md). Where this document overlaps `03-web-client.md` or `05-desktop.md`, it takes precedence. The command palette (⌘K) is out of scope; it will list and run the same commands.
+pi-code's keyboard layer: shared shortcut infrastructure, switching between live conversations, starting a new one, starting a PR review, toggling the sidebar and a help screen. Decisions and rationale: [`../../maps/2026-11-05-keyboard.md`](../../maps/2026-11-05-keyboard.md). Where this document overlaps `03-web-client.md` or `05-desktop.md`, it takes precedence. The command palette (⌘K) is out of scope; it will list and run the same commands.
 
 Every shortcut is a tmux-style **leader**: ⌘J, then one plain key. ⌘B also toggles the sidebar directly everywhere, and the installed Chrome app window takes ⌘1–9 directly. Key handling isn't gated by viewport or pointer: shortcuts work at every size and simply can't fire without a hardware keyboard (F3, F4).
 
@@ -27,6 +27,7 @@ Browsers in scope: Chrome and Safari, on macOS and iPadOS, plus Chrome on Window
 | Command (`commands.ts`) | Title | Section | After the leader | Direct |
 |---|---|---|---|---|
 | `conversation.new` | New conversation | Conversations | C | — |
+| `pr.review` | Review PR | Conversations | R | — |
 | `conversation.previous` | Previous conversation | Conversations | P | — |
 | `conversation.next` | Next conversation | Conversations | N | — |
 | `conversation.goTo` | Go to conversation 1–9 | Conversations | 1–9 | ⌘1–9, Chrome app window only |
@@ -61,7 +62,7 @@ A pending flag in the keyboard provider, with no timeout: the indicator and Esc 
 
 - **Modifiers.** The leader and direct keys need the platform modifier and no other: no Shift, no Alt (Windows reports AltGr as Ctrl+Alt, so AltGr+J isn't the leader), and on macOS no Ctrl. The second key may carry only the platform modifier; with Shift or Alt it's unbound.
 - **Digits** match by `code` (`Digit1`–`Digit9`): AZERTY's digit row types `&é"…`.
-- **Letters** (J, C, P, N, B, H) match by `key`, lower-cased, so they follow the user's layout. When `key` isn't a Latin letter (Cyrillic, Greek), they fall back to `code` (`KeyC` → c).
+- **Letters** (J, C, R, P, N, B, H) match by `key`, lower-cased, so they follow the user's layout. When `key` isn't a Latin letter (Cyrillic, Greek), they fall back to `code` (`KeyC` → c).
 - **IME.** Keydowns with `isComposing` set or `keyCode === 229` are never handled, and cancel a pending leader; the second check catches Safari's composition-commit key, which arrives without `isComposing`. The composer already ignores `isComposing` keydowns (`packages/web/src/features/conversation/composer.tsx`).
 
 ## When shortcuts are off
@@ -79,9 +80,9 @@ While a modal, sheet, popover or menu is open, the leader still arms but the onl
 | `commands.ts` | The static command list `{ id, title, section }` (the Keymap table), read by the help screen and a later palette |
 | `keymap.ts` | Bindings: leader keys and direct ⌘B to command ids everywhere, plus the direct digits in the app context outside Safari rules. Context, platform and Safari detection; key and code matching |
 | `keyboard-provider.tsx` | `KeyboardProvider`: the handler registry, the leader state, the window listeners, the pill and the help dialog. `useCommand(id, handler)` registers a handler for the component's lifetime; `conversation.goTo`'s handler takes the position (1–9) |
-| `shell-commands.tsx` | `ShellCommands`: registers `conversation.new`, `.previous`, `.next` and `.goTo`, and hosts the `ProjectPicker` that `conversation.new` opens |
+| `shell-commands.tsx` | `ShellCommands`: registers `conversation.new`, `.previous`, `.next` and `.goTo`, and hosts the `ProjectPicker` that `conversation.new` opens; registers `pr.review`, which opens the "Review PR" dialog `PrReviewProvider` hosts |
 
-`AppShell` (`packages/web/src/features/pwa/app-shell.tsx`) renders `KeyboardProvider`, with `ShellCommands` and, on desktop, `SidebarCommand` inside it, inside `WorktreeActionsProvider` and `StopOrDeleteProvider`, around the layout div: the picker's `NewWorktreeButton` on repo groups calls `useWorktreeActions()`, which throws outside its provider (`packages/web/src/features/worktrees/worktree-actions.tsx`). The provider mounts one `keydown` listener on `window` in the capture phase, which runs before Radix's document-level Escape listener and React's root listener, so swallowing a key keeps it from the composer, the slash menu and open dialogs. A key bound to a command with no registered handler behaves as unbound. The Active-list commands register from `AppShell`, not from `Sidebar`: `AppShell` unmounts `<Sidebar>` when it's closed, and phone sizes mount it only inside `SidebarSheet` (`packages/web/src/features/sidebar/sidebar-sheet.tsx`) (F12).
+`AppShell` (`packages/web/src/features/pwa/app-shell.tsx`) renders `KeyboardProvider`, with `ShellCommands` and, on desktop, `SidebarCommand` inside it, inside `WorktreeActionsProvider`, `StopOrDeleteProvider` and `PrReviewProvider` (`packages/web/src/features/pr-review/pr-review-dialog.tsx`, whose `usePrReview()` `ShellCommands` calls), around the layout div: the picker's `NewWorktreeButton` on repo groups calls `useWorktreeActions()`, which throws outside its provider (`packages/web/src/features/worktrees/worktree-actions.tsx`). The provider mounts one `keydown` listener on `window` in the capture phase, which runs before Radix's document-level Escape listener and React's root listener, so swallowing a key keeps it from the composer, the slash menu and open dialogs. A key bound to a command with no registered handler behaves as unbound. The Active-list commands register from `AppShell`, not from `Sidebar`: `AppShell` unmounts `<Sidebar>` when it's closed, and phone sizes mount it only inside `SidebarSheet` (`packages/web/src/features/sidebar/sidebar-sheet.tsx`) (F12).
 
 ## Toggle sidebar
 
@@ -103,6 +104,10 @@ Positions ignore the sidebar's search filter.
 
 ⌘J C opens the project picker (`ProjectPicker`, `packages/web/src/features/catalog/project-picker.tsx`) hosted by `ShellCommands`, the same picker as the sidebar's New conversation button, on every route and with the sidebar closed. It opens in place: Esc leaves the user where they were, which navigating to the manifest shortcut's `/?new=1` (`useNewConversationPicker`) would not, since that lands on `/`. Choosing a project opens the agent and navigates to it (`useOpenAgent`).
 
+## Review PR
+
+⌘J R opens the "Review PR" dialog, hosted once by `PrReviewProvider`, the same dialog as Home's "Review PR" buttons, on every route and with the sidebar closed; Esc closes it unless a review is being prepared ([`11-pr-guide.md`](11-pr-guide.md), "Review PR dialog").
+
 ## Help screen
 
 A dialog (`packages/web/src/components/ui/dialog.tsx`) titled "Keyboard shortcuts", opened by ⌘J H or the entry point, closed by ⌘J H, Esc or its ×.
@@ -114,7 +119,7 @@ A dialog (`packages/web/src/components/ui/dialog.tsx`) titled "Keyboard shortcut
 
 - `keymap.ts`: key and code matching across QWERTY, AZERTY, Dvorak and Cyrillic events; modifiers including AltGr; platform and Safari-rules detection over user-agent fixtures (macOS Safari, Chrome, Edge, iPad `CriOS/`); context from `matchMedia`; direct ⌘B in every context.
 - Provider: pending, Esc, blur, bound and unbound keys with and without ⌘, bare modifiers and repeats, IME `isComposing` and 229, direct digits and ⌘B per context, the off state with each overlay kind, the help exception, the slash menu left alone; the pill's three states, and the pill not `aria-hidden` over a modal dialog.
-- `ShellCommands`: positions, wrapping, entry from outside the Active list, empty positions, the picker with the sidebar closed, and the picker listing a repo project.
+- `ShellCommands`: positions, wrapping, entry from outside the Active list, empty positions, the picker with the sidebar closed, and the picker listing a repo project; ⌘J R opening the Review PR dialog with the sidebar closed (`pr-review-dialog.test.tsx`).
 - `AppShell`: ⌘J B and ⌘B hide and show the sidebar with `aria-expanded` following; focus left alone outside the sidebar and moved to the toggle from inside it; no handler below `DESKTOP_QUERY`.
 - Help screen per context and platform; the entry point's absence below `DESKTOP_QUERY`.
 

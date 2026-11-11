@@ -9,7 +9,9 @@ import { SessionCatalog } from "./catalog/sessions.ts";
 import type { ErrorEnvelope } from "./errors.ts";
 import { StreamHub } from "./live/stream-hub.ts";
 import { piVersionProbe } from "./pi-version.ts";
+import { PrReviews } from "./pr/pr-reviews.ts";
 import { PrService } from "./pr/pr-service.ts";
+import { RepoRegistry } from "./store/repo-registry.ts";
 import { SidebarStateStore } from "./store/sidebar-state.ts";
 import { testGuides } from "./testing/guides.ts";
 
@@ -50,6 +52,11 @@ beforeAll(() => {
     hub: new StreamHub({ manager, catalog, sidebar, prs: prService.store, guides }),
     sidebar,
     prService,
+    prReviews: new PrReviews({
+      manager,
+      prs: prService,
+      repos: new RepoRegistry(join(dist, "data")),
+    }),
     piVersion: async () => "9.9.9",
   });
 });

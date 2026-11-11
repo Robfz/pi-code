@@ -1,12 +1,14 @@
 /**
  * PR review (design/10-pr-review.md): attaching a conversation to a GitHub PR (`/pr`), refreshing
  * it, and polling its head for newer pushes. Each fetches through `gh` and `git` without a
- * checkout, pins the PR's base and head, stores the attachment by session file and, for attach and
- * refresh, prompts the agent (steering a running one). Attach and refresh also start the
- * conversation's PR guide (design/11-pr-guide.md), which is sent to the agent once ready.
+ * checkout (a PR review's own worktree is moved to the pinned head), pins the PR's base and
+ * head, stores the attachment by session file and, for attach and refresh, prompts the agent
+ * (steering a running one). Attach and refresh also start the conversation's PR guide
+ * (design/11-pr-guide.md), which is sent to the agent once ready.
  */
 import { createHash } from "node:crypto";
-import type { PrAttachment, PrGuide, PrGuideResponse } from "@pi-code/protocol";
+import { basename } from "node:path";
+import type { PrAttachment, PrGuide, PrGuideResponse, PrRefreshResponse } from "@pi-code/protocol";
 import type { Agent, AgentManager } from "../agents/agent-manager.ts";
 import { acceptsInput, assertAcceptsInput } from "../agents/commands.ts";
 import { ApiError } from "../errors.ts";
@@ -21,6 +23,14 @@ import {
   remotePrHead,
   repoFolder,
 } from "../git/pr.ts";
+import {
+  headOf,
+  isClean,
+  resetHard,
+  reviewWorktreeName,
+  reviewWorktreeOf,
+} from "../git/worktrees.ts";
+import { KeyedLock } from "../keyed-lock.ts";
 import { guideKey } from "../store/guide-store.ts";
 import { PrStore, prView, type StoredPr, type StoredPrs } from "../store/pr-store.ts";
 import {
@@ -111,7 +121,7 @@ export class PrService {
   private readonly gh: GhRunner;
   private readonly prompt: PromptSender;
   /** Attach, refresh and poll run one at a time per session file. */
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
   /** Polls in flight by session file, so repeated triggers share one. */
   private readonly polls = new Map<string, Promise<void>>();
   /** When each session file's last poll was asked for (`Date.now()`). */
@@ -146,7 +156,8 @@ export class PrService {
 
   /**
    * `/pr [arg]`: attaches the agent's conversation to the PR `arg` names (a URL or number), or
-   * to the current branch's PR, and sends the agent its context. Throws `pr_attached`,
+   * to the current branch's PR, and sends the agent its context; a review worktree of the PR is
+   * moved to the pinned head first, as on Refresh (a warning is logged). Throws `pr_attached`,
    * `not_a_git_repo`, `not_a_github_repo`, `invalid_body` (a bad argument or another repo's
    * PR), `pr_not_found`, `gh_failed`, `git_failed`, or `agent_busy` when the conversation moved
    * to another session during the fetch.
@@ -155,7 +166,7 @@ export class PrService {
     assertAcceptsInput(agent);
     const target = parsePrArg(arg);
     const file = sessionFileOf(agent);
-    return this.locked(file, async () => {
+    return this.locks.run(file, async () => {
       if (this.store.get(file) !== undefined) {
         throw new ApiError(
           "pr_attached",
@@ -176,6 +187,10 @@ export class PrService {
         repoFolder(agent.cwd),
       ]);
       const pr = this.entry(fetched, repo, gitDir, folder);
+      // A review worktree created just before may hold an older head: its branch is fetched from
+      // origin's branch, the pinned head from `refs/pull/<n>/head`.
+      const warning = await moveReviewWorktree(agent, pr.number, pr.headSha);
+      if (warning !== undefined) console.warn(`[pr] ${warning}`);
       const [files, commits] = await Promise.all([
         diffStat(agent.cwd, fetched.baseSha, fetched.headSha),
         commitsBetween(agent.cwd, fetched.baseSha, fetched.headSha),
@@ -189,13 +204,14 @@ export class PrService {
 
   /**
    * Re-fetches the attached PR, pins its new base and head, and sends the agent what changed
-   * (commits, files, new comments). Throws `invalid_body` when no PR is attached, and the
-   * errors of `attach`.
+   * (commits, files, new comments). A review worktree of the PR not at the pinned head is moved
+   * there first (`moveReviewWorktree`); the response's `worktreeWarning` says why it wasn't. Throws
+   * `invalid_body` when no PR is attached, and the errors of `attach`.
    */
-  async refresh(agent: Agent): Promise<PrAttachment> {
+  async refresh(agent: Agent): Promise<PrRefreshResponse> {
     assertAcceptsInput(agent);
     const file = sessionFileOf(agent);
-    return this.locked(file, async () => {
+    return this.locks.run(file, async () => {
       const previous = this.store.get(file);
       if (previous === undefined) {
         throw new ApiError("invalid_body", "this conversation isn't attached to a PR");
@@ -209,6 +225,8 @@ export class PrService {
       const previousHead =
         headSha === previous.headSha ? previous.previousHeadSha : previous.headSha;
       if (previousHead !== undefined) pr.previousHeadSha = previousHead;
+      // Also when the head didn't move, retrying a move an earlier Refresh couldn't make.
+      const worktreeWarning = await moveReviewWorktree(agent, previous.number, headSha);
       const [files, commits] = await Promise.all([
         diffStat(agent.cwd, baseSha, headSha),
         commitsBetween(agent.cwd, previous.headSha, headSha),
@@ -217,7 +235,7 @@ export class PrService {
       await this.deliver(agent, file, pr, message);
       // The prune that storing `pr` started cancels the previous key's job once nothing pins it.
       if (guideKey(pr) !== prGuideKey(previous)) await this.startGuide(agent, file, pr, view);
-      return prView(pr);
+      return { pr: prView(pr), ...(worktreeWarning !== undefined ? { worktreeWarning } : {}) };
     });
   }
 
@@ -252,7 +270,7 @@ export class PrService {
    */
   async retryGuide(agent: Agent): Promise<PrGuideResponse> {
     const file = sessionFileOf(agent);
-    return this.locked(file, async () => {
+    return this.locks.run(file, async () => {
       const { pr, stored } = await this.guideTarget(agent);
       const view = await viewPr(this.gh, agent.cwd, pr.repo, pr.number);
       if (stored.folder === undefined) await this.store.set(file, pr);
@@ -260,6 +278,11 @@ export class PrService {
       void this.guides.regenerate(input);
       return { key: guideInputKey(input), state: "generating" };
     });
+  }
+
+  /** `gh pr view` of PR `number` of the GitHub repo `repo`, run in `cwd`. */
+  view(cwd: string, repo: string, number: number): Promise<PrView> {
+    return viewPr(this.gh, cwd, repo, number);
   }
 
   /**
@@ -274,12 +297,13 @@ export class PrService {
     this.polledAt.set(file, Date.now());
     const running = this.polls.get(file);
     if (running) return running;
-    const poll = this.locked(file, async () => {
-      const head = await remotePrHead(agent.cwd, pr.number);
-      const current = this.store.get(file);
-      if (head === undefined || current === undefined || current.remoteHeadSha === head) return;
-      await this.store.set(file, { ...current, remoteHeadSha: head });
-    })
+    const poll = this.locks
+      .run(file, async () => {
+        const head = await remotePrHead(agent.cwd, pr.number);
+        const current = this.store.get(file);
+        if (head === undefined || current === undefined || current.remoteHeadSha === head) return;
+        await this.store.set(file, { ...current, remoteHeadSha: head });
+      })
       .catch(() => {})
       .finally(() => this.polls.delete(file));
     this.polls.set(file, poll);
@@ -369,19 +393,21 @@ export class PrService {
     let prompt: Promise<string> | undefined;
     for (const [file, pr] of attached) {
       // Behind any attach or refresh of the conversation, which may move it to another key.
-      void this.locked(file, async () => {
-        const current = this.store.get(file);
-        const id = this.agents().ownerOf(file);
-        const agent = id === undefined ? undefined : this.agents().get(id);
-        if (current === undefined || prGuideKey(current) !== key) return;
-        if (agent === undefined || !acceptsInput(agent)) return;
-        await this.sendGuide(agent, file, guide, () => {
-          prompt ??= this.guidePrompt(agent.cwd, pr, guide);
-          return prompt;
+      void this.locks
+        .run(file, async () => {
+          const current = this.store.get(file);
+          const id = this.agents().ownerOf(file);
+          const agent = id === undefined ? undefined : this.agents().get(id);
+          if (current === undefined || prGuideKey(current) !== key) return;
+          if (agent === undefined || !acceptsInput(agent)) return;
+          await this.sendGuide(agent, file, guide, () => {
+            prompt ??= this.guidePrompt(agent.cwd, pr, guide);
+            return prompt;
+          });
+        })
+        .catch((e: unknown) => {
+          console.warn(`[guides] couldn't send the guide to ${file}: ${(e as Error).message}`);
         });
-      }).catch((e: unknown) => {
-        console.warn(`[guides] couldn't send the guide to ${file}: ${(e as Error).message}`);
-      });
     }
   };
 
@@ -508,15 +534,34 @@ export class PrService {
       reportedInline: inline.map((c) => c.id),
     };
   }
+}
 
-  private locked<T>(file: string, task: () => Promise<T>): Promise<T> {
-    const run = (this.locks.get(file) ?? Promise.resolve()).then(task);
-    const settled = run.catch(() => {});
-    this.locks.set(file, settled);
-    void settled.then(() => {
-      if (this.locks.get(file) === settled) this.locks.delete(file);
-    });
-    return run;
+/**
+ * Checks out `headSha` in the review worktree of PR `number` holding the agent's cwd, unless it is
+ * there already (`git reset --hard`, so a force-push is followed too; commits made there and not
+ * pushed stay in the reflog). Returns a warning for the user when the worktree stays where it
+ * was: it has local changes, the agent is running a turn (whose tools would see the files change
+ * under them), or git failed. A conversation outside a review worktree of the PR is left alone.
+ */
+async function moveReviewWorktree(
+  agent: Agent,
+  number: number,
+  headSha: string,
+): Promise<string | undefined> {
+  let name = reviewWorktreeName(number);
+  try {
+    const path = await reviewWorktreeOf(agent.cwd, number);
+    if (path === undefined) return undefined;
+    name = basename(path);
+    if ((await headOf(path)) === headSha) return undefined;
+    if (agent.info().isStreaming) {
+      return `${name} wasn't moved while the agent was running; refresh again when it's idle`;
+    }
+    if (!(await isClean(path))) return `${name} has local changes; it stays at the previous commit`;
+    await resetHard(path, headSha);
+    return undefined;
+  } catch (e) {
+    return `couldn't check out the new head in ${name}: ${(e as Error).message}`;
   }
 }
 

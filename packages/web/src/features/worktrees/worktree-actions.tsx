@@ -118,7 +118,7 @@ export function WorktreeActionsProvider({ children }: { children: ReactNode }) {
             <DialogDescription className="break-words">
               {step?.dirty
                 ? `${target?.label} has uncommitted changes or submodules. Changes will be lost.`
-                : `Deletes ${target?.path} and its conversations (moved to the Trash) and stops the live ones; the branch is kept.`}
+                : `Deletes ${target?.path} and its conversations (moved to the Trash) and stops the live ones; the branch is kept, unless it's a PR review's.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

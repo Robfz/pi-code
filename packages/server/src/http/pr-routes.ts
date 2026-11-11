@@ -32,7 +32,7 @@ export function prRoutes(manager: AgentManager, service: PrService) {
     )
     .post("/:id/pr/refresh", async (c) => {
       const agent = manager.require(c.req.param("id"));
-      return c.json({ pr: await service.refresh(agent) }, 200);
+      return c.json(await service.refresh(agent), 200);
     })
     .post("/:id/pr/poll", async (c) => {
       await service.poll(manager.require(c.req.param("id")));

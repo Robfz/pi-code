@@ -75,6 +75,8 @@ interface CreateWorktreeBody {
 
 Step 3 runs before the fetch so a doomed request spends no network. If step 7 fails, the response is the open's error, its message stating that the worktree was created at `<repo>/<name>`. Two creations with the same name: the second fails at step 3, or in git (`git_failed`).
 
+PR reviews create worktrees too: `POST /api/pr-reviews` adds `<repo>/pr-<number>` on the PR's head branch with the same checks, through `addReviewWorktree` ([`11-pr-guide.md`](11-pr-guide.md), "Entry").
+
 ### `DELETE /api/worktrees` — remove
 
 ```ts
@@ -83,8 +85,8 @@ interface RemoveWorktreeBody { path: string; force?: boolean }
 
 1. `path` is absolute and canonicalizes inside `$HOME`. `layoutOf(path)` has role `worktree` and its repo has a main checkout (`mainCheckoutIn(layout.repo)`), else `400 not_a_worktree`, which also covers the main checkout and the container.
 2. Without `force`, `assertClean(path)` (`git/worktrees.ts`), for a folder still present: any output of `git status --porcelain=v1 --untracked-files=normal`, or a submodule (a `<gitdir>/modules` directory, or a mode-160000 gitlink whose folder has a `.git`), → `409 worktree_dirty` "uncommitted changes or submodules". These are what make plain `git worktree remove` refuse; checking first keeps conversations running if the user cancels.
-3. Every agent whose cwd is inside `path`, exited ones included, is closed through `AgentManager.close`, which waits for pi to exit. A running pi would recreate its session file after step 5.
-4. `removeWorktree(main, path, force)`: `git worktree remove [--force] <path>`, run from the main checkout of step 1. A missing folder's record is pruned (F15). Git saying the path "is not a working tree" when the folder is missing counts as done, so a retry after a failed step 5 or a manual `git worktree prune` still deletes the sessions, and a repeated remove answers `204`. Without `force`, git refusing over changes or submodules (made after step 2) → `409 worktree_dirty`, with the agents of step 3 already closed; any other failure → `502 git_failed`. The branch is kept.
+3. The worktree's branch, as `git worktree list --porcelain -z` from the main checkout records it (the folder may be missing), is read while git still lists it (`reviewBranchAt`, `git/worktrees.ts`): it matters only when it is a PR review's branch, marked `branch.<name>.pi-code-review` ([`11-pr-guide.md`](11-pr-guide.md), "Review worktrees"). Every agent whose cwd is inside `path`, exited ones included, is closed through `AgentManager.close`, which waits for pi to exit. A running pi would recreate its session file after step 5.
+4. `removeWorktree(main, path, force)`: `git worktree remove [--force] <path>`, run from the main checkout of step 1. A missing folder's record is pruned (F15). Git saying the path "is not a working tree" when the folder is missing counts as done, so a retry after a failed step 5 or a manual `git worktree prune` still deletes the sessions, and a repeated remove answers `204`. Without `force`, git refusing over changes or submodules (made after step 2) → `409 worktree_dirty`, with the agents of step 3 already closed; any other failure → `502 git_failed`. The branch is kept, unless step 3 found a review branch: `git branch -D <branch>` then deletes it, unpushed commits included. A failure there doesn't stop steps 5 and 6; it is reported after them (`502 git_failed`), and the branch, a leftover still marked, is deleted by the next review of its PR.
 5. The sessions whose header `cwd` is inside `path`, from `SessionCatalog.sessions()` after `invalidate()` and never from directory names (F12), are deleted by `deleteSessionFiles` (`catalog/session-files.ts`) one at a time like pi's TUI: `trash <file>` (no shell, 10 s timeout), counted as done when it exits 0 or the file is gone, else `unlink`. After the first `trash` timeout, the remaining files are unlinked directly. A file failing both fails the request with `500 internal` naming it, after the others are attempted. The encoded session dir is kept.
 6. `hub.refreshCatalog()`, also after a failed step 5, sends `catalog` without the deleted sessions, with or without the session watcher; the closed agents produce `agent_closed`. → `204`.
 
@@ -173,7 +175,7 @@ Recent projects render through the model. A repo group's container (when it has 
 
 `requestRemove` backs every "Remove worktree" button. One removal runs at a time: while it does, every button is disabled (its own shows a spinner) and `requestRemove` does nothing, so the dirty dialog of step 2 can't replace another confirmation.
 
-1. Confirm: "Remove {label}? Deletes {path} and its conversations (moved to the Trash) and closes the live ones; the branch is kept." Asked on every removal because a phone mis-tap would otherwise lose session files, which `unlink` deletes for good when `trash` fails.
+1. Confirm: "Remove {label}? Deletes {path} and its conversations (moved to the Trash) and stops the live ones; the branch is kept, unless it's a PR review's." Asked on every removal because a phone mis-tap would otherwise lose session files, which `unlink` deletes for good when `trash` fails.
 2. `DELETE /api/worktrees { path }`. On `409 worktree_dirty` a second dialog follows: "Remove {label} anyway? {label} has uncommitted changes or submodules. Changes will be lost." Confirming retries with `force: true`. Both confirm buttons are disabled while a removal runs.
 3. Success → toast, and the `sessions` and `projects` queries are invalidated. Listings follow through `agent_closed` and `catalog` frames; a conversation on screen shows "Conversation closed". Failures → toast with the server's message.
 

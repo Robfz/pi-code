@@ -479,6 +479,18 @@ describe("ChangesView", () => {
       expect(screen.getByTestId("pr-header")).not.toHaveTextContent("Outdated");
     });
 
+    it("toasts the warning of a review worktree that stays at the previous commit", async () => {
+      const warning = vi.spyOn(toast, "warning").mockImplementation(() => "");
+      const message = "pr-12 has local changes; it stays at the previous commit";
+      await renderAttached({ ...PR, remoteHeadSha: "c".repeat(40) }, [
+        200,
+        { pr: { ...PR, headSha: "c".repeat(40) }, worktreeWarning: message },
+      ]);
+      const header = await screen.findByTestId("pr-header");
+      await userEvent.setup().click(within(header).getByRole("button", { name: "Refresh" }));
+      await waitFor(() => expect(warning).toHaveBeenCalledWith(message));
+    });
+
     it("toasts why a refresh failed, still Outdated", async () => {
       const error = vi.spyOn(toast, "error").mockImplementation(() => "");
       await renderAttached({ ...PR, remoteHeadSha: "c".repeat(40) }, [

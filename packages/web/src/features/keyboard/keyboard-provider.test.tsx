@@ -481,6 +481,7 @@ describe("help screen", () => {
         .map((row) => row.textContent),
     ).toEqual([
       "New conversation⌘J C",
+      "Review PR⌘J R",
       "Previous conversation⌘J P",
       "Next conversation⌘J N",
       "Go to conversation 1–9⌘J 1–9⌘1–9",

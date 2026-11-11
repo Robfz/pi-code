@@ -82,6 +82,7 @@ const toggleSidebar: [string, Binding] = ["b", { command: "sidebar.toggle" }];
 
 const LEADER = new Map<string, Binding>([
   ["c", { command: "conversation.new" }],
+  ["r", { command: "pr.review" }],
   ["p", { command: "conversation.previous" }],
   ["n", { command: "conversation.next" }],
   ...goTo,

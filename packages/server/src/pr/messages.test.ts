@@ -37,6 +37,7 @@ const VIEW: PrView = {
   headRefName: "feature",
   baseRefOid: PR.baseSha,
   headRefOid: PR.headSha,
+  crossRepository: false,
   comments: [
     { author: "bob", body: "Already reported.", createdAt: "2026-01-01T00:00:00Z" },
     { author: "carol", body: "", createdAt: "2026-01-03T00:00:00Z", review: "CHANGES_REQUESTED" },

@@ -31,10 +31,12 @@ import type { SseOptions } from "../http/stream.ts";
 import { StreamHub } from "../live/stream-hub.ts";
 import type { GhRunner } from "../pr/github.ts";
 import type { GuideRunner, GuideService } from "../pr/guide-service.ts";
+import { PrReviews } from "../pr/pr-reviews.ts";
 import { PrService } from "../pr/pr-service.ts";
 import { type PushSendOptions, PushService } from "../push/push-service.ts";
 import { SubscriptionStore } from "../push/subscriptions.ts";
 import { loadVapidDetails } from "../push/vapid.ts";
+import { RepoRegistry } from "../store/repo-registry.ts";
 import { SidebarStateStore } from "../store/sidebar-state.ts";
 import { testGuides } from "./guides.ts";
 import { fakePiCommand } from "./stub-process.ts";
@@ -311,6 +313,9 @@ export class Harness {
   readonly hub: StreamHub;
   readonly sidebar: SidebarStateStore;
   readonly prService: PrService;
+  /** The layout repos seen in the hub's sessions and pins (`<root>/data/repos.json`). */
+  readonly repos: RepoRegistry;
+  readonly prReviews: PrReviews;
   /** PR guides (store in `<root>/data`), run by `guideRunner`. */
   readonly guides: GuideService;
   /** pi-code's data dir (VAPID keys, push subscriptions). */
@@ -382,6 +387,13 @@ export class Harness {
       prs: this.prService.store,
       guides: this.guides,
     });
+    this.repos = new RepoRegistry(this.dataDir);
+    this.repos.follow(this.hub);
+    this.prReviews = new PrReviews({
+      manager: this.manager,
+      prs: this.prService,
+      repos: this.repos,
+    });
     this.sessionsWatcher = opts.watchSessions
       ? watchSessions(join(this.agentDir, "sessions"), () => void this.hub.refreshCatalog())
       : undefined;
@@ -427,6 +439,7 @@ export class Harness {
       hub: this.hub,
       sidebar: this.sidebar,
       prService: this.prService,
+      prReviews: this.prReviews,
       piVersion: async () => "test",
       ...(this.push !== undefined ? { push: this.push } : {}),
       ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
@@ -528,6 +541,7 @@ export class Harness {
     this.sessionsWatcher?.close();
     this.prService.close();
     await Promise.all([this.manager.closeAll(), this.guides.close()]);
+    await this.repos.close();
     this.hub.close();
     await this.push?.idle();
     await new Promise<void>((resolve) => {
