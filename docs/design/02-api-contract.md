@@ -55,7 +55,7 @@ interface SessionSummary {
   id: string;
   cwd: string;
   name?: string;
-  firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks; `#12 Title` when it starts with a `<pr>` block (10-pr-review.md), `#12 Title (guide)` with a `<pr-guide>` block (11-pr-guide.md), `/skill:name args` with an expanded skill
+  firstMessage?: string;         // first user message, ≤200 chars, without leading `<file>` blocks; `#12 Title` when it starts with a `<pr>` block (10-pr-review.md), `Review guide · #12 Title` with a `<pr-guide>` block (11-pr-guide.md), `/skill:name args` with an expanded skill
   createdAt: string;
   updatedAt: string;             // last entry timestamp
   lastPromptAt?: string;         // last user message's timestamp; absent before the first prompt

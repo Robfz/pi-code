@@ -1,3 +1,4 @@
+import { prBlockLabel, prGuideBlockLabel, splitUserMessage } from "@pi-code/protocol";
 import { UndoIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -6,6 +7,14 @@ import { errorMessage, rpc } from "@/lib/api";
 import { useConversation } from "@/store/context";
 import { useDrafts } from "@/store/drafts";
 import { selectQueue } from "@/store/selectors";
+
+/** A queued text as shown: a `<pr>` or `<pr-guide>` prompt by its label, any other text as is. */
+function queuedLabel(text: string): string {
+  const { prs, guides } = splitUserMessage(text);
+  if (prs[0] !== undefined) return prBlockLabel(prs[0]);
+  if (guides[0] !== undefined) return prGuideBlockLabel(guides[0]);
+  return text;
+}
 
 function joinTexts(texts: readonly string[]): string {
   return texts.filter((t) => t.trim() !== "").join("\n\n");
@@ -50,7 +59,7 @@ export function QueueDisplay() {
             className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1 text-xs"
           >
             <span className="shrink-0 font-medium text-muted-foreground">{item.kind}</span>
-            <span className="min-w-0 truncate">{item.text}</span>
+            <span className="min-w-0 truncate">{queuedLabel(item.text)}</span>
           </li>
         ))}
       </ul>

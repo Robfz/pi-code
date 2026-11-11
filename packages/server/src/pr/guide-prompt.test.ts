@@ -17,6 +17,7 @@ describe("guidePrompt", () => {
     expect(prompt).toContain(`PR's head (${"f".repeat(40)})`);
     expect(prompt).toContain("A short PR gets a single section");
     expect(prompt).toContain("calling submit_guide exactly once");
+    expect(prompt).toContain("never hunk ids, which the reader doesn't see");
   });
 
   it("frames the title and description as untrusted, each line of theirs marked", () => {

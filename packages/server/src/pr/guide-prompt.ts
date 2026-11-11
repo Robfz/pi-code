@@ -34,7 +34,7 @@ export function guidePrompt(pr: GuidePr, headSha: string, diffPath: string): str
     "- Start with the core change, then its consequences; group glue and secondary changes (wiring, renames, tests, configuration, docs) apart, in sections of their own after them.",
     "- Each section has a short title and an explanation in markdown of why its changes exist: the problem they solve, the approach, and how they relate to the other sections. Don't retell the diff line by line.",
     "- A short PR gets a single section with its explanation.",
-    "- Reference hunks only by their ids, exactly as labelled in the diff file. Put each hunk in the section it belongs to; a hunk may appear in several sections only when it's necessary to understand each of them.",
+    "- Reference hunks only by their ids, exactly as labelled in the diff file, and only in the tool call: explanations name files, functions or lines, never hunk ids, which the reader doesn't see. Put each hunk in the section it belongs to; a hunk may appear in several sections only when it's necessary to understand each of them.",
     '- Hunks no section references are listed at the end under "Other changes" automatically, and so are files without hunks (binary or too large): leave trivial hunks out rather than making a catch-all section.',
     `- Finish by calling ${GUIDE_TOOL} exactly once, with every section.`,
     "",

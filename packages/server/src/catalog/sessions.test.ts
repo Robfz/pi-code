@@ -270,7 +270,7 @@ describe("parseSessionFile", () => {
       text: "Review guide for o/r#7\n…",
     });
     const guide = parseSessionFile("/f.jsonl", `${header}\n${user(`${block}Read it`)}\n`, "x");
-    expect(guide?.firstMessage).toBe("#7 Add things (guide)");
+    expect(guide?.firstMessage).toBe("Review guide · #7 Add things");
     const skill = '<skill name="review" location="/s/SKILL.md">\nSteps\n</skill>\n\nthe diff';
     const skilled = parseSessionFile("/f.jsonl", `${header}\n${user(skill)}\n`, "x");
     expect(skilled?.firstMessage).toBe("/skill:review the diff");

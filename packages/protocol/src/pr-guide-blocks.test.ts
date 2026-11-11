@@ -51,6 +51,6 @@ describe("splitPrGuideBlocks", () => {
 
 describe("prGuideBlockLabel", () => {
   it("names the PR and marks the guide", () => {
-    expect(prGuideBlockLabel(BLOCK)).toBe('#12 Fix "quotes" & <tags> (guide)');
+    expect(prGuideBlockLabel(BLOCK)).toBe('Review guide · #12 Fix "quotes" & <tags>');
   });
 });

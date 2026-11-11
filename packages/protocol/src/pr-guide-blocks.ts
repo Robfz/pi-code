@@ -52,7 +52,7 @@ export function splitPrGuideBlocks(text: string): { guides: PrGuideBlock[]; body
   return { guides, body: text.slice(end) };
 }
 
-/** A one-line label for a block: `#12 Title (guide)`. */
+/** A one-line label for a block: `Review guide · #12 Title`, marked up front so it survives truncation. */
 export function prGuideBlockLabel(block: Pick<PrGuideBlock, "number" | "title">): string {
-  return `#${block.number} ${block.title} (guide)`;
+  return `Review guide · #${block.number} ${block.title}`;
 }
