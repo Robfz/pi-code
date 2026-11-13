@@ -106,7 +106,7 @@ Rules:
 | `conversations` | Opening and switching conversations; the sidebar follows new, finished, added and deleted sessions | The same through Home and the sessions list |
 | `cold-load` | Lazy chunks load, assets come precompressed, the service worker installs without the lazy assets and caches them on use, the shell works offline | Same |
 | `multi-agent` | Two agents streaming at once in one tab end correct, with the right sidebar statuses | — |
-| `review` | The review pane updates after a turn; selecting lines adds `@path:N` to the composer | The Diff page from the conversation menu |
+| `review` | The review pane updates after a turn; selecting lines adds `@path:N` to the composer; the Files tab's viewer has one line-number column | The Diff page from the conversation menu |
 
 ## Perf
 

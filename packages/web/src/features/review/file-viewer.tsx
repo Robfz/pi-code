@@ -17,19 +17,6 @@ import { LoadError, NotARepo } from "./query-states";
 import type { FileTarget } from "./review-state";
 import { SelectableDiff } from "./selectable-diff";
 
-/**
- * Hides the unified view's old-number column: both sides number the same lines. The library
- * sizes the number cell inline for two columns, hence the `!` widths.
- */
-const SINGLE_NUMBER_COLUMN = [
-  "[&_[data-line-old-num]]:hidden",
-  "[&_[data-line-old-num]+span]:hidden",
-  "[&_[data-line-new-num]]:w-full",
-  "[&_.diff-line-num]:w-[calc(var(--diff-aside-width--)+20px)]!",
-  "[&_.diff-line-num]:min-w-0!",
-  "[&_.diff-line-num]:max-w-none!",
-].join(" ");
-
 function Message({ children }: { children: ReactNode }) {
   return <p className="py-10 text-center text-sm text-muted-foreground">{children}</p>;
 }
@@ -86,8 +73,9 @@ export function FileViewer({
       body = <Message>This file is too large to show (over 1 MB).</Message>;
     else if (patch === "") body = <Message>This file is empty.</Message>;
     else {
+      // Both sides number the same lines: one number column (`diff-theme.css`).
       body = (
-        <div className={SINGLE_NUMBER_COLUMN}>
+        <div className="diff-single-number">
           <SelectableDiff
             patch={patch}
             fileName={shown}
