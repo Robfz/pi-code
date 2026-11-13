@@ -137,13 +137,31 @@ function outcomeText(outcome: BashOutcome): string {
   return `exit ${outcome.code}`;
 }
 
+/** `cd <dir> && ` or `cd <dir>; ` at the start of a command; the dir unquoted, quoted or escaped. */
+const CD_PREFIX = /^\s*cd\s+("[^"]*"|'[^']*'|(?:\\.|[^\s"'\\;&|])+)\s*(?:&&|;)\s*/;
+
+/** A command without its leading `cd <dir> &&` (or `;`), and that dir. */
+export function splitCd(command: string): { dir?: string; command: string } {
+  const m = CD_PREFIX.exec(command);
+  const rest = m ? command.slice(m[0].length) : "";
+  if (!m?.[1] || rest.trim() === "") return { command };
+  const raw = m[1];
+  const quoted = raw.startsWith('"') || raw.startsWith("'");
+  return { dir: quoted ? raw.slice(1, -1) : raw.replace(/\\(.)/g, "$1"), command: rest };
+}
+
 function bashLabel({ args, status, result, isError }: ToolRendererProps): ToolLabel {
   const command = str(args, "command");
   const outcome = result ? bashOutcome(toolResultText(result), isError).outcome : undefined;
+  const shown = command !== undefined ? splitCd(command) : undefined;
   return {
     icon: SquareTerminalIcon,
     verb: statusVerb(status, "Running", "Ran", "Command failed"),
-    target: command !== undefined ? { kind: "code", text: truncate(command, 200) } : undefined,
+    target: shown && {
+      kind: "code",
+      text: truncate(shown.command, 200),
+      ...(shown.dir !== undefined && { dir: shown.dir }),
+    },
     meta: outcome?.kind === "exit" && outcome.code !== 0 ? `exit ${outcome.code}` : undefined,
   };
 }

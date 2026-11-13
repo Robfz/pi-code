@@ -46,6 +46,34 @@ function PathTarget({ path }: { path: string }) {
   );
 }
 
+/** `dir` before a command (dropped when it's the conversation's folder), relative to the folder. */
+function CodeTarget({ text, dir, className }: { text: string; dir?: string; className?: string }) {
+  const cwd = useConversationCwd();
+  const trimmed = dir && dir.length > 1 ? dir.replace(/\/+$/, "") : dir;
+  const shownDir =
+    trimmed === undefined || trimmed === "." || trimmed === cwd.replace(/\/+$/, "")
+      ? undefined
+      : cwdRelative(trimmed, cwd);
+  const code = (
+    <span
+      data-slot={shownDir ? undefined : "row-target"}
+      className={cn(
+        "min-w-0 truncate font-mono text-[12.5px] tracking-[-0.01em] text-subtle-foreground",
+        className,
+      )}
+    >
+      {text}
+    </span>
+  );
+  if (!shownDir) return code;
+  return (
+    <span data-slot="row-target" className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
+      <span className="min-w-0 truncate text-faint-foreground">{shownDir}</span>
+      {code}
+    </span>
+  );
+}
+
 function Target({
   target,
   className,
@@ -55,17 +83,7 @@ function Target({
 }) {
   if (target.kind === "path") return <PathTarget path={target.text} />;
   if (target.kind === "code") {
-    return (
-      <span
-        data-slot="row-target"
-        className={cn(
-          "min-w-0 truncate font-mono text-[12.5px] tracking-[-0.01em] text-subtle-foreground",
-          className,
-        )}
-      >
-        {target.text}
-      </span>
-    );
+    return <CodeTarget text={target.text} dir={target.dir} className={className} />;
   }
   return (
     <span data-slot="row-target" className={cn("min-w-0 truncate text-foreground", className)}>

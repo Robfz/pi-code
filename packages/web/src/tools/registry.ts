@@ -45,7 +45,15 @@ export interface ToolLabel {
   icon: LucideIcon;
   /** Present tense while running or streaming, past tense when done, "… failed" on error. */
   verb: string;
-  target?: { kind: "path" | "code" | "text"; text: string };
+  target?: {
+    kind: "path" | "code" | "text";
+    text: string;
+    /**
+     * Where a `code` target runs (a command's `cd <dir> &&` prefix): shown before it, relative
+     * to the conversation's folder, unless it is that folder.
+     */
+    dir?: string;
+  };
   meta?: ReactNode;
   /** Accent colour for the whole row: `ultraspawn` outlines it and tints the icon purple. */
   tone?: "ultraspawn";

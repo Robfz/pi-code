@@ -216,7 +216,7 @@ A full-column-width box: `--user-message` surface, 1px hairline, 10px radius, 11
 - **Icon:** 14px lucide, `faint-foreground`.
 - **Status:** `toolStatus` (`store/tool-status.ts`): the committed result's, else the live run's, else streaming while the assistant streams the arguments. A call with none of these is running while the run is active if it's in the live turn (the branch's last turn, or the streaming message once a pending user message starts a new one); one left unanswered in an earlier turn (an aborted message) is done. Exploration groups and the live-status row use the same function.
 - **Verb:** weight 500, `foreground`. Running or streaming: present tense with `shimmer`. Done: past tense, quiet. Failed: the icon becomes `CircleAlert` and the verb turns `status-error` ("Edit failed").
-- **Target:** a path is its basename in `foreground` followed by its directory in `faint-foreground` (directory hidden below 1024px; relative to the conversation's folder when inside it); a command or pattern is mono 12.5px `subtle-foreground`; other text is `foreground`. Truncated with an ellipsis.
+- **Target:** a path is its basename in `foreground` followed by its directory in `faint-foreground` (directory hidden below 1024px; relative to the conversation's folder when inside it); a command or pattern is mono 12.5px `subtle-foreground`, a command's leading `cd <dir> &&` (or `;`) left out of it: the dir shows before the command in `faint-foreground`, relative to the conversation's folder, and not at all when it is that folder; other text is `foreground`. Truncated with an ellipsis.
 - **Meta:** `muted-foreground`, tabular numbers; `+n −m` in diff colours. A failed call appends the first line of its error.
 - **Duration:** `faint-foreground` 12px in the tail: committed calls use `toolResult.durationMs`, live ones `ToolRun.durationMs`, running ones the elapsed time since `ToolRun.startedAt`; none when unknown.
 - **Body:** the renderer's `Body` in a bordered `--card` surface, 8px radius, without nested boxes. `read` code and `edit` / `write` diffs fill it edge to edge (no inner frame or header; the copy button shows on hover); `bash` is one terminal surface: the command after a faint `$`, the output in `subtle-foreground`, then `exit N` (faint, `status-error` when non-zero). A finished call with neither a result nor a partial result (never executed) has no body. A call with a curator URL shows its Review button under the row while collapsed.
@@ -242,7 +242,7 @@ interface ToolRenderer {
 | Tool | Icon | Running | Done | Failed | Target | Meta |
 |---|---|---|---|---|---|---|
 | `read` | `FileText` | Reading | Read | Read failed | path | `:a-b` when `offset`/`limit` are given |
-| `bash` | `SquareTerminal` | Running | Ran | Command failed | command, first line | `exit N` when non-zero |
+| `bash` | `SquareTerminal` | Running | Ran | Command failed | command, first line, without a leading `cd <dir> &&` | `exit N` when non-zero |
 | `grep` | `TextSearch` | Searching | Searched | Search failed | `/pattern/` | `· N matches` |
 | `find` | `FileSearch` | Finding | Found | Find failed | pattern | `· N files` |
 | `ls` | `FolderOpen` | Listing | Listed | List failed | directory path | `· N entries` |
