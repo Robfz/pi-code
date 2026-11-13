@@ -9,6 +9,7 @@ import { layoutOf, mainCheckoutIn } from "../catalog/layout.ts";
 import { ApiError } from "../errors.ts";
 import { canonicalPath } from "../paths.ts";
 import { GitError, gitFailed, gitTopLevel, type RunGitOptions, runGit } from "./git.ts";
+import { fetchPr } from "./pr.ts";
 import { fetchOrigin } from "./refs.ts";
 
 /** `git worktree add`. */
@@ -255,16 +256,17 @@ export interface AddReviewWorktreeRequest {
   repo: string;
   /** The PR's number. */
   number: number;
-  /** The PR's head branch, on `origin`. */
+  /** The PR's head branch. */
   branch: string;
 }
 
 /**
  * Adds the review worktree `<repo>/pr-<number>` on a new local branch named after the PR's head
  * branch, fetched from `origin` and tracking `origin/<branch>`, and marks the branch as a review
- * branch. Returns its path. A leftover review branch of this PR is deleted first; throws
- * `worktree_exists` or `branch_exists` before fetching anything. A failure after the fetch
- * removes what was created.
+ * branch. When the head branch is gone from `origin` (a merged or closed PR's, deleted), the
+ * branch starts at `refs/pull/<number>/head` instead, with no upstream. Returns its path. A
+ * leftover review branch of this PR is deleted first; throws `worktree_exists` or
+ * `branch_exists` before fetching anything. A failure after the fetch removes what was created.
  */
 export async function addReviewWorktree(req: AddReviewWorktreeRequest): Promise<string> {
   const { repo, main } = await layoutContainer(req.home, req.repo);
@@ -277,22 +279,23 @@ export async function addReviewWorktree(req: AddReviewWorktreeRequest): Promise<
   await assertAvailable(main, path, branch);
 
   const remote = `refs/remotes/origin/${branch}`;
+  let start = remote;
   try {
     await fetchOrigin(main, [`+refs/heads/${branch}:${remote}`]);
   } catch (e) {
-    if (e instanceof ApiError && e.message.includes("couldn't find remote ref")) {
-      throw new ApiError("git_failed", `the PR's head branch ${branch} isn't on origin`);
-    }
-    throw e;
+    if (!(e instanceof ApiError && e.message.includes("couldn't find remote ref"))) throw e;
+    start = await pullHead(main, number, branch);
   }
   try {
     // The upstream is set by hand: `--track` refuses a start point that origin's fetch refspec
     // doesn't map, as in single-branch clones.
-    await git(main, ["worktree", "add", "--no-track", "-b", branch, path, remote], {
+    await git(main, ["worktree", "add", "--no-track", "-b", branch, path, start], {
       timeoutMs: SLOW_GIT_TIMEOUT_MS,
     });
-    await git(main, ["config", `branch.${branch}.remote`, "origin"]);
-    await git(main, ["config", `branch.${branch}.merge`, `refs/heads/${branch}`]);
+    if (start === remote) {
+      await git(main, ["config", `branch.${branch}.remote`, "origin"]);
+      await git(main, ["config", `branch.${branch}.merge`, `refs/heads/${branch}`]);
+    }
     await git(main, ["config", reviewMarker(branch), String(number)]);
   } catch (e) {
     // Neither the branch nor the folder existed before (`assertAvailable`).
@@ -300,6 +303,21 @@ export async function addReviewWorktree(req: AddReviewWorktreeRequest): Promise<
     throw e;
   }
   return path;
+}
+
+/** PR `number`'s head as fetched from `refs/pull/<number>/head`; `git_failed` when it's missing. */
+async function pullHead(main: string, number: number, branch: string): Promise<string> {
+  try {
+    return (await fetchPr(main, number, "")).headSha;
+  } catch (e) {
+    if (e instanceof ApiError && e.message.includes("couldn't find remote ref")) {
+      throw new ApiError(
+        "git_failed",
+        `neither the PR's head branch ${branch} nor refs/pull/${number}/head is on origin`,
+      );
+    }
+    throw e;
+  }
 }
 
 /**
