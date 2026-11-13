@@ -6,7 +6,7 @@ import { ConversationStoreProvider } from "@/store/context";
 import { useUiPrefs } from "@/store/ui-prefs";
 import { stubMatchMedia } from "@/test/dom-stubs";
 import { hydratedStore } from "@/test/render";
-import { bashOutcome, listResult, readRange } from "./builtin";
+import { bashOutcome, listResult, readRange, splitCd } from "./builtin";
 import { langFromPath, splitNotice } from "./common";
 import { fixtureToolCall, propsAt, rowBody, rowParts } from "./testing";
 import { ToolCallView, type ToolCallViewProps } from "./tool-call-view";
@@ -192,6 +192,75 @@ describe("bash", () => {
       output: "",
     });
     expect(bashOutcome("spawn failed", true)).toEqual({ output: "spawn failed" });
+  });
+
+  it("splitCd", () => {
+    expect(splitCd("cd /a/b && pnpm test")).toEqual({ dir: "/a/b", command: "pnpm test" });
+    expect(splitCd("cd src; ls")).toEqual({ dir: "src", command: "ls" });
+    expect(splitCd("cd x&&ls -la")).toEqual({ dir: "x", command: "ls -la" });
+    expect(splitCd("  cd x &&\n  make")).toEqual({ dir: "x", command: "make" });
+    expect(splitCd('cd "/my dir" && ls')).toEqual({ dir: "/my dir", command: "ls" });
+    expect(splitCd("cd '/my dir' && ls")).toEqual({ dir: "/my dir", command: "ls" });
+    expect(splitCd("cd /my\\ dir && ls")).toEqual({ dir: "/my dir", command: "ls" });
+    // Only the first cd goes; the rest of the chain stays.
+    expect(splitCd("cd a && cd b && ls")).toEqual({ dir: "a", command: "cd b && ls" });
+    for (const unchanged of [
+      "ls && cd x",
+      "cd x",
+      "cd x && ",
+      "cd x || exit 1",
+      "cd $(git rev-parse --show-toplevel) && ls",
+      "cdx && ls",
+      "bash -lc 'cd x && ls'",
+    ]) {
+      expect(splitCd(unchanged)).toEqual({ command: unchanged });
+    }
+  });
+
+  it("row: drops a cd into the conversation's folder, shows another dir before the command", () => {
+    const store = hydratedStore();
+    const cwd = store.getState().agent.cwd;
+    const call = (id: string, command: string) => (
+      <div data-testid={id}>
+        <ToolCallView
+          toolCallId={id}
+          toolName="bash"
+          args={{ command }}
+          status="done"
+          isError={false}
+          result={{ content: [] }}
+        />
+      </div>
+    );
+    render(
+      <ConversationStoreProvider store={store}>
+        {call("cwd", `cd ${cwd}/ && pnpm test`)}
+        {call("inside", `cd "${cwd}/packages/web" && pnpm test`)}
+        {call("relative", "cd src; ls")}
+        {call("outside", "cd /tmp && ls")}
+      </ConversationStoreProvider>,
+    );
+    const target = (id: string) =>
+      rowParts(within(screen.getByTestId(id)).getByTestId("tool-call")).target;
+    expect(target("cwd")).toBe("pnpm test");
+    expect(target("inside")).toBe("packages/webpnpm test");
+    expect(target("relative")).toBe("srcls");
+    expect(target("outside")).toBe("/tmpls");
+    expect(screen.getByText("packages/web")).toHaveClass("text-faint-foreground");
+  });
+
+  it("expanded: the body keeps the full command", async () => {
+    view({
+      toolCallId: "b2",
+      toolName: "bash",
+      args: { command: "cd /home/me/project && ls" },
+      status: "done",
+      isError: false,
+      result: { content: [{ type: "text", text: "a.txt" }] },
+    });
+    expect(label().target).toBe("ls");
+    await expand();
+    expect(within(body()).getByText("cd /home/me/project && ls")).toBeInTheDocument();
   });
 });
 
