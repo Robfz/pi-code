@@ -228,15 +228,46 @@ describe("POST /api/pr-reviews", () => {
     }
   });
 
-  it("refuses a head branch that isn't on origin, leaving nothing behind", async () => {
-    const { h, repo, main, worktree, setGh } = await start();
-    setGh(fakeGh([{ ...OPEN(repo), headRefName: "gone" }]));
-    const res = await review(h, URL_7);
+  it("starts a merged PR whose head branch is gone from origin at its pull ref", async () => {
+    const { h, repo, main, container, setGh } = await start();
+    // PR 8's head branch `merged` isn't on origin; `refs/pull/8/head` is.
+    setGh(
+      fakeGh([
+        {
+          number: 8,
+          state: "MERGED",
+          baseRefOid: repo.mergedBase,
+          headRefOid: repo.mergedHead,
+          headRefName: "merged",
+        },
+      ]),
+    );
+    const res = await review(h, "https://github.com/octo/repo/pull/8");
+    expect(res.status).toBe(201);
+    const worktree = join(container, "pr-8");
+    expect(res.body.agent.cwd).toBe(worktree);
+    expect(git(worktree, "symbolic-ref", "--short", "HEAD").trim()).toBe("merged");
+    expect(head(worktree)).toBe(repo.mergedHead);
+    expect(git(main, "config", "--get-regexp", "^branch\\.merged\\.").trim()).toBe(
+      "branch.merged.pi-code-review 8",
+    );
+    const file = h.manager.require(res.body.agent.id).sessionFile as string;
+    expect(h.prService.store.get(file)).toMatchObject({ number: 8, headSha: repo.mergedHead });
+
+    expect((await h.api("DELETE", "/api/worktrees", { path: worktree })).status).toBe(204);
+    expect(branchExists(main, "merged")).toBe(false);
+  });
+
+  it("refuses a PR with neither its head branch nor its pull ref on origin", async () => {
+    const { h, repo, main, container, setGh } = await start();
+    setGh(fakeGh([{ ...OPEN(repo), number: 9, headRefName: "gone" }]));
+    const res = await review(h, "https://github.com/octo/repo/pull/9");
     expect(res.status).toBe(502);
     expect(res.body.error?.code).toBe("git_failed");
-    expect(res.body.error?.message).toContain("isn't on origin");
-    expect(existsSync(worktree)).toBe(false);
+    expect(res.body.error?.message).toContain("refs/pull/9/head");
+    expect(existsSync(join(container, "pr-9"))).toBe(false);
     expect(branchExists(main, "gone")).toBe(false);
+    expect(h.manager.list()).toEqual([]);
   });
 
   it("leaves no branch or folder when the checkout fails, and works once fixed", async () => {

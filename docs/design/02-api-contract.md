@@ -459,7 +459,7 @@ type PrGuideResponse = {
 Re-reads the PR's title and description with `gh pr view` and generates the guide again, replacing a running job and the stored guide; the new guide is sent to the agents attached to it once ready. → `200 PrGuideResponse` (`generating`). `400 invalid_body` when no PR is attached, `404 pr_not_found`, `409 agent_busy` when the agent has no session yet, `502 gh_failed`, `502 git_failed` (reading the folder of an attachment stored without one).
 
 ### `POST /api/pr-reviews`
-Starts a PR review from its URL ([`11-pr-guide.md`](11-pr-guide.md), "Entry"): finds the local `<repo>/main` repo whose `origin` is the URL's repository, creates the review worktree `<repo>/pr-<number>` on a new local branch named like the PR's head branch (fetched from origin, tracking `origin/<head>`, marked as a review branch), opens a conversation there and attaches it to the PR as `POST /api/agents/:id/pr { pr: url }` does, which sends the `<pr>` context and starts the guide. Requests for one PR run one at a time.
+Starts a PR review from its URL ([`11-pr-guide.md`](11-pr-guide.md), "Entry"): finds the local `<repo>/main` repo whose `origin` is the URL's repository, creates the review worktree `<repo>/pr-<number>` on a new local branch named like the PR's head branch (fetched from origin, tracking `origin/<head>`, marked as a review branch; when the head branch is gone from origin, as for a merged or closed PR whose branch was deleted, created at `refs/pull/<number>/head` with no upstream), opens a conversation there and attaches it to the PR as `POST /api/agents/:id/pr { pr: url }` does, which sends the `<pr>` context and starts the guide. Requests for one PR run one at a time.
 ```ts
 interface StartPrReviewBody {
   url: string;                   // https://github.com/<owner>/<repo>/pull/<n>[/…]
@@ -478,7 +478,7 @@ interface StartPrReviewBody {
 | 409 | `agent_busy` | the new worktree needs a trust decision: trust the repo's folder first; also the attach's (the agent moved to another session) |
 | 409 | `agent_exited` | pi exited before the attach |
 | 502 | `gh_failed` | `gh` missing, logged out or failing |
-| 502 | `git_failed` | the fetch (the head branch gone from origin included), `worktree add` or the branch's config, or the attach's git |
+| 502 | `git_failed` | the fetch (neither the head branch nor `refs/pull/<number>/head` on origin included), `worktree add` or the branch's config, or the attach's git |
 
 The open's errors pass through. Any failure from `worktree add` on removes what was created (the branch, the worktree) and closes the conversation, before answering.
 
