@@ -1,3 +1,4 @@
+<!-- pi:map -->
 # pi-code — Delete sessions: decision map
 
 Builds on [2026-09-26-origin.md](2026-09-26-origin.md), [2026-09-30-desktop.md](2026-09-30-desktop.md) and [2026-09-30-worktrees.md](2026-09-30-worktrees.md).

@@ -1,3 +1,4 @@
+<!-- pi:map -->
 # pi-code — Code review and line references: decision map
 
 Revisits the deferred "tree/diff as side panes" item of [2026-09-30-desktop.md](2026-09-30-desktop.md).

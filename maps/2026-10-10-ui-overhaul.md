@@ -1,3 +1,4 @@
+<!-- pi:map -->
 # pi-code — UI/UX overhaul (phase 1): decision map
 
 Builds on [2026-09-30-desktop.md](2026-09-30-desktop.md). Reference: Cursor's Agents Window (Cursor 3.x), plus a market survey of agent-orchestrator UIs (Claude Code desktop, Codex app, Conductor, VS Code Agents/Copilot, Antigravity, Zed, T3 Code, Warp, Amp).

@@ -1,3 +1,4 @@
+<!-- pi:map -->
 # pi-code — Git worktree support: decision map
 
 Builds on [2026-09-26-origin.md](2026-09-26-origin.md) and [2026-09-30-desktop.md](2026-09-30-desktop.md); picks up BACKLOG.md's "Git worktree support".
