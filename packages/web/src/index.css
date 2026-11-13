@@ -128,17 +128,20 @@
   --status-online: oklch(0.66 0.17 145);
   --ultraspawn: oklch(0.56 0.2 300);
   --scrollbar-thumb: oklch(0.3 0 0 / 0.18);
-  /* Vitesse Light, for code blocks and diffs. */
+  /*
+   * Vitesse Light for code blocks and diffs, its lightness tuned for 4.5:1 on `--card` (3:1 for
+   * comments and punctuation).
+   */
   --syntax-fg: #393a34;
   --syntax-keyword: #1e754f;
-  --syntax-string: #b56959;
-  --syntax-function: #59873a;
-  --syntax-comment: #a0ada0;
-  --syntax-number: #2f798a;
-  --syntax-property: #998418;
-  --syntax-variable: #b07d48;
-  --syntax-type: #2e8f82;
-  --syntax-punctuation: #999999;
+  --syntax-string: #a25849;
+  --syntax-function: #4b792b;
+  --syntax-comment: #818d81;
+  --syntax-number: #2c7687;
+  --syntax-property: #806c00;
+  --syntax-variable: #94622d;
+  --syntax-type: #0c7a6e;
+  --syntax-punctuation: #8a8a8a;
 }
 
 /*

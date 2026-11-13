@@ -64,7 +64,7 @@ No component uses raw palette classes (`emerald-*`, `amber-*`, `red-*`, `green-*
 
 ### Syntax
 
-Code blocks and the diff viewer share ten tokens: `--syntax-fg`, `-keyword`, `-string`, `-function`, `-comment`, `-number`, `-property`, `-variable`, `-type`, `-punctuation`. Neutral's are Vitesse Light / Dark.
+Code blocks and the diff viewer share ten tokens: `--syntax-fg`, `-keyword`, `-string`, `-function`, `-comment`, `-number`, `-property`, `-variable`, `-type`, `-punctuation`. Neutral's are Vitesse Light, lightness-tuned to 4.5:1 on `--card` (3:1 for comments and punctuation), and Vitesse Dark.
 
 ### Palettes
 
