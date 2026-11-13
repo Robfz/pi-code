@@ -123,6 +123,7 @@ Geist Sans (`@fontsource-variable/geist`) for UI and prose; Geist Mono (`@fontso
 - Shiki highlights with one theme for light and dark (`lib/code-highlighter.ts`) whose colours are the `--syntax-*` tokens as `var()` strings, its scopes following Vitesse's; switching palette or theme restyles code without highlighting again. The diff viewer (`components/diff/diff-theme.css`) maps highlight.js classes onto the same tokens, on `--card` rows with hairline borders and `diff-add` / `diff-del` tints; wrapped diff lines break between words where they can.
 - Code blocks (Streamdown's `[data-streamdown="code-block"]`) sit on `--card` with a hairline border and 8px radius, under a 32px header holding the language (12px muted) and a copy button; the body is 13px mono, line height 1.6, scrolling horizontally.
 - Inline code is a mono chip: 0.875em on `--chip`, 5px radius.
+- Tables have one hairline frame with an 8px radius (Streamdown's scroller, without its outer card) and their full height, scrolling only sideways when wide.
 - Links are `text-link`, underlined on hover.
 - Line references in assistant text are mono chips in `text-link` on `bg-link/12`; in user messages and the composer's mirror they are `text-link` text (the mirror must keep the textarea's metrics).
 
