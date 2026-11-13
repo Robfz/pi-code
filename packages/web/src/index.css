@@ -415,6 +415,16 @@
 .markdown [data-streamdown="code-block-body"] > pre {
   background: none;
 }
+/* Tables: one hairline frame, the scroller's, with no card around it. */
+.markdown [data-streamdown="table-wrapper"] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.markdown [data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
+  border-radius: 8px;
+}
 .markdown > :first-child {
   margin-top: 0;
 }

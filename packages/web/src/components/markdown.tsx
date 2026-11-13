@@ -191,7 +191,8 @@ const CONTROLS: ControlsConfig = { code: { copy: true, download: false } };
  * Markdown via Streamdown; `streaming` enables incomplete-markdown handling for live text.
  * Single newlines inside a paragraph render as line breaks (`pre-line`), like pi's TUI.
  * Code blocks are highlighted by Shiki (`lazyCodePlugin`, languages loaded on demand); their
- * chrome and the prose styles live in `index.css` (`.markdown`).
+ * chrome and the prose styles live in `index.css` (`.markdown`). Tables grow to their full
+ * height (no inner vertical scroll) and scroll sideways when wide.
  * `codeRefs` marks line references as `span[data-code-ref]` (`rehypeCodeRefs`); the caller
  * handles their clicks.
  *
@@ -227,6 +228,7 @@ export const Markdown = memo(function Markdown({
       rehypePlugins={codeRefs ? REHYPE_PLUGINS_WITH_CODE_REFS : REHYPE_PLUGINS}
       plugins={PLUGINS}
       controls={CONTROLS}
+      tableMaxHeight="none"
       lineNumbers={false}
     >
       {text}

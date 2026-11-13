@@ -276,6 +276,14 @@ describe("Markdown styles", () => {
     expect(within(block).queryByRole("button", { name: /download/i })).toBeNull();
     expect(within(block).getAllByRole("button")).toHaveLength(1);
   });
+
+  it("doesn't cap a table's height", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => `| ${i} | x |`).join("\n");
+    const { container } = render(<Markdown text={`| a | b |\n|---|---|\n${rows}`} />);
+    const scroller = container.querySelector('[data-streamdown="table"]')?.parentElement;
+    expect(scroller).not.toBeNull();
+    expect(scroller?.style.maxHeight).toBe("");
+  });
 });
 
 describe("code highlighting", () => {
