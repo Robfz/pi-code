@@ -120,3 +120,23 @@
 .diff-tailwindcss-wrapper [data-operator="-"] {
   color: var(--diff-del);
 }
+
+/*
+ * One line-number column in a unified view (`.diff-single-number`, the Files tab's viewer, where
+ * both sides number the same lines): the old number and its spacer are hidden, and the number
+ * cell, which the library sizes inline for two columns, fits one.
+ */
+.diff-single-number .diff-tailwindcss-wrapper [data-line-old-num],
+.diff-single-number .diff-tailwindcss-wrapper [data-line-old-num] + span {
+  display: none;
+}
+.diff-single-number .diff-tailwindcss-wrapper [data-line-new-num] {
+  width: 100%;
+}
+.diff-single-number .diff-tailwindcss-wrapper .diff-line-num {
+  /* biome-ignore-start lint/complexity/noImportantStyles: only !important beats the inline style */
+  width: calc(var(--diff-aside-width--) + 20px) !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  /* biome-ignore-end lint/complexity/noImportantStyles: only !important beats the inline style */
+}

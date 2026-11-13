@@ -77,3 +77,33 @@ test("mobile: the Diff page shows the turn's changes and adds a line range to th
   await expect(page).toHaveURL(`/agents/${conversation.id}`);
   await expect(composer(page)).toHaveValue(/@src\/app\.ts:13-14\b/);
 });
+
+test("desktop: the Files tab's viewer shows one line-number column, the changes diff two", async ({
+  app,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the review pane is desktop-only");
+  const conversation = await app.conversation({ kind: "short-answer" });
+  await app.open(conversation);
+  editApp(conversation.cwd);
+  await sendPrompt(page, conversation.prompt);
+  await app.waitForRunEnd(conversation);
+
+  const pane = await openReviewPane(page);
+  const file = changedApp(page);
+  await expect(file.locator('[data-testid="diff-viewer"]')).toHaveAttribute(
+    "data-mode",
+    "unified",
+    GIT_REFRESH,
+  );
+  // The cascade (the library's stylesheet is unlayered) only shows in a real browser.
+  await expect(file.locator("[data-line-old-num]").first()).not.toHaveCSS("display", "none");
+
+  await pane.getByRole("tab", { name: "Files" }).click();
+  await pane.getByRole("combobox", { name: "Search files" }).fill("app.ts");
+  await pane.getByRole("option", { name: /app\.ts/ }).click();
+  const viewer = pane.locator(".diff-single-number");
+  await expect(newLine(viewer, 14)).toBeVisible();
+  await expect(viewer.locator("[data-line-old-num]").first()).toHaveCSS("display", "none");
+  await expect(viewer.locator("[data-line-old-num] + span").first()).toHaveCSS("display", "none");
+});
