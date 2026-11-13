@@ -1,3 +1,4 @@
+<!-- pi:map -->
 # pi-code — Side panel: ordering, collapse, pins: decision map
 
 Builds on `maps/2026-09-30-desktop.md` (Sidebar) and `maps/2026-09-30-worktrees.md` (grouping).
