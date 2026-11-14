@@ -92,7 +92,7 @@ function baseline(agents: AgentInfo[] = everyAgent) {
 const press = (init: KeyboardEventInit) =>
   fireEvent.keyDown(document.activeElement ?? document.body, init);
 const leader = (key: string, code = `Key${key.toUpperCase()}`) => {
-  press({ key: "j", code: "KeyJ", metaKey: true });
+  press({ key: "k", code: "KeyK", metaKey: true });
   press({ key, code });
 };
 const digit = (n: number) => leader(String(n), `Digit${n}`);

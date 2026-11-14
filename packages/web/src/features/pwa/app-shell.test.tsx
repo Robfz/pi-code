@@ -42,7 +42,7 @@ const active = (container: HTMLElement) =>
 const press = (init: KeyboardEventInit) =>
   fireEvent.keyDown(document.activeElement ?? document.body, init);
 const leaderB = () => {
-  press({ key: "j", code: "KeyJ", metaKey: true });
+  press({ key: "k", code: "KeyK", metaKey: true });
   return press({ key: "b", code: "KeyB" });
 };
 const cmdB = () => press({ key: "b", code: "KeyB", metaKey: true });
@@ -153,7 +153,7 @@ describe("desktop shell (≥1024px)", () => {
   describe("sidebar shortcut", () => {
     beforeEach(() => stubUserAgent(USER_AGENTS.macChrome));
 
-    it("hides and shows the sidebar with ⌘J B and ⌘B", async () => {
+    it("hides and shows the sidebar with ⌘K B and ⌘B", async () => {
       renderApp("/settings", { desktop: true });
       await screen.findByRole("heading", { name: "Settings" });
       expect(leaderB()).toBe(false);
@@ -273,7 +273,7 @@ describe("phone shell (<1024px)", () => {
     await screen.findByRole("heading", { name: "Settings" });
     expect(cmdB()).toBe(true);
     expect(leaderB()).toBe(false);
-    expect(screen.getByRole("status")).toHaveTextContent("⌘J B: not a command");
+    expect(screen.getByRole("status")).toHaveTextContent("⌘K B: not a command");
   });
 
   it("has back-to-Home chevrons on settings and sessions", async () => {

@@ -47,12 +47,12 @@ export function modifierLabel(platform: Platform): string {
 /** Between a modifier's label and what follows: nothing on Apple platforms, `+` elsewhere. */
 const separator = (platform: Platform) => (platform === "apple" ? "" : "+");
 
-/** `key` with the platform's modifier, as labelled: `⌘J`, `Ctrl+J`. */
+/** `key` with the platform's modifier, as labelled: `⌘K`, `Ctrl+K`. */
 export function chordLabel(platform: Platform, key: string): string {
   return modifierLabel(platform) + separator(platform) + key;
 }
 
-/** The leader as labelled: `⌘J`, `Ctrl+J`. */
+/** The leader as labelled: `⌘K`, `Ctrl+K`. */
 export function leaderLabel(platform: Platform): string {
   return chordLabel(platform, LEADER_KEY.toUpperCase());
 }
@@ -71,7 +71,7 @@ export interface Keymap {
 }
 
 /** The leader's own key, after the platform's modifier. */
-export const LEADER_KEY = "j";
+export const LEADER_KEY = "k";
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const goTo = DIGITS.map((digit): [string, Binding] => [
@@ -179,7 +179,7 @@ function keysLabel(keys: readonly string[]): string {
 }
 
 /**
- * A command's shortcuts in `keymap`, each as the keys pressed in turn: `[["⌘J", "1–9"], ["⌘1–9"]]`.
+ * A command's shortcuts in `keymap`, each as the keys pressed in turn: `[["⌘K", "1–9"], ["⌘1–9"]]`.
  */
 export function shortcutsFor(id: CommandId, keymap: Keymap, platform: Platform): string[][] {
   const keysOf = (map: ReadonlyMap<string, Binding>) =>
