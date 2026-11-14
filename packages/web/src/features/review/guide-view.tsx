@@ -267,19 +267,23 @@ function GuideSection({
   children: ReactNode;
 }) {
   const titleId = useId();
+  const additions = item.cards.reduce((sum, card) => sum + card.additions, 0);
+  const deletions = item.cards.reduce((sum, card) => sum + card.deletions, 0);
   return (
     <section
       ref={sectionRef}
       data-testid="guide-section"
       aria-labelledby={titleId}
-      className="scroll-mt-9 border-b"
+      className="mt-6 scroll-mt-9 first-of-type:mt-4"
     >
-      <div className="flex items-start gap-3 px-3 py-3">
-        <h3 id={titleId} className="min-w-0 flex-1 text-sm font-semibold">
-          <span className="mr-2 font-mono font-normal text-muted-foreground tabular-nums">
+      <div className="flex items-center gap-3 border-y bg-card px-3 py-2.5">
+        <h3 id={titleId} className="flex min-w-0 flex-1 items-baseline">
+          <span className="w-8 shrink-0 font-mono text-sm text-muted-foreground tabular-nums">
             {twoDigits(index + 1)}
           </span>
-          {item.title}
+          <span className="min-w-0 text-[1.0625rem] leading-snug font-semibold tracking-[-0.01em]">
+            {item.title}
+          </span>
         </h3>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <input
@@ -292,9 +296,19 @@ function GuideSection({
         </label>
       </div>
       {!reviewed && (
-        <div className="flex flex-col gap-3 px-3 pb-4">
-          {item.explanation !== undefined && <Markdown text={item.explanation} />}
-          {children}
+        <div className="flex flex-col gap-4 pt-3.5 pr-3 pb-2 pl-11">
+          {item.explanation !== undefined && (
+            <Markdown text={item.explanation} className="text-subtle-foreground" />
+          )}
+          {item.cards.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+                <span className="tracking-[0.08em] uppercase">Files · {item.cards.length}</span>
+                <LineCounts additions={additions} deletions={deletions} />
+              </p>
+              <div className="divide-y overflow-clip rounded-md border">{children}</div>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -307,7 +321,7 @@ function FileRow({ card }: { card: GuideCard }) {
     <div
       data-testid="diff-file"
       data-path={card.path}
-      className="flex h-9 items-center gap-2 rounded-md border pr-3 pl-2"
+      className="flex h-9 items-center gap-2 pr-3 pl-2"
     >
       <StatusBadge status={card.status} />
       <FilePath file={card} />
@@ -391,7 +405,7 @@ function GuideFileCard({
       }
       open={open}
       onOpenChange={onOpenChange}
-      className="scroll-mt-9 overflow-clip rounded-md border"
+      className="scroll-mt-9"
       headerClassName="top-9"
     >
       <SelectableDiff
