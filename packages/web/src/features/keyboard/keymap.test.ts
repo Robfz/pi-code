@@ -84,28 +84,28 @@ describe("keyLabel", () => {
 });
 
 describe("modifiers", () => {
-  const j = { key: "j", code: "KeyJ" };
+  const k = { key: "k", code: "KeyK" };
 
   it("takes ⌘ alone on Apple platforms", () => {
-    expect(isLeader(key({ ...j, metaKey: true }), "apple")).toBe(true);
-    expect(isLeader(key({ ...j, ctrlKey: true }), "apple")).toBe(false);
-    expect(isLeader(key({ ...j, metaKey: true, ctrlKey: true }), "apple")).toBe(false);
-    expect(isLeader(key({ ...j, metaKey: true, shiftKey: true }), "apple")).toBe(false);
-    expect(isLeader(key({ ...j, metaKey: true, altKey: true }), "apple")).toBe(false);
-    expect(isLeader(key(j), "apple")).toBe(false);
+    expect(isLeader(key({ ...k, metaKey: true }), "apple")).toBe(true);
+    expect(isLeader(key({ ...k, ctrlKey: true }), "apple")).toBe(false);
+    expect(isLeader(key({ ...k, metaKey: true, ctrlKey: true }), "apple")).toBe(false);
+    expect(isLeader(key({ ...k, metaKey: true, shiftKey: true }), "apple")).toBe(false);
+    expect(isLeader(key({ ...k, metaKey: true, altKey: true }), "apple")).toBe(false);
+    expect(isLeader(key(k), "apple")).toBe(false);
   });
 
   it("takes Ctrl alone elsewhere, not AltGr", () => {
-    expect(isLeader(key({ ...j, ctrlKey: true }), "other")).toBe(true);
-    expect(isLeader(key({ ...j, metaKey: true }), "other")).toBe(false);
+    expect(isLeader(key({ ...k, ctrlKey: true }), "other")).toBe(true);
+    expect(isLeader(key({ ...k, metaKey: true }), "other")).toBe(false);
     // Windows reports AltGr as Ctrl+Alt.
-    expect(isLeader(key({ ...j, ctrlKey: true, altKey: true }), "other")).toBe(false);
-    expect(isLeader(key({ ...j, ctrlKey: true, shiftKey: true }), "other")).toBe(false);
+    expect(isLeader(key({ ...k, ctrlKey: true, altKey: true }), "other")).toBe(false);
+    expect(isLeader(key({ ...k, ctrlKey: true, shiftKey: true }), "other")).toBe(false);
   });
 
   it("takes the leader on other layouts", () => {
-    expect(isLeader(key({ key: "j", code: "KeyC", metaKey: true }), "apple")).toBe(true);
-    expect(isLeader(key({ key: "о", code: "KeyJ", ctrlKey: true }), "other")).toBe(true);
+    expect(isLeader(key({ key: "k", code: "KeyV", metaKey: true }), "apple")).toBe(true);
+    expect(isLeader(key({ key: "л", code: "KeyK", ctrlKey: true }), "other")).toBe(true);
   });
 
   it("lets the second key carry the platform's modifier or none", () => {
@@ -191,26 +191,26 @@ describe("keymapFor", () => {
 
   it("labels each command's keys", () => {
     expect(shortcutsFor("conversation.new", keymapFor("app", false), "apple")).toEqual([
-      ["⌘J", "C"],
+      ["⌘K", "C"],
     ]);
-    expect(shortcutsFor("pr.review", keymapFor("tab", false), "other")).toEqual([["Ctrl+J", "R"]]);
+    expect(shortcutsFor("pr.review", keymapFor("tab", false), "other")).toEqual([["Ctrl+K", "R"]]);
     expect(shortcutsFor("conversation.goTo", keymapFor("app", false), "apple")).toEqual([
-      ["⌘J", "1–9"],
+      ["⌘K", "1–9"],
       ["⌘1–9"],
     ]);
     expect(shortcutsFor("conversation.goTo", keymapFor("tab", false), "other")).toEqual([
-      ["Ctrl+J", "1–9"],
+      ["Ctrl+K", "1–9"],
     ]);
     expect(shortcutsFor("sidebar.toggle", keymapFor("tab", false), "apple")).toEqual([
-      ["⌘J", "B"],
+      ["⌘K", "B"],
       ["⌘B"],
     ]);
     expect(shortcutsFor("sidebar.toggle", keymapFor("app", false), "apple")).toEqual([
-      ["⌘J", "B"],
+      ["⌘K", "B"],
       ["⌘B"],
     ]);
     expect(shortcutsFor("sidebar.toggle", keymapFor("tab", false), "other")).toEqual([
-      ["Ctrl+J", "B"],
+      ["Ctrl+K", "B"],
       ["Ctrl+B"],
     ]);
   });

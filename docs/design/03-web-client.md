@@ -61,7 +61,7 @@ Every listing (sidebar, Home, `/sessions`, the picker's recent projects) goes th
 
 ### Review PR
 
-`PrReviewProvider` (`features/pr-review/pr-review-dialog.tsx`), mounted once in `AppShell`, owns the "Review PR" dialog: one PR URL field, then `POST /api/pr-reviews`, which creates the PR's review worktree and a conversation attached to it; the conversation opens with its review pane on Guide (desktop) or its Guide tab (phone). Home's "Review PR" buttons (desktop and phone) and ⌘J R (`pr.review`, [`10-keyboard.md`](10-keyboard.md)) open it through `usePrReview`. Details in [`11-pr-guide.md`](11-pr-guide.md), "Review PR dialog".
+`PrReviewProvider` (`features/pr-review/pr-review-dialog.tsx`), mounted once in `AppShell`, owns the "Review PR" dialog: one PR URL field, then `POST /api/pr-reviews`, which creates the PR's review worktree and a conversation attached to it; the conversation opens with its review pane on Guide (desktop) or its Guide tab (phone). Home's "Review PR" buttons (desktop and phone) and ⌘K R (`pr.review`, [`10-keyboard.md`](10-keyboard.md)) open it through `usePrReview`. Details in [`11-pr-guide.md`](11-pr-guide.md), "Review PR dialog".
 
 ### Stop and Delete
 

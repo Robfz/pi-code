@@ -87,7 +87,7 @@ const overlayOpen = () => document.querySelector(OPEN_OVERLAY) !== null;
 type Pill = { kind: "pending" } | { kind: "unbound" | "off"; key: string };
 
 /**
- * The shortcut layer (`docs/design/10-keyboard.md`): the command handlers, the ⌘J leader, the
+ * The shortcut layer (`docs/design/10-keyboard.md`): the command handlers, the ⌘K leader, the
  * status pill and the help dialog. Its one `keydown` listener is on `window` in the capture phase,
  * ahead of Radix's document-level Escape listener and React's root listener, so a swallowed key
  * reaches neither the composer nor an open dialog.
@@ -160,7 +160,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (isBareModifier(event)) return;
-      // A held leader's repeats are swallowed too: Chrome binds Ctrl+J on Windows.
+      // A held leader's repeats are swallowed too: Chrome binds Ctrl+K on Windows.
       swallow();
       if (event.repeat && isLeader(event, platform)) return;
       pending = false;

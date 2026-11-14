@@ -104,12 +104,12 @@ describe("Review PR", () => {
     expect(useReviewStore.getState().reviews.r1).toMatchObject({ paneOpen: false, tab: "guide" });
   });
 
-  it("opens with ⌘J R on any route, with the sidebar closed too", async () => {
+  it("opens with ⌘K R on any route, with the sidebar closed too", async () => {
     renderApp("/settings");
     await screen.findByRole("heading", { name: "Settings" });
     baseline();
     await userEvent.setup().click(screen.getByRole("button", { name: "Toggle sidebar" }));
-    fireEvent.keyDown(document.body, { key: "j", code: "KeyJ", metaKey: true });
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", metaKey: true });
     fireEvent.keyDown(document.body, { key: "r", code: "KeyR" });
     const dialog = await screen.findByTestId("pr-review-dialog");
     expect(within(dialog).getByLabelText("Pull request URL")).toHaveFocus();

@@ -37,7 +37,7 @@ function renderKeyboard(overlay?: ReactNode) {
 const press = (init: KeyboardEventInit & { keyCode?: number }) =>
   fireEvent.keyDown(document.activeElement ?? document.body, init);
 
-const leader = { key: "j", code: "KeyJ", metaKey: true };
+const leader = { key: "k", code: "KeyK", metaKey: true };
 const C = { key: "c", code: "KeyC" };
 const H = { key: "h", code: "KeyH" };
 const cmdB = { key: "b", code: "KeyB", metaKey: true };
@@ -58,17 +58,17 @@ afterEach(() => {
 });
 
 describe("the leader", () => {
-  it("arms on ⌘J, then runs the next key's command; both are swallowed", () => {
+  it("arms on ⌘K, then runs the next key's command; both are swallowed", () => {
     renderKeyboard();
     expect(press(leader)).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J … Esc to cancel");
+    expect(pill()).toHaveTextContent("⌘K … Esc to cancel");
     expect(press(C)).toBe(false);
     expect(ran).toHaveBeenCalledWith("new");
     expect(pill()).toBeNull();
     expect(composerKeys).not.toHaveBeenCalled();
   });
 
-  it("takes the second key with ⌘ held, so ⌘J ⌘C doesn't copy", () => {
+  it("takes the second key with ⌘ held, so ⌘K ⌘C doesn't copy", () => {
     renderKeyboard();
     press(leader);
     expect(press({ ...C, metaKey: true })).toBe(false);
@@ -84,12 +84,12 @@ describe("the leader", () => {
     expect(ran.mock.calls).toEqual([["goTo 1"], ["goTo 3"]]);
   });
 
-  it("uses Ctrl+J on Windows and Linux", () => {
+  it("uses Ctrl+K on Windows and Linux", () => {
     stubUserAgent(USER_AGENTS.windowsEdge);
     renderKeyboard();
     expect(press(leader)).toBe(true);
     expect(press({ ...leader, metaKey: false, ctrlKey: true })).toBe(false);
-    expect(pill()).toHaveTextContent("Ctrl+J … Esc to cancel");
+    expect(pill()).toHaveTextContent("Ctrl+K … Esc to cancel");
     press({ ...C, ctrlKey: true });
     expect(ran).toHaveBeenCalledWith("new");
   });
@@ -131,7 +131,7 @@ describe("the leader", () => {
     press(leader);
     expect(press({ key: "x", code: "KeyX" })).toBe(false);
     expect(composerKeys).not.toHaveBeenCalled();
-    expect(pill()).toHaveTextContent("⌘J X: not a command");
+    expect(pill()).toHaveTextContent("⌘K X: not a command");
     act(() => vi.advanceTimersByTime(NOTICE_MS - 1));
     expect(pill()).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
@@ -144,11 +144,11 @@ describe("the leader", () => {
     renderKeyboard();
     press(leader);
     press({ key: "x", code: "KeyX" });
-    expect(pill()).toHaveTextContent("⌘J X: not a command");
+    expect(pill()).toHaveTextContent("⌘K X: not a command");
     act(() => vi.advanceTimersByTime(NOTICE_MS / 2));
     press(leader);
     act(() => vi.advanceTimersByTime(NOTICE_MS));
-    expect(pill()).toHaveTextContent("⌘J … Esc to cancel");
+    expect(pill()).toHaveTextContent("⌘K … Esc to cancel");
     expect(press(C)).toBe(false);
     expect(ran).toHaveBeenCalledWith("new");
   });
@@ -157,7 +157,7 @@ describe("the leader", () => {
     renderKeyboard();
     press(leader);
     expect(press({ key: " ", code: "Space" })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J Space: not a command");
+    expect(pill()).toHaveTextContent("⌘K Space: not a command");
   });
 
   it.each([
@@ -180,7 +180,7 @@ describe("the leader", () => {
     press(leader);
     expect(press({ key: "x", code: "KeyX", metaKey: true })).toBe(false);
     expect(composerKeys).not.toHaveBeenCalled();
-    expect(pill()).toHaveTextContent("⌘J X: not a command");
+    expect(pill()).toHaveTextContent("⌘K X: not a command");
   });
 
   it("never times out", () => {
@@ -188,7 +188,7 @@ describe("the leader", () => {
     renderKeyboard();
     press(leader);
     act(() => vi.advanceTimersByTime(NOTICE_MS * 10));
-    expect(pill()).toHaveTextContent("⌘J … Esc to cancel");
+    expect(pill()).toHaveTextContent("⌘K … Esc to cancel");
     expect(press(C)).toBe(false);
     expect(ran).toHaveBeenCalledWith("new");
   });
@@ -201,27 +201,27 @@ describe("the leader", () => {
     fireEvent(document.activeElement as Element, new Event("keydown", { bubbles: true }));
     window.removeEventListener("error", errors);
     expect(errors).not.toHaveBeenCalled();
-    expect(pill()).toHaveTextContent("⌘J … Esc to cancel");
+    expect(pill()).toHaveTextContent("⌘K … Esc to cancel");
   });
 
   it("treats Shift or Alt on the second key, and a command with no handler, as unbound", () => {
     renderKeyboard();
     press(leader);
     expect(press({ key: "C", code: "KeyC", shiftKey: true })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J ⇧C: not a command");
+    expect(pill()).toHaveTextContent("⌘K ⇧C: not a command");
     press(leader);
     expect(press({ key: "ç", code: "KeyC", altKey: true })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J ⌥C: not a command");
+    expect(pill()).toHaveTextContent("⌘K ⌥C: not a command");
     press(leader);
     expect(press({ key: "c", code: "KeyC", ctrlKey: true })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J ⌃C: not a command");
+    expect(pill()).toHaveTextContent("⌘K ⌃C: not a command");
     press(leader);
     expect(press({ key: "p", code: "KeyP" })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J P: not a command");
+    expect(pill()).toHaveTextContent("⌘K P: not a command");
     expect(ran).not.toHaveBeenCalled();
   });
 
-  it("stays pending over bare modifiers and ⌘J repeats", () => {
+  it("stays pending over bare modifiers and ⌘K repeats", () => {
     renderKeyboard();
     press(leader);
     expect(press({ key: "Meta", code: "MetaLeft", metaKey: true })).toBe(true);
@@ -229,7 +229,7 @@ describe("the leader", () => {
     press({ key: "Control", code: "ControlLeft", ctrlKey: true });
     press({ key: "Alt", code: "AltLeft", altKey: true });
     expect(press({ ...leader, repeat: true })).toBe(false);
-    expect(pill()).toHaveTextContent("⌘J … Esc to cancel");
+    expect(pill()).toHaveTextContent("⌘K … Esc to cancel");
     press(C);
     expect(ran).toHaveBeenCalledWith("new");
   });
@@ -267,7 +267,7 @@ describe("useCommand", () => {
     rerender(renderNew(false, false));
     press(leader);
     press(C);
-    expect(pill()).toHaveTextContent("⌘J C: not a command");
+    expect(pill()).toHaveTextContent("⌘K C: not a command");
     expect(ran).not.toHaveBeenCalled();
   });
 
@@ -378,7 +378,7 @@ describe("while an overlay is open", () => {
     press(leader);
     expect(press(C)).toBe(false);
     expect(ran).not.toHaveBeenCalled();
-    expect(pill()).toHaveTextContent("⌘J C is off while a dialog is open");
+    expect(pill()).toHaveTextContent("⌘K C is off while a dialog is open");
     expect(press({ key: "2", code: "Digit2", metaKey: true })).toBe(true);
     expect(press(cmdB)).toBe(true);
     expect(ran).not.toHaveBeenCalled();
@@ -421,7 +421,7 @@ describe("while an overlay is open", () => {
     // The modal hides the rest of the page.
     expect(screen.queryByRole("textbox", { name: "Composer" })).toBeNull();
     press(leader);
-    expect(screen.getByRole("status")).toHaveTextContent("⌘J … Esc to cancel");
+    expect(screen.getByRole("status")).toHaveTextContent("⌘K … Esc to cancel");
     expect(screen.getByRole("status").closest("[aria-hidden=true]")).toBeNull();
   });
 
@@ -440,10 +440,10 @@ describe("while an overlay is open", () => {
     const { rerender } = render(dialog(false));
     press(leader);
     rerender(dialog(true));
-    expect(screen.getByRole("status")).toHaveTextContent("⌘J … Esc to cancel");
+    expect(screen.getByRole("status")).toHaveTextContent("⌘K … Esc to cancel");
     expect(screen.getByRole("status").closest("[aria-hidden=true]")).toBeNull();
     press(C);
-    expect(screen.getByRole("status")).toHaveTextContent("⌘J C is off while a dialog is open");
+    expect(screen.getByRole("status")).toHaveTextContent("⌘K C is off while a dialog is open");
     expect(screen.getByRole("status").closest("[aria-hidden=true]")).toBeNull();
   });
 });
@@ -468,7 +468,7 @@ describe("help screen", () => {
     renderKeyboard();
     await openHelp();
     const dialog = help() as HTMLElement;
-    expect(dialog).toHaveTextContent("Press ⌘J, then a key, with or without ⌘ held. Esc cancels.");
+    expect(dialog).toHaveTextContent("Press ⌘K, then a key, with or without ⌘ held. Esc cancels.");
     expect(
       within(dialog)
         .getAllByRole("heading", { level: 3 })
@@ -480,26 +480,26 @@ describe("help screen", () => {
         .getAllByRole("row")
         .map((row) => row.textContent),
     ).toEqual([
-      "New conversation⌘J C",
-      "Review PR⌘J R",
-      "Previous conversation⌘J P",
-      "Next conversation⌘J N",
-      "Go to conversation 1–9⌘J 1–9⌘1–9",
+      "New conversation⌘K C",
+      "Review PR⌘K R",
+      "Previous conversation⌘K P",
+      "Next conversation⌘K N",
+      "Go to conversation 1–9⌘K 1–9⌘1–9",
     ]);
     expect(
       within(within(dialog).getByRole("table", { name: "View" })).getByRole("row"),
-    ).toHaveTextContent("Toggle sidebar⌘J B⌘B");
+    ).toHaveTextContent("Toggle sidebar⌘K B⌘B");
     expect(
       within(within(dialog).getByRole("table", { name: "Help" })).getByRole("row"),
-    ).toHaveTextContent("Keyboard shortcuts⌘J H");
+    ).toHaveTextContent("Keyboard shortcuts⌘K H");
     expect(dialog).not.toHaveTextContent("without ⌘:");
   });
 
   it("leaves direct digits out of a tab, but not ⌘B", async () => {
     renderKeyboard();
     await openHelp();
-    expect(keysOf("Go to conversation 1–9")).toBe("⌘J 1–9");
-    expect(keysOf("Toggle sidebar")).toBe("⌘J B⌘B");
+    expect(keysOf("Go to conversation 1–9")).toBe("⌘K 1–9");
+    expect(keysOf("Toggle sidebar")).toBe("⌘K B⌘B");
   });
 
   it("labels Ctrl on Windows and Linux", async () => {
@@ -509,10 +509,10 @@ describe("help screen", () => {
     press({ ...leader, metaKey: false, ctrlKey: true });
     press(H);
     await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
-    expect(help()).toHaveTextContent("Press Ctrl+J, then a key, with or without Ctrl held.");
-    expect(keysOf("New conversation")).toBe("Ctrl+J C");
-    expect(keysOf("Go to conversation 1–9")).toBe("Ctrl+J 1–9Ctrl+1–9");
-    expect(keysOf("Toggle sidebar")).toBe("Ctrl+J BCtrl+B");
+    expect(help()).toHaveTextContent("Press Ctrl+K, then a key, with or without Ctrl held.");
+    expect(keysOf("New conversation")).toBe("Ctrl+K C");
+    expect(keysOf("Go to conversation 1–9")).toBe("Ctrl+K 1–9Ctrl+1–9");
+    expect(keysOf("Toggle sidebar")).toBe("Ctrl+K BCtrl+B");
   });
 
   it("has the digit note under Safari rules, even in the app context", async () => {
@@ -520,10 +520,10 @@ describe("help screen", () => {
     stubMatchMedia((query) => query === APP_QUERY);
     renderKeyboard();
     await openHelp();
-    expect(keysOf("Go to conversation 1–9")).toBe("⌘J 1–9");
-    expect(keysOf("Toggle sidebar")).toBe("⌘J B⌘B");
+    expect(keysOf("Go to conversation 1–9")).toBe("⌘K 1–9");
+    expect(keysOf("Toggle sidebar")).toBe("⌘K B⌘B");
     expect(help()).toHaveTextContent(
-      "After ⌘J, press the digit without ⌘: this browser keeps ⌘1–9 for itself.",
+      "After ⌘K, press the digit without ⌘: this browser keeps ⌘1–9 for itself.",
     );
   });
 
